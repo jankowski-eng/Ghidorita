@@ -1,0 +1,25 @@
+html, body, #root { height: 100%; margin: 0; }
+body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
+.app { display: flex; flex-direction: column; height: 100%; }
+.bar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #2d2d30; }
+.bar input[type=text] { flex: 1; background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 3px 6px; }
+.progress { height: 18px; background: #333; position: relative; }
+.progress > div { height: 100%; background: #0e639c; transition: width .2s; }
+.progress > span { position: absolute; left: 8px; top: 1px; font-size: 12px; }
+.main { flex: 1; display: flex; min-height: 0; }
+.funcs { width: 260px; display: flex; flex-direction: column; border-right: 1px solid #444; }
+.funcs input { margin: 4px; background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 3px 6px; }
+.right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.editor { flex: 1; min-height: 0; border-bottom: 1px solid #444; }
+.listing { flex: 1; min-height: 0; }
+.scroll { height: 100%; overflow: auto; font: 12px ui-monospace, Menlo, monospace; }
+.frow { height: 20px; line-height: 20px; padding: 0 8px; white-space: nowrap; cursor: pointer; overflow: hidden; }
+.frow:hover { background: #2a2d2e; }
+.frow.sel { background: #094771; }
+.lrow { position: absolute; left: 0; right: 0; height: 16px; line-height: 16px; white-space: nowrap; display: flex; gap: 12px; padding: 0 8px; }
+.lrow.ph { color: #555; }
+.lrow .a { color: #9cdcfe; width: 90px; } .lrow .b { color: #888; width: 130px; }
+.lrow .m { color: #c586c0; width: 60px; } .lrow .l { color: #dcdcaa; } .lrow .c { color: #6a9955; }
+.status { padding: 3px 8px; background: #007acc; color: #fff; font: 12px ui-monospace, Menlo, monospace; }
+.call-token { text-decoration: underline; cursor: pointer; color: #4fc1ff !important; }
+.err { color: #f66; }
