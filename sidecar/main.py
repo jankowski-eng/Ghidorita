@@ -401,6 +401,11 @@ class Sidecar:
             self.ws = None
 
     def shutdown(self):
+        for job in list(self.dj.values()):  # let running decompiles return so dispose() can reach the native child
+            job.cancelled = True
+            if job.mon is not None:
+                job.mon.cancel()
+
         def d():
             try:
                 self.on_decomp_thread(self._drop_decomp)  # dispose on the thread that owns it
@@ -408,7 +413,7 @@ class Sidecar:
                 pass
         t = threading.Thread(target=d, daemon=True)
         t.start()
-        t.join(3)  # a stuck decompile must not block exit
+        t.join(2.5)  # a stuck decompile must not block exit (Electron SIGKILLs at 3 s)
         os._exit(0)
 
 
