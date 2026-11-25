@@ -105,7 +105,7 @@ export function App() {
         if (m === "progress") setProgress(p as Progress);
         else if (m === "error") fail((p as { message: string }).message);
       };
-      if (cfg.autotest) runAutotest(cfg.autotest);
+      if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest);
     })().catch(fail);
   }, []);
 
@@ -139,6 +139,67 @@ export function App() {
       result.functions = fl.length; result.totalBytes = (await rpc.call("listing_info", {})).totalBytes;
       result.ok = result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && errors.current.length === 0;
     } catch (e) { fail(e); }
+    result.errors = errors.current;
+    window.host.autotestDone(result);
+  }
+
+  // BENCH=1 AUTOTEST=<file>: listing scroll + decompile measurements in the real renderer (step 6 of the spike)
+  async function runBench(file: string) {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const frame = () => new Promise<number>((r) => requestAnimationFrame(r));
+    const q = (xs: number[], p: number) => { const a = [...xs].sort((x, y) => x - y); return a.length ? Math.round(a[Math.min(a.length - 1, Math.floor(a.length * p))] * 100) / 100 : 0; };
+    const summ = (xs: number[]) => ({ n: xs.length, median: q(xs, 0.5), p95: q(xs, 0.95), max: q(xs, 1) });
+    const result: Record<string, any> = { ok: true };
+    let gaps: number[] = [];
+    let running = true;
+    (async () => { let last = performance.now(); while (running) { const n = await frame(); gaps.push(n - last); last = n; } })();
+    const frames = () => { const g = gaps; gaps = []; return { frames: g.length, ...summ(g) }; };
+    try {
+      setPath(file);
+      const t0 = performance.now();
+      const fl = await open(file);
+      result.openMs = Math.round(performance.now() - t0);
+      const info = await rpc.call("listing_info", {});
+      const m = new AddrMap(info.ranges);
+      result.functions = fl!.length; result.totalBytes = m.total;
+      await sleep(1500);
+      const L = (window as any).__listing;
+      const randAddr = () => m.addr(Math.random() * (m.total - 1));
+
+      frames();
+      const lat: number[] = [];
+      for (let i = 0; i < 300; i++) { const t = performance.now(); await L.jump(randAddr()); await frame(); lat.push(performance.now() - t); }
+      result.randomJump300 = { ms: summ(lat), frameGapMs: frames() };
+
+      const sw: number[] = []; const ts = performance.now();
+      for (let i = 0; i < 1000; i++) { const t = performance.now(); await L.jump(m.addr((i / 999) * (m.total - 1))); await frame(); sw.push(performance.now() - t); }
+      result.sweepStartToEnd1000 = { ms: summ(sw), totalS: Math.round(performance.now() - ts) / 1000, frameGapMs: frames() };
+
+      // fling: 100 lines per frame (~6000 lines/s at 60 Hz) from the middle; a "stall" frame is one where the buffer could not supply the lines
+      const fling = async (ms: number, until?: () => boolean) => {
+        await L.jump(m.addr(m.total / 2)); await sleep(500); frames();
+        const end = performance.now() + ms; let stall = 0, stallRun = 0, worst = 0, moved = 0, f = 0, t = performance.now();
+        while (performance.now() < end && !(until?.())) {
+          await frame(); f++;
+          const d = L.scrollLines(100); moved += d;
+          if (d < 100) { stall++; stallRun += performance.now() - t; worst = Math.max(worst, stallRun); } else stallRun = 0;
+          t = performance.now();
+        }
+        return { frames: f, linesMoved: moved, stallFrames: stall, worstConsecutiveStallMs: Math.round(worst), frameGapMs: frames() };
+      };
+      result.fling20s = await fling(20000);
+      (window as any).__lst.length = 0;
+
+      let done = false; const dl: number[] = [];
+      const picks = Array.from({ length: 50 }, () => fl![Math.floor(Math.random() * fl!.length)]);
+      const dec = (async () => { for (const f of picks) { const t = performance.now(); try { await rpc.call("decompile", { entry: f.entry }); } catch (e) { errors.current.push(String(e)); } dl.push(performance.now() - t); } done = true; })();
+      result.flingDuringDecompile50 = await fling(120000, () => done);
+      await dec;
+      result.decompileMs = summ(dl);
+      const fwd = ((window as any).__lst as any[]).map((x) => x.ms);
+      result.listingFetchMsDuringDecompile = summ(fwd);
+    } catch (e) { fail(e); result.ok = false; }
+    running = false;
     result.errors = errors.current;
     window.host.autotestDone(result);
   }
@@ -296,9 +357,11 @@ function Listing({ map, scrollReq, topAddrRef, onLatency, onError }: {
   };
 
   const scrollLines = (n: number) => {
+    const before = st.top;
     st.top = Math.max(0, Math.min(st.top + n, maxTop()));
     topAddrRef.current = st.lines[st.top]?.row.address ?? topAddrRef.current;
     syncThumb(); render(); ensure();
+    return st.top - before;
   };
   (window as any).__listing = { jump: (a: Address) => jump(a, true), scrollLines, top: () => topAddrRef.current };
 

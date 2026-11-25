@@ -1,0 +1,59 @@
+{
+ "binary": "/opt/homebrew/Cellar/mysql-client/9.3.0/bin/mysqldump",
+ "size_mb": 6.95,
+ "first_open": {
+  "jvm_start_s": 3.52,
+  "open_binary_s": 103.22,
+  "persisted": false,
+  "rss_after_open_mb": [
+   1198.0,
+   5.8
+  ],
+  "functions": 1891,
+  "total_bytes": 6954352,
+  "ranges": 2,
+  "listing_100_rows_random_300": {
+   "n": 300,
+   "median_ms": 7.1,
+   "p95_ms": 12.06,
+   "max_ms": 33.28
+  },
+  "listing_100_rows_backward_100": {
+   "n": 100,
+   "median_ms": 7.69,
+   "p95_ms": 11.35,
+   "max_ms": 11.82
+  },
+  "decompile_50_cold_while_listing": {
+   "n": 50,
+   "median_ms": 13.83,
+   "p95_ms": 49.94,
+   "max_ms": 55.39,
+   "errors": 0,
+   "total_s": 0.9
+  },
+  "listing_during_decompile": {
+   "n": 34,
+   "median_ms": 10.0,
+   "p95_ms": 20.06,
+   "max_ms": 23.37
+  },
+  "rss_after_workload_mb": [
+   1202.9,
+   9.0
+  ],
+  "exit_after_stdin_close_s": 0.04,
+  "total_spawn_to_ready_s": 106.74
+ },
+ "reopen": {
+  "jvm_start_s": 3.5,
+  "open_binary_s": 2.28,
+  "persisted": true,
+  "rss_after_open_mb": [
+   371.4,
+   4.1
+  ],
+  "exit_after_stdin_close_s": 0.02,
+  "total_spawn_to_ready_s": 5.78
+ }
+}

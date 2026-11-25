@@ -43,6 +43,11 @@ Other modes:
 MOCK=1 npm start                    # fake sidecar, 2M fake rows
 AUTOTEST=/bin/ls npm start          # scripted flow, prints AUTOTEST_RESULT, writes app/out/screenshot.png
 cd ../sidecar && .venv/bin/python -m pytest -s test_smoke.py   # sidecar smoke test on /bin/ls, writes timings.json
+cd ../app && npm test                                          # address map unit test
+BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompile measurements in the renderer
+../sidecar/.venv/bin/python ../bench/bench_sidecar.py <binary> /tmp/bench-projects out.json   # sidecar-level measurements
 ```
 
 Never modify the Ghidra source checkout; everything here lives in this repo.
+
+Analyzed programs persist in a Ghidra project under `$SIDECAR_PROJECTS_DIR` (the app uses its userData dir, `~/Library/Application Support/<app>/projects`), keyed by file sha256. Delete that dir to force re-analysis.
