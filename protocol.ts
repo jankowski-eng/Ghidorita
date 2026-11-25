@@ -72,7 +72,7 @@ export interface AddrRange {
 }
 
 export interface Methods {
-  open_binary: { params: { path: string }; result: { programId: string; name: string } };
+  open_binary: { params: { path: string }; result: { programId: string; name: string; persisted: boolean } };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };

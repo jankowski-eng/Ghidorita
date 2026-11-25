@@ -33,7 +33,7 @@ function startSidecar(): Promise<number> {
     cmd = path.join(repo, "sidecar/.venv/bin/python"); args = [path.join(repo, "sidecar/main.py")];
   }
   // stdin stays an open pipe: when Electron dies the sidecar sees EOF and exits.
-  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, SIDECAR_TOKEN: token } });
+  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, SIDECAR_TOKEN: token, SIDECAR_PROJECTS_DIR: path.join(app.getPath("userData"), "projects") } });
   return new Promise((resolve, reject) => {
     sidecar!.on("error", reject);
     sidecar!.on("exit", (code) => { reject(new Error(`sidecar exited early (${code})`)); if (!quitting) { console.error(`sidecar exited (${code})`); } });

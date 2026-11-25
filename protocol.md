@@ -10,7 +10,7 @@ JSON-RPC 2.0 over WebSocket, text frames, one JSON object per frame. Types: `pro
 ## Requests (client → server; replies are standard JSON-RPC results)
 | method | params | result |
 |---|---|---|
-| `open_binary` | `{path}` | `{programId, name}`. Imports (or reopens the persisted analyzed program), runs auto-analysis if needed; emits `progress` notifications; replies when done. |
+| `open_binary` | `{path}` | `{programId, name, persisted}`. `programId` is the file's sha256; the analyzed program is stored in a Ghidra project (`$SIDECAR_PROJECTS_DIR`, default `~/Library/Application Support/ghidra-desktop-spike/projects`) and `persisted` is true when it was loaded from there without re-analysis. Otherwise imports, runs auto-analysis, saves; emits `progress` notifications; replies when done. |
 | `list_functions` | `{}` | `[{name, entry, size}]` sorted by entry |
 | `decompile` | `{entry, timeoutSecs?=30}` | `{text, tokens[], cached}` |
 | `cancel_decompile` | `{id}` | `{cancelled}` — cancels the `decompile` request with that JSON-RPC id, whether still queued or running; that request fails with `Cancelled`. `false` if the id is unknown or already finished. |

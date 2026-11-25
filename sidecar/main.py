@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ghidra sidecar: JSON-RPC 2.0 over WebSocket (see ../protocol.md)."""
-import asyncio, concurrent.futures, json, os, queue, signal, sys, tempfile, threading, time
+import asyncio, concurrent.futures, hashlib, json, os, queue, signal, sys, tempfile, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -37,6 +37,7 @@ class Sidecar:
         self.djobs = queue.Queue()   # decompile thread: owns self.decomp and self.cache
         self.program = None
         self.results = None
+        self.consumer = None
         self.decomp = None
         self.cache = OrderedDict()  # decompile thread only; shortcut: not invalidated (program is read-only after analysis), fine until editing is added
         self.dj = {}                # request id -> Job, loop thread only
@@ -119,30 +120,70 @@ class Sidecar:
         return PyGhidraTaskMonitor(None, cb)
 
     # ---- methods (worker) ----
+    def _project(self):
+        """One Ghidra project for all programs, programs named by file sha256.
+        shortcut: a second sidecar on the same projects dir fails on the project lock; one process per dir."""
+        if getattr(self, "proj", None) is None:
+            from ghidra.base.project import GhidraProject
+            from ghidra.framework.model import ProjectLocator
+            d = os.environ.get("SIDECAR_PROJECTS_DIR") or os.path.expanduser("~/Library/Application Support/ghidra-desktop-spike/projects")
+            os.makedirs(d, exist_ok=True)
+            # GhidraProject, not pyghidra.open_project: that one builds a GUI-oriented DefaultProjectManager which hangs headless here
+            gp = (GhidraProject.openProject(d, "spike", True) if ProjectLocator(d, "spike").exists()
+                  else GhidraProject.createProject(d, "spike", False))
+            self.proj = gp.getProject()
+        return self.proj
+
+    def _close_program(self):
+        if self.results is not None:
+            self.results.close()
+        elif self.program is not None:
+            self.program.release(self.consumer)
+        self.program = self.results = None
+
     def open_binary(self, path):
         import pyghidra
         from ghidra.app.util.importer import ProgramLoader
+        from ghidra.program.util import GhidraProgramUtilities
         self.on_decomp_thread(self._drop_decomp)
-        if self.results is not None:
-            self.results.close()
-            self.program = self.results = None
+        self._close_program()
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
-        self.progress("import", 0, "importing")
-        # shortcut: in-memory program, no throwaway project dir (nothing is saved); upgrade if saving/analysis state must persist
-        try:
-            res = ProgramLoader.builder().source(path).monitor(self.monitor("import")).load()
-        except Exception as e:
-            raise RpcError(INTERNAL, "import failed: %s" % e)
-        self.results = res
-        prog = res.getPrimaryDomainObject()
-        self.progress("import", 100, "imported")
-        self.progress("analysis", -1, "analyzing")
-        pyghidra.analyze(prog, self.monitor("analysis"))
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        key = h.hexdigest()
+        proj = self._project()
+        t0 = time.monotonic()
+        persisted = proj.getProjectData().getFile("/" + key) is not None
+        if persisted:
+            self.progress("import", 100, "loading persisted analysis")
+            prog, self.consumer = pyghidra.consume_program(proj, "/" + key)
+            log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
+        else:
+            self.progress("import", 0, "importing")
+            self.consumer = None
+            try:
+                res = (ProgramLoader.builder().source(path).project(proj).projectFolderPath("/").name(key)
+                       .monitor(self.monitor("import")).load())
+            except Exception as e:
+                raise RpcError(INTERNAL, "import failed: %s" % e)
+            self.results = res
+            prog = res.getPrimaryDomainObject()
+            res.save(self.monitor("import"))  # creates the domain file in the project
+            self.progress("import", 100, "imported")
         self.program = prog
+        if not GhidraProgramUtilities.isAnalyzed(prog):
+            self.progress("analysis", -1, "analyzing")
+            pyghidra.analyze(prog, self.monitor("analysis"))
+            self.progress("analysis", -1, "saving")
+            prog.save("analyzed", self.monitor("analysis"))
+            # shortcut: a cancelled/crashed analysis leaves an unanalyzed (or half-analyzed, not saved) program; it is re-analyzed on next open
         self.on_decomp_thread(lambda: self._open_decomp(prog))
         self.progress("ready", 100, "ready")
-        return {"programId": str(prog.getName()), "name": str(prog.getName())}  # shortcut: id == name, single program
+        self.open_secs = time.monotonic() - t0
+        return {"programId": key, "name": os.path.basename(path), "persisted": persisted}
 
     def _drop_decomp(self):
         if self.decomp is not None:
@@ -386,6 +427,7 @@ def main():
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(os.environ["GHIDRA_INSTALL_DIR"]))
     if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
+    launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
     launcher.start()
     log("jvm start: %.2fs" % (time.monotonic() - t0))
 

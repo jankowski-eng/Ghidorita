@@ -21,7 +21,7 @@ def thin_binary(tmp_path):
 
 def test_smoke(tmp_path):
     timings = {}
-    env = dict(os.environ, GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA)
+    env = dict(os.environ, GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(tmp_path / "projects"))
     t0 = time.monotonic()
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, env=env)
@@ -50,12 +50,19 @@ def test_smoke(tmp_path):
             t = time.monotonic()
             r = await call("open_binary", path=binary)
             timings["import_analysis_s"] = round(time.monotonic() - t, 2)
-            assert "result" in r, r
+            assert "result" in r and r["result"]["persisted"] is False, r
             phases = {n["params"]["phase"] for n in notes if n["method"] == "progress"}
             assert {"import", "analysis", "ready"} <= phases, phases
 
             fns = (await call("list_functions"))["result"]
             assert fns
+            t = time.monotonic()
+            notes.clear()
+            r2 = await call("open_binary", path=binary)  # reopen: loaded from the project, no analysis
+            timings["reopen_s"] = round(time.monotonic() - t, 2)
+            assert r2["result"]["persisted"] is True and r2["result"]["programId"] == r["result"]["programId"], r2
+            assert not any(n["params"]["phase"] == "analysis" for n in notes if n["method"] == "progress")
+            assert (await call("list_functions"))["result"] == fns
             timings["function_count"] = len(fns)
 
             # first function whose decompile yields tokens
