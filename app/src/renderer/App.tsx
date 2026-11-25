@@ -117,7 +117,7 @@ export function App() {
       let clicked = false;
       for (const f of order) {
         const r = await rpc.call("decompile", { entry: f.entry });
-        const tok = r.tokens.find((t) => t.targetFunction);
+        const tok = r.tokens.find((t) => t.targetFunction && t.targetFunction !== f.entry); // a real call to another function
         if (!tok) continue;
         await select(f.entry);
         await new Promise((r) => setTimeout(r, 300));
@@ -135,7 +135,7 @@ export function App() {
       result.listingTopAddress = (await rpc.call("row_to_address", { index: topRowRef.current })).address;
       result.editorFirstLine = (editorRef.current?.getValue() ?? "").split("\n")[0];
       result.functions = fl.length; result.rowCount = rowCount || (await rpc.call("listing_info", {})).rowCount;
-      result.ok = result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && errors.current.length === 0;
+      result.ok = result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && errors.current.length === 0;
     } catch (e) { fail(e); }
     result.errors = errors.current;
     window.host.autotestDone(result);

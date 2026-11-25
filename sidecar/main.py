@@ -267,13 +267,12 @@ class Sidecar:
                 if kind in ("variable", "param"):
                     tok["varName"] = s
                 if isinstance(t, ClangFuncNameToken):
-                    f = DecompilerUtils.getFunction(prog, t)
-                    if f is None:
-                        op = t.getPcodeOp()
-                        if op is not None and op.getOpcode() == PcodeOp.CALL:
-                            f = fm.getFunctionAt(op.getInput(0).getAddress())
-                    if f is not None:
-                        tok["targetFunction"] = hx(f.getEntryPoint().getOffset())
+                    # only tokens that belong to a call op; the function's own name in its signature has no op
+                    op = t.getPcodeOp()
+                    if op is not None and op.getOpcode() == PcodeOp.CALL:
+                        f = fm.getFunctionAt(op.getInput(0).getAddress())
+                        if f is not None:
+                            tok["targetFunction"] = hx(f.getEntryPoint().getOffset())
                 tokens.append(tok)
             lines_out.append(text)
         return {"text": "\n".join(lines_out), "tokens": tokens}
