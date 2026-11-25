@@ -352,8 +352,13 @@ def main():
     t0 = time.monotonic()
     if "GHIDRA_INSTALL_DIR" not in os.environ:
         sys.exit("GHIDRA_INSTALL_DIR not set")
+    import pathlib
     import pyghidra
-    pyghidra.start()
+    from pyghidra.launcher import HeadlessPyGhidraLauncher
+    launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(os.environ["GHIDRA_INSTALL_DIR"]))
+    if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
+        launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
+    launcher.start()
     log("jvm start: %.2fs" % (time.monotonic() - t0))
 
     sc = Sidecar()

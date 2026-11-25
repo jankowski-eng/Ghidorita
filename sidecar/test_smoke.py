@@ -3,12 +3,12 @@ import asyncio, glob, json, os, subprocess, sys, time
 import websockets
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-JAVA = "/Users/fjankowski/Library/Java/JavaVirtualMachines/openjdk-21.0.2/Contents/Home"
+JAVA = os.environ.get("JAVA_HOME", "/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home")
 BIN = os.environ.get("SPIKE_BINARY", "/bin/ls")
 
 
 def ghidra_dir():
-    d = os.environ.get("GHIDRA_INSTALL_DIR") or (sorted(glob.glob("/Users/fjankowski/Projekte/floss/ghidra/build/dist/ghidra_*/") or [None])[-1])
+    d = os.environ.get("GHIDRA_INSTALL_DIR") or (sorted(glob.glob(os.path.join(os.path.dirname(__file__), "..", "ghidra-install", "ghidra_*/")) or [None])[-1])
     assert d, "no Ghidra install"
     return d
 
