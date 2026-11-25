@@ -1,0 +1,55 @@
+{
+ "name": "ls",
+ "heap_before_mb": 58,
+ "heap_max_mb": 8192,
+ "rss_before_mb": 377,
+ "py_index_s": 1.11,
+ "rows": 64381,
+ "rss_after_py_index_mb": 454,
+ "heap_after_py_index_mb": 57,
+ "java_index_s": 0.2,
+ "heap_after_java_index_mb": 59,
+ "verified_rows": 30400,
+ "results": {
+  "i_naive/random": {
+   "rows_per_s": 29160,
+   "median_ms": 4.18,
+   "p95_ms": 17.43,
+   "batches": 300
+  },
+  "i_naive/sequential": {
+   "rows_per_s": 28468,
+   "median_ms": 4.4,
+   "p95_ms": 15.92,
+   "batches": 300
+  },
+  "ii_tuned/random": {
+   "rows_per_s": 30303,
+   "median_ms": 4.34,
+   "p95_ms": 15.67,
+   "batches": 300
+  },
+  "ii_tuned/sequential": {
+   "rows_per_s": 31877,
+   "median_ms": 3.81,
+   "p95_ms": 18.99,
+   "batches": 300
+  },
+  "iii_java/random": {
+   "rows_per_s": 137480,
+   "median_ms": 0.67,
+   "p95_ms": 4.84,
+   "batches": 300
+  },
+  "iii_java/sequential": {
+   "rows_per_s": 137936,
+   "median_ms": 0.73,
+   "p95_ms": 3.83,
+   "batches": 300
+  },
+  "iii_java_rawstring/random": {
+   "median_ms": 0.53,
+   "p95_ms": 1.81
+  }
+ }
+}

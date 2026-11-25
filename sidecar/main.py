@@ -365,7 +365,13 @@ def main():
 
     async def serve():
         sc.loop = asyncio.get_running_loop()
-        async with websockets.serve(sc.conn, "127.0.0.1", 0, max_size=None) as srv:
+        token = os.environ.get("SIDECAR_TOKEN")  # shortcut: no token => no auth (tests only), make mandatory before shipping
+
+        def guard(conn, request):  # a web page can reach 127.0.0.1; require the secret URL path set by Electron main
+            if token and request.path != "/" + token:
+                return conn.respond(403, "forbidden\n")
+
+        async with websockets.serve(sc.conn, "127.0.0.1", 0, max_size=None, process_request=guard) as srv:
             port = srv.sockets[0].getsockname()[1]
             print(port, file=out, flush=True)
             await asyncio.Future()

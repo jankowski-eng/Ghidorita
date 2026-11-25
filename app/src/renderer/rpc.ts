@@ -12,8 +12,8 @@ export class Rpc {
   private pending = new Map<number, Pending>();
   onNotification: <N extends keyof Notifications>(method: N, params: Notifications[N]) => void = () => {};
 
-  connect(port: number): Promise<void> {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  connect(port: number, token: string): Promise<void> {
+    this.ws = new WebSocket(`ws://127.0.0.1:${port}/${token}`);
     this.ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data as string);
       if (msg.id === undefined) return this.onNotification(msg.method, msg.params);

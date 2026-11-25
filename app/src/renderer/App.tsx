@@ -97,7 +97,7 @@ export function App() {
   useEffect(() => {
     (async () => {
       const cfg = await window.host.getConfig();
-      await rpc.connect(cfg.port);
+      await rpc.connect(cfg.port, cfg.token);
       rpc.onNotification = (m, p) => {
         if (m === "progress") setProgress(p as Progress);
         else if (m === "error") fail((p as { message: string }).message);

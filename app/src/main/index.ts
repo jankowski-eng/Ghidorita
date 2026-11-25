@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { randomBytes } from "node:crypto";
+const token = randomBytes(24).toString("hex");
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -31,7 +33,7 @@ function startSidecar(): Promise<number> {
     cmd = path.join(repo, "sidecar/.venv/bin/python"); args = [path.join(repo, "sidecar/main.py")];
   }
   // stdin stays an open pipe: when Electron dies the sidecar sees EOF and exits.
-  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"] });
+  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, SIDECAR_TOKEN: token } });
   return new Promise((resolve, reject) => {
     sidecar!.on("error", reject);
     sidecar!.on("exit", (code) => { reject(new Error(`sidecar exited early (${code})`)); if (!quitting) { console.error(`sidecar exited (${code})`); } });
@@ -67,7 +69,7 @@ ipcMain.handle("autotest-done", async (_e, result: { ok: boolean }) => {
 app.whenReady().then(async () => {
   let port: number;
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecar(); app.exit(1); return; }
-  ipcMain.handle("get-config", () => ({ port, autotest: autotest ?? null }));
+  ipcMain.handle("get-config", () => ({ port, token, autotest: autotest ?? null }));
   win = new BrowserWindow({ width: 1400, height: 900, webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
 });
