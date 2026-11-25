@@ -46,7 +46,7 @@ def test_smoke(tmp_path):
             timings["import_analysis_s"] = round(time.monotonic() - t, 2)
             assert "result" in r, r
             phases = {n["params"]["phase"] for n in notes if n["method"] == "progress"}
-            assert {"import", "analysis", "index", "ready"} <= phases, phases
+            assert {"import", "analysis", "ready"} <= phases, phases
 
             fns = (await call("list_functions"))["result"]
             assert fns
@@ -80,19 +80,40 @@ def test_smoke(tmp_path):
             assert d2["result"]["cached"] is True and d2["result"]["text"] == res["text"]
             timings["targets_seen"] = sum("targetFunction" in k for k in res["tokens"])
 
-            n = (await call("listing_info"))["result"]["rowCount"]
-            assert n > 0
-            timings["row_count"] = n
-            rows = (await call("listing_rows", startIndex=0, count=200))["result"]
-            assert len(rows) == 200
-            assert all(r["address"].startswith("0x") and r["mnemonic"] for r in rows)
-            t = time.monotonic()
-            await call("listing_rows", startIndex=n // 2, count=200)
-            timings["listing_rows_200_ms"] = round((time.monotonic() - t) * 1000, 1)
-            assert len((await call("listing_rows", startIndex=n - 5, count=200))["result"]) == 5
-            for i in (0, 1, n // 2, n - 1):
-                a = (await call("row_to_address", index=i))["result"]["address"]
-                assert (await call("address_to_row", address=a))["result"]["index"] == i
+            info = (await call("listing_info"))["result"]
+            ranges = info["ranges"]
+            assert ranges and info["totalBytes"] == sum(r["size"] for r in ranges)
+            timings["total_bytes"], timings["ranges"] = info["totalBytes"], len(ranges)
+            first = ranges[0]["start"]
+            rows = (await call("listing_rows", address=first, count=200))["result"]
+            assert len(rows) == 200 and rows[0]["address"] == first
+            assert all(r["address"].startswith("0x") and r["mnemonic"] and r["length"] > 0 for r in rows)
+            for a, b in zip(rows, rows[1:]):  # ascending; contiguous inside a range
+                assert int(b["address"], 16) >= int(a["address"], 16) + a["length"]
+            # forward from the middle of a code unit starts at the unit containing it
+            mid = int(rows[5]["address"], 16)
+            f = (await call("listing_rows", address=hex(mid + rows[5]["length"] - 1), count=3))["result"]
+            assert f[0]["address"] == rows[5]["address"], (f[0], rows[5])
+            # backward: strictly before the anchor, ascending, and consistent with forward
+            back = (await call("listing_rows", address=rows[50]["address"], count=20, direction="backward"))["result"]
+            assert back == rows[30:50], "backward != forward slice"
+            assert (await call("listing_rows", address=first, count=20, direction="backward"))["result"] == []
+            last = ranges[-1]
+            end = hex(int(last["start"], 16) + last["size"] - 1)
+            tail = (await call("listing_rows", address=end, count=50))["result"]
+            assert len(tail) == 1 and int(tail[0]["address"], 16) + tail[0]["length"] == int(last["start"], 16) + last["size"]
+            assert (await call("listing_rows", address=hex(int(end, 16) + 1), count=5))["result"] == [] or len(ranges) > 1
+            # random-position latency
+            import random
+            lat = []
+            for _ in range(50):
+                r = random.choice(ranges)
+                a = hex(int(r["start"], 16) + random.randrange(r["size"]))
+                t = time.monotonic()
+                await call("listing_rows", address=a, count=200)
+                lat.append((time.monotonic() - t) * 1000)
+            lat.sort()
+            timings["listing_rows_200_median_ms"] = round(lat[25], 1)
 
             assert (await call("nope"))["error"]["code"] == -32601
             assert (await call("decompile", entry="0x1"))["error"]["code"] == -32004

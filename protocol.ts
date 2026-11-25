@@ -57,6 +57,7 @@ export interface DecompileResult {
 
 export interface ListingRow {
   address: Address;
+  length: number;    // code unit length in bytes; next row (if contiguous) starts at address + length
   bytes: string;     // hex, e.g. "55 48 89 e5"
   mnemonic: string;  // for data: the data type name, e.g. "db", "ds"
   operands: string;
@@ -64,18 +65,22 @@ export interface ListingRow {
   comment?: string;
 }
 
+/** A contiguous loaded+initialized address range, ascending, non-overlapping. */
+export interface AddrRange {
+  start: Address;
+  size: number; // bytes
+}
+
 export interface Methods {
   open_binary: { params: { path: string }; result: { programId: string; name: string } };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   cancel_decompile: { params: {}; result: { cancelled: boolean } };
-  listing_info: { params: {}; result: { rowCount: number } };
-  listing_rows: { params: { startIndex: number; count: number }; result: ListingRow[] };
-  address_to_row: { params: { address: Address }; result: { index: number } };
-  row_to_address: { params: { index: number }; result: { address: Address } };
+  listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
+  listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
 }
 
 export interface Notifications {
-  progress: { phase: "import" | "analysis" | "index" | "ready"; pct: number; message: string };
+  progress: { phase: "import" | "analysis" | "ready"; pct: number; message: string };
   error: { message: string };
 }

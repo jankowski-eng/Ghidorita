@@ -11,7 +11,7 @@ const MNEMS = ["push", "mov", "lea", "call", "add", "sub", "cmp", "jne", "xor", 
 const row = (idx) => {
   const h = (idx * 2654435761) >>> 0;
   const m = MNEMS[h % MNEMS.length];
-  const r = { address: hex(BASE + idx * STRIDE), bytes: (h >>> 8).toString(16).padStart(8, "0").replace(/(..)/g, "$1 ").trim(),
+  const r = { address: hex(BASE + idx * STRIDE), length: STRIDE, bytes: (h >>> 8).toString(16).padStart(8, "0").replace(/(..)/g, "$1 ").trim(),
     mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
   if (idx % ROWS_PER_FUNC === 0) r.label = nameOf(idx / ROWS_PER_FUNC);
   if (idx % 50 === 7) r.comment = `note ${idx}`;
@@ -65,22 +65,14 @@ const handlers = {
       cancelDecompile = () => { clearTimeout(t); cancelDecompile = null; reject({ code: -32002, message: "Cancelled" }); };
     });
   },
-  listing_info: () => ({ rowCount: ROWS }),
-  async listing_rows({ startIndex, count }) {
+  listing_info: () => ({ ranges: [{ start: hex(BASE), size: ROWS * STRIDE }], totalBytes: ROWS * STRIDE }),
+  async listing_rows({ address, count, direction = "forward" }) {
     await sleep(20);
-    const end = Math.min(ROWS, startIndex + count);
-    const out = [];
-    for (let i = Math.max(0, startIndex); i < end; i++) out.push(row(i));
-    return out;
-  },
-  address_to_row({ address }) {
     const idx = Math.floor((parseInt(address, 16) - BASE) / STRIDE);
-    if (!(idx >= 0 && idx < ROWS)) throw { code: -32004, message: "NotFound" };
-    return { index: idx };
-  },
-  row_to_address({ index }) {
-    if (!(index >= 0 && index < ROWS)) throw { code: -32004, message: "NotFound" };
-    return { address: hex(BASE + index * STRIDE) };
+    const [from, to] = direction === "backward" ? [idx - count, idx] : [idx, idx + count];
+    const out = [];
+    for (let i = Math.max(0, from); i < Math.min(ROWS, to); i++) out.push(row(i));
+    return out;
   },
 };
 

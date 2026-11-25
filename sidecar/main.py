@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ghidra sidecar: JSON-RPC 2.0 over WebSocket (see ../protocol.md)."""
-import asyncio, bisect, json, os, queue, signal, sys, tempfile, threading, time
+import asyncio, json, os, queue, signal, sys, tempfile, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -33,7 +33,6 @@ class Sidecar:
         self.results = None
         self.decomp = None
         self.cache = OrderedDict()  # shortcut: cache not invalidated (program is read-only after analysis), fine until editing is added
-        self.index = []  # sorted code unit start offsets
         self.cur_monitor = None
         self.mon_lock = threading.Lock()
         threading.Thread(target=self._worker, daemon=True).start()
@@ -112,7 +111,6 @@ class Sidecar:
             self.results.close()
             self.program = self.results = None
         self.cache.clear()
-        self.index = []
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
         self.progress("import", 0, "importing")
@@ -127,25 +125,11 @@ class Sidecar:
         self.progress("analysis", -1, "analyzing")
         pyghidra.analyze(prog, self.monitor("analysis"))
         self.program = prog
-        self.progress("index", 0, "building listing index")
-        t = time.monotonic()
-        self._build_index()
-        log("index build: %d rows in %.3fs" % (len(self.index), time.monotonic() - t))
-        self.index_secs = time.monotonic() - t
         self.decomp = DecompInterface()
         if not self.decomp.openProgram(prog):
             raise RpcError(INTERNAL, "decompiler failed to open program: %s" % self.decomp.getLastMessage())
         self.progress("ready", 100, "ready")
         return {"programId": str(prog.getName()), "name": str(prog.getName())}  # shortcut: id == name, single program
-
-    def _build_index(self):
-        prog = self.program
-        it = prog.getListing().getCodeUnits(prog.getMemory().getLoadedAndInitializedAddressSet(), True)
-        # shortcut: offsets only unique per address space; assumes one default space; upgrade with (space,offset) keys
-        arr = []
-        for cu in it:
-            arr.append(cu.getMinAddress().getOffset())
-        self.index = arr
 
     def list_functions(self):
         out = []
@@ -157,54 +141,64 @@ class Sidecar:
         return [{"name": n, "entry": hx(o), "size": int(s)} for o, n, s in out]
 
     def listing_info(self):
-        self.need()
-        return {"rowCount": len(self.index)}
+        mem = self.need().getMemory()
+        space = self.program.getAddressFactory().getDefaultAddressSpace()  # shortcut: default space only
+        ranges = [{"start": hx(r.getMinAddress().getOffset()), "size": int(r.getLength())}
+                  for r in mem.getLoadedAndInitializedAddressSet() if r.getMinAddress().getAddressSpace() == space]
+        return {"ranges": ranges, "totalBytes": sum(r["size"] for r in ranges)}
 
-    def row_to_address(self, index):
-        self.need()
-        if not 0 <= index < len(self.index):
-            raise RpcError(NOT_FOUND, "row out of range")
-        return {"address": hx(self.index[index])}
-
-    def address_to_row(self, address):
-        prog = self.need()
-        cu = prog.getListing().getCodeUnitContaining(self.addr(address))
-        if cu is None:
-            raise RpcError(NOT_FOUND, "no code unit at %s" % address)
-        i = bisect.bisect_left(self.index, cu.getMinAddress().getOffset())
-        if i >= len(self.index) or self.index[i] != cu.getMinAddress().getOffset():
-            raise RpcError(NOT_FOUND, "address not in listing index")
-        return {"index": i}
-
-    def fetch_rows(self, start, count):
-        """Replaceable hot path: rows [start, start+count) already clamped by the caller."""
+    def listing_rows(self, address, count, direction="forward"):
+        """Walk code units from an anchor address; no index. See protocol.md."""
         from ghidra.program.model.listing import CommentType, Instruction
-        prog = self.program
-        listing, st = prog.getListing(), prog.getSymbolTable()
+        from jpype import JArray, JByte
+        prog = self.need()
+        fwd = direction != "backward"
+        count = max(0, min(int(count), 1000))
+        listing, st, mem = prog.getListing(), prog.getSymbolTable(), prog.getMemory()
+        loaded = mem.getLoadedAndInitializedAddressSet()
+        a = self.addr(address)
+        cu = listing.getCodeUnitContaining(a)
+        a = cu.getMinAddress() if cu is not None else a
+        lo, hi = loaded.getMinAddress(), loaded.getMaxAddress()
+        if count == 0 or lo is None:
+            return []
+        if fwd:
+            if a.compareTo(hi) > 0:
+                return []
+            view = loaded.intersectRange(a if a.compareTo(lo) >= 0 else lo, hi)
+        else:
+            if a.compareTo(lo) <= 0:
+                return []
+            end = a.previous()
+            view = loaded.intersectRange(lo, end if end.compareTo(hi) <= 0 else hi)
         rows = []
-        for off in self.index[start:start + count]:
-            a = self.addr(hx(off))
-            cu = listing.getCodeUnitAt(a)
+        for cu in listing.getCodeUnits(view, fwd):
+            if len(rows) >= count:
+                break
+            ca = cu.getMinAddress()
+            n = cu.getLength()
             if isinstance(cu, Instruction):
                 ops = ", ".join(str(cu.getDefaultOperandRepresentation(i)) for i in range(cu.getNumOperands()))
             else:
                 ops = str(cu.getDefaultValueRepresentation())
-            b = bytes(x & 0xFF for x in cu.getBytes())
-            row = {"address": hx(off), "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
-            sym = st.getPrimarySymbol(a)
+            if n <= 16:
+                b = bytes(x & 0xFF for x in cu.getBytes())
+            else:  # shortcut: show the first 16 bytes of big data units only
+                buf = JArray(JByte)(16)
+                mem.getBytes(ca, buf)
+                b = bytes(x & 0xFF for x in buf)
+            row = {"address": hx(ca.getOffset()), "length": int(n), "bytes": b.hex(" ") + (" …" if n > 16 else ""),
+                   "mnemonic": str(cu.getMnemonicString()), "operands": ops}
+            sym = st.getPrimarySymbol(ca)
             if sym is not None:
                 row["label"] = str(sym.getName())
             c = cu.getComment(CommentType.EOL)
             if c:
                 row["comment"] = str(c)
             rows.append(row)
+        if not fwd:
+            rows.reverse()
         return rows
-
-    def listing_rows(self, startIndex, count):
-        self.need()
-        s = max(0, int(startIndex))
-        n = max(0, min(int(count), len(self.index) - s))
-        return self.fetch_rows(s, n)
 
     def decompile(self, entry, timeoutSecs=30):
         from ghidra.pyghidra import PyGhidraTaskMonitor
@@ -294,8 +288,7 @@ class Sidecar:
         try:
             if method == "cancel_decompile":
                 result = self.cancel_decompile()
-            elif method in ("open_binary", "list_functions", "decompile", "listing_info", "listing_rows",
-                            "address_to_row", "row_to_address"):
+            elif method in ("open_binary", "list_functions", "decompile", "listing_info", "listing_rows"):
                 fn = getattr(self, method)
                 result = await self.run(lambda: fn(**params))
             else:

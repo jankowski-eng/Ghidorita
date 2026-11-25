@@ -23,3 +23,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .status { padding: 3px 8px; background: #007acc; color: #fff; font: 12px ui-monospace, Menlo, monospace; }
 .call-token { text-decoration: underline; cursor: pointer; color: #4fc1ff !important; }
 .err { color: #f66; }
+.lbox { position: relative; height: 100%; overflow: hidden; font: 12px ui-monospace, Menlo, monospace; }
+.lpane { position: absolute; left: 0; top: 0; bottom: 0; right: 16px; overflow: hidden; }
+.lbar { position: absolute; right: 0; top: 0; bottom: 0; width: 16px; overflow-y: scroll; }
+.lrow.lbl { padding-left: 24px; }
