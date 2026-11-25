@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ghidra sidecar: JSON-RPC 2.0 over WebSocket (see ../protocol.md)."""
-import asyncio, json, os, queue, signal, sys, tempfile, threading, time
+import asyncio, concurrent.futures, json, os, queue, signal, sys, tempfile, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -24,38 +24,57 @@ def hx(off):
     return "0x%x" % off
 
 
+class Job:
+    def __init__(self):
+        self.cancelled, self.mon = False, None
+
+
 class Sidecar:
     def __init__(self):
         self.loop = None
         self.ws = None
-        self.jobs = queue.Queue()
+        self.jobs = queue.Queue()    # open_binary, listing, function list: never waits behind a decompile
+        self.djobs = queue.Queue()   # decompile thread: owns self.decomp and self.cache
         self.program = None
         self.results = None
         self.decomp = None
-        self.cache = OrderedDict()  # shortcut: cache not invalidated (program is read-only after analysis), fine until editing is added
-        self.cur_monitor = None
+        self.cache = OrderedDict()  # decompile thread only; shortcut: not invalidated (program is read-only after analysis), fine until editing is added
+        self.dj = {}                # request id -> Job, loop thread only
         self.mon_lock = threading.Lock()
-        threading.Thread(target=self._worker, daemon=True).start()
+        for q in (self.jobs, self.djobs):
+            threading.Thread(target=self._worker, args=(q,), daemon=True).start()
 
     # ---- worker plumbing ----
-    def _worker(self):
+    def _worker(self, q):
         while True:
-            fn, fut = self.jobs.get()
+            fn, fut = q.get()
             try:
                 res, exc = fn(), None
             except BaseException as e:  # noqa
                 res, exc = None, e
-            self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
+            self._deliver(fut, res, exc)
 
     @staticmethod
     def _settle(fut, res, exc):
         if not fut.done():
             fut.set_exception(exc) if exc else fut.set_result(res)
 
-    def run(self, fn):
+    def _deliver(self, fut, res, exc):
+        if isinstance(fut, concurrent.futures.Future):  # waited on by a worker thread, not the loop
+            self._settle(fut, res, exc)
+        else:
+            self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
+
+    def run(self, fn, q=None):
         fut = self.loop.create_future()
-        self.jobs.put((fn, fut))
+        (q or self.jobs).put((fn, fut))
         return fut
+
+    def on_decomp_thread(self, fn):
+        """Blocking call from the read thread: run fn on the decompile thread (serialises decomp/cache changes)."""
+        f = concurrent.futures.Future()
+        self.djobs.put((fn, f))  # _worker only calls loop.call_soon_threadsafe(_settle,..); see _settle
+        return f.result()
 
     def notify(self, method, params):  # thread-safe
         def send():
@@ -103,14 +122,10 @@ class Sidecar:
     def open_binary(self, path):
         import pyghidra
         from ghidra.app.util.importer import ProgramLoader
-        from ghidra.app.decompiler import DecompInterface
-        if self.decomp is not None:
-            self.decomp.dispose()
-            self.decomp = None
+        self.on_decomp_thread(self._drop_decomp)
         if self.results is not None:
             self.results.close()
             self.program = self.results = None
-        self.cache.clear()
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
         self.progress("import", 0, "importing")
@@ -125,11 +140,22 @@ class Sidecar:
         self.progress("analysis", -1, "analyzing")
         pyghidra.analyze(prog, self.monitor("analysis"))
         self.program = prog
-        self.decomp = DecompInterface()
-        if not self.decomp.openProgram(prog):
-            raise RpcError(INTERNAL, "decompiler failed to open program: %s" % self.decomp.getLastMessage())
+        self.on_decomp_thread(lambda: self._open_decomp(prog))
         self.progress("ready", 100, "ready")
         return {"programId": str(prog.getName()), "name": str(prog.getName())}  # shortcut: id == name, single program
+
+    def _drop_decomp(self):
+        if self.decomp is not None:
+            self.decomp.dispose()
+            self.decomp = None
+        self.cache.clear()
+
+    def _open_decomp(self, prog):
+        from ghidra.app.decompiler import DecompInterface
+        d = DecompInterface()
+        if not d.openProgram(prog):
+            raise RpcError(INTERNAL, "decompiler failed to open program: %s" % d.getLastMessage())
+        self.decomp = d
 
     def list_functions(self):
         out = []
@@ -200,9 +226,11 @@ class Sidecar:
             rows.reverse()
         return rows
 
-    def decompile(self, entry, timeoutSecs=30):
+    def decompile(self, entry, timeoutSecs=30, job=None):
         from ghidra.pyghidra import PyGhidraTaskMonitor
         prog = self.need()
+        if job is not None and job.cancelled:  # cancelled while queued
+            raise RpcError(CANCELLED, "decompile cancelled")
         a = self.addr(entry)
         func = prog.getFunctionManager().getFunctionAt(a)
         if func is None:
@@ -214,13 +242,12 @@ class Sidecar:
             r["cached"] = True
             return r
         mon = PyGhidraTaskMonitor(None, None)
-        with self.mon_lock:
-            self.cur_monitor = mon
-        try:
-            res = self.decomp.decompileFunction(func, int(timeoutSecs), mon)
-        finally:
+        if job is not None:
             with self.mon_lock:
-                self.cur_monitor = None
+                job.mon = mon
+                if job.cancelled:
+                    mon.cancel()
+        res = self.decomp.decompileFunction(func, int(timeoutSecs), mon)
         if res.isCancelled() or mon.isCancelled():
             raise RpcError(CANCELLED, "decompile cancelled")
         if res.isTimedOut():
@@ -272,12 +299,16 @@ class Sidecar:
         return {"text": "\n".join(lines_out), "tokens": tokens}
 
     # ---- loop-thread side ----
-    def cancel_decompile(self):
+    def cancel_decompile(self, id):
+        """Cancel the decompile request with this JSON-RPC id, queued or running. False if unknown/finished."""
+        job = self.dj.get(id)
+        if job is None:
+            return {"cancelled": False}
         with self.mon_lock:
-            m = self.cur_monitor
-            if m is not None:
-                m.cancel()
-        return {"cancelled": m is not None}
+            job.cancelled = True
+            if job.mon is not None:
+                job.mon.cancel()
+        return {"cancelled": True}
 
     async def handle(self, ws, raw):
         try:
@@ -287,8 +318,14 @@ class Sidecar:
             return
         try:
             if method == "cancel_decompile":
-                result = self.cancel_decompile()
-            elif method in ("open_binary", "list_functions", "decompile", "listing_info", "listing_rows"):
+                result = self.cancel_decompile(**params)
+            elif method == "decompile":
+                job = self.dj[rid] = Job()
+                try:
+                    result = await self.run(lambda: self.decompile(job=job, **params), self.djobs)
+                finally:
+                    self.dj.pop(rid, None)
+            elif method in ("open_binary", "list_functions", "listing_info", "listing_rows"):
                 fn = getattr(self, method)
                 result = await self.run(lambda: fn(**params))
             else:
@@ -325,13 +362,12 @@ class Sidecar:
     def shutdown(self):
         def d():
             try:
-                if self.decomp is not None:
-                    self.decomp.dispose()
+                self.on_decomp_thread(self._drop_decomp)  # dispose on the thread that owns it
             except Exception:
                 pass
         t = threading.Thread(target=d, daemon=True)
         t.start()
-        t.join(3)
+        t.join(3)  # a stuck decompile must not block exit
         os._exit(0)
 
 

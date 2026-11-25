@@ -27,7 +27,7 @@ export function App() {
   const [stats, setStats] = useState<Stats>({});
   const [error, setError] = useState("");
   const decompileSeq = useRef(0);
-  const inflightDecompile = useRef(false);
+  const inflightId = useRef<number | null>(null);
   const selectedRef = useRef<Address | null>(null);
   const topAddrRef = useRef<Address>("");
   const errors = useRef<string[]>([]);
@@ -38,22 +38,23 @@ export function App() {
 
   const select = useCallback(async (entry: Address, push = true) => {
     const seq = ++decompileSeq.current;
-    if (inflightDecompile.current) rpc.call("cancel_decompile", {}).catch(() => {});
+    if (inflightId.current !== null) rpc.call("cancel_decompile", { id: inflightId.current }).catch(() => {});
     if (push && selectedRef.current && selectedRef.current !== entry) { const prev = selectedRef.current; setHistory((h) => [...h, prev]); }
     selectedRef.current = entry;
     setSelected(entry);
     setScrollReq((s) => ({ address: entry, n: s.n + 1 }));
-    inflightDecompile.current = true;
     const t0 = performance.now();
+    const p = rpc.call("decompile", { entry });
+    const myId = inflightId.current = rpc.lastId;
     try {
-      const r = await rpc.call("decompile", { entry });
+      const r = await p;
       if (seq !== decompileSeq.current) return; // stale
       setText(r.text); setTokens(r.tokens);
       setStats((s) => ({ ...s, decompileMs: Math.round(performance.now() - t0) }));
     } catch (e) {
       if (seq !== decompileSeq.current || (e instanceof RpcError && e.code === -32002)) return; // cancelled/stale
       fail(e);
-    } finally { if (seq === decompileSeq.current) inflightDecompile.current = false; }
+    } finally { if (inflightId.current === myId) inflightId.current = null; }
   }, []);
 
   const back = () => {

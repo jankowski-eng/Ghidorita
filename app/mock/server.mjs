@@ -45,7 +45,7 @@ function decompile(i) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false;
-let cancelDecompile = null;
+const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
   async open_binary({ path }, notify) {
@@ -57,12 +57,12 @@ const handlers = {
   list_functions() {
     return Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: ROWS_PER_FUNC * STRIDE }));
   },
-  decompile({ entry }) {
+  decompile({ entry }, notify, rid) {
     const i = Math.round((parseInt(entry, 16) - BASE) / (ROWS_PER_FUNC * STRIDE));
     if (!(i >= 0 && i < NFUNC)) throw { code: -32004, message: "NotFound" };
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => { cancelDecompile = null; resolve(decompile(i)); }, 150);
-      cancelDecompile = () => { clearTimeout(t); cancelDecompile = null; reject({ code: -32002, message: "Cancelled" }); };
+      const t = setTimeout(() => { cancels.delete(rid); resolve(decompile(i)); }, 150);
+      cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },
   listing_info: () => ({ ranges: [{ start: hex(BASE), size: ROWS * STRIDE }], totalBytes: ROWS * STRIDE }),
@@ -82,14 +82,14 @@ wss.on("connection", (ws) => {
   ws.on("message", async (data) => {
     const req = JSON.parse(data.toString());
     if (req.method === "cancel_decompile") { // bypasses the queue
-      const c = cancelDecompile; if (c) c();
+      const c = cancels.get(req.params?.id); if (c) c();
       return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { cancelled: !!c } }));
     }
     try {
       const h = handlers[req.method];
       if (!h) throw { code: -32601, message: "MethodNotFound" };
       if (req.method !== "open_binary" && !opened && req.method !== "cancel_decompile") throw { code: -32001, message: "NoProgram" };
-      const result = await h(req.params ?? {}, notify);
+      const result = await h(req.params ?? {}, notify, req.id);
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }));
     } catch (e) {
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, error: { code: e.code ?? -32603, message: e.message ?? String(e) } }));

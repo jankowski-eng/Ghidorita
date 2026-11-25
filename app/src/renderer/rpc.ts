@@ -9,6 +9,7 @@ type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 export class Rpc {
   private ws!: WebSocket;
   private nextId = 1;
+  lastId = 0; // id of the most recent call(); read synchronously after call() to target cancel_decompile
   private pending = new Map<number, Pending>();
   onNotification: <N extends keyof Notifications>(method: N, params: Notifications[N]) => void = () => {};
 
@@ -27,7 +28,7 @@ export class Rpc {
   }
 
   call<M extends keyof Methods>(method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
-    const id = this.nextId++;
+    const id = this.lastId = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));

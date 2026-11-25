@@ -75,7 +75,7 @@ export interface Methods {
   open_binary: { params: { path: string }; result: { programId: string; name: string } };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
-  cancel_decompile: { params: {}; result: { cancelled: boolean } };
+  cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
 }

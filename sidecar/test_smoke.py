@@ -30,16 +30,22 @@ def test_smoke(tmp_path):
     binary = thin_binary(tmp_path)
 
     async def scenario():
-        notes, nid = [], [0]
+        notes, nid, stash = [], [0], {}
+
+        async def reply(rid):  # replies to other requests are stashed, not dropped
+            while rid not in stash:
+                m = json.loads(await ws.recv())
+                if m.get("id") is None:
+                    notes.append(m)
+                else:
+                    stash[m["id"]] = m
+            return stash.pop(rid)
+
         async with websockets.connect("ws://127.0.0.1:%d" % port, max_size=None) as ws:
             async def call(method, **params):
                 nid[0] += 1
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": nid[0], "method": method, "params": params}))
-                while True:
-                    m = json.loads(await ws.recv())
-                    if m.get("id") == nid[0]:
-                        return m
-                    notes.append(m)
+                return await reply(nid[0])
 
             t = time.monotonic()
             r = await call("open_binary", path=binary)
@@ -118,19 +124,37 @@ def test_smoke(tmp_path):
             assert (await call("nope"))["error"]["code"] == -32601
             assert (await call("decompile", entry="0x1"))["error"]["code"] == -32004
 
-            # cancel: fire a decompile then cancel right away (may race with fast functions)
-            big = max(fns, key=lambda f: f["size"])
-            nid[0] += 1
-            did = nid[0]
-            await ws.send(json.dumps({"jsonrpc": "2.0", "id": did, "method": "decompile", "params": {"entry": big["entry"], "timeoutSecs": 1}}))
-            await asyncio.sleep(0.05)
-            c = await call("cancel_decompile")
-            timings["cancel_result"] = c["result"]
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("id") == did:
-                    timings["cancel_outcome"] = m.get("error", {}).get("code", "completed")
-                    break
+            async def send(method, **params):
+                nid[0] += 1
+                await ws.send(json.dumps({"jsonrpc": "2.0", "id": nid[0], "method": method, "params": params}))
+                return nid[0]
+
+            # cancel by id, request already running
+            ranked = sorted(fns, key=lambda f: -f["size"])
+            big, big2 = ranked[0], ranked[1]
+            did = await send("decompile", entry=big["entry"], timeoutSecs=5)
+            await asyncio.sleep(0.02)
+            c = await call("cancel_decompile", id=did)
+            r = await reply(did)
+            timings["cancel_running"] = [c["result"]["cancelled"], r.get("error", {}).get("code", "completed")]
+            assert (await call("cancel_decompile", id=999999))["result"] == {"cancelled": False}
+
+            # cancel while queued behind another decompile; the first must still complete
+            a_id = await send("decompile", entry=big["entry"], timeoutSecs=30)
+            b_id = await send("decompile", entry=big2["entry"], timeoutSecs=30)
+            c = await call("cancel_decompile", id=b_id)
+            assert c["result"]["cancelled"] is True
+            rb, ra = await reply(b_id), await reply(a_id)
+            assert rb["error"]["code"] == -32002, rb
+            assert "result" in ra, ra
+
+            # a listing fetch is not delayed by a running decompile
+            cold = sorted(fns, key=lambda f: -f["size"])[2]
+            d_id = await send("decompile", entry=cold["entry"], timeoutSecs=30)
+            t = time.monotonic()
+            await call("listing_rows", address=first, count=200)
+            timings["listing_during_decompile_ms"] = round((time.monotonic() - t) * 1000, 1)
+            await reply(d_id)
 
     try:
         asyncio.run(asyncio.wait_for(scenario(), 600))
