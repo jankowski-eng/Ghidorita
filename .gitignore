@@ -1,0 +1,8 @@
+ghidra-build.log
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+out/
+projects/
