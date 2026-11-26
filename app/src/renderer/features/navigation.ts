@@ -19,6 +19,7 @@ export function useNavigation(tabs: Tabs) {
 
   const containingFunction = (address: Address) => store.getState().program?.lookup.containing(address) ?? Promise.resolve(null);
   const applyLoc = async (loc: Loc, viaHistory: boolean, seq: number): Promise<void> => {
+    views.dispatch({ type: "set", patch: { cursorAt: loc.address } });
     if (viaHistory || loc.source !== "listing") views.dispatch({ type: "set", patch: (v) => ({ scrollReq: { address: loc.address, n: v.scrollReq.n + 1 } }) });
     let f: FuncAt | null = null;
     let err: unknown = null;

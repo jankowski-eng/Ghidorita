@@ -51,12 +51,12 @@ const bytesText = (r: ListingRow) => r.bytes + (r.bytesMore ? ` …+${r.bytesMor
  * fraction -> byte position -> address and jumps. Edits: `change` carries the program_changed ranges, only buffered rows intersecting them are
  * refetched (rowcache.ts spliceRows); no ranges (type edits) refetches from the top row. Neither moves the view or cancels a navigation.
  */
-export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, pc, stmt, breakpoints, onGutter, onLatency, onError, onRowClick, onGo, onEdit, onXrefs, menu }: {
+export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, pc, stmt, breakpoints, onGutter, onLatency, onError, onRowClick, onCursor, onGo, onEdit, onXrefs, menu }: {
   reader: Pick<ListingReads, "rows">; initialRows: ListingRow[]; map: AddrMap;
   rowRef: { current: (() => ListingRow | undefined) | null }; testMode: boolean; canEdit: (a: EditAction) => boolean; scrollReq: { address: Address; n: number }; change: { n: number; ranges: Range[] | null };
   topAddrRef: { current: Address }; cursorRef: { current: Address };
   pc?: Address | null; stmt?: { start: Address; end: Address } | null; breakpoints?: Address[]; onGutter?: (address: Address) => void; // debugger: the stop address, the breakpoint addresses, a click in the left gutter
-  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onGo?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void; menu?: () => MenuItem[];
+  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onCursor?: (address: Address) => void; onGo?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void; menu?: () => MenuItem[];
 }) {
   const ctx = useContextMenu();
   const box = useRef<HTMLDivElement>(null);
@@ -181,7 +181,7 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
   };
 
   // Row cursor: an address (not an index), so it survives buffer shifts and refreshes; it highlights the row whose unit contains it.
-  const setCur = (a: Address) => { st.cur = a; cursorRef.current = a; };
+  const setCur = (a: Address) => { st.cur = a; cursorRef.current = a; onCursor?.(a); };
   const curIndex = () => { const p = st.cur ? parseAddr(st.cur) : null; return p ? indexAt(st.rows, p) : -1; };
   const moveCursor = (n: number) => {
     if (!st.rows.length) return;

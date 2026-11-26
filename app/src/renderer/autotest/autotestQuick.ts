@@ -63,6 +63,30 @@ async function copyStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, an
   R.copy = { address: addr, bytes: hex, ok: true };
 }
 
+async function hexStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("bytes"), "provider has no bytes capability");
+  await c.goAddr(fl[0].entry);
+  await waitFor(() => c.topAddr() === fl[0].entry && mainRow(2), 10000, "listing at the first function");
+  const row = mainRow(2), addr = rowAddr(row);
+  row.click(); document.querySelector<HTMLElement>(".lbox")!.focus(); await sleep(100);
+  c.command({ type: "dock", panel: "hex" });
+  const region = await waitFor(() => byLabel<HTMLElement>("region", "Bytes"), 5000, "bytes pane");
+  const cur = () => [...region.querySelectorAll<HTMLElement>(".hx-bytes .hx-b.cur")];
+  const shown = row.querySelector(".b")!.textContent!.replace(/\s*…\+\d+$/, "");
+  await waitFor(() => cur().length > 0 && cur().every((e) => e.textContent !== "··"), 10000, "the cursor's bytes loaded in the pane");
+  need(cur().map((e) => e.textContent).join(" ") === shown, `pane bytes ${cur().map((e) => e.textContent).join(" ")} != row bytes ${shown}`);
+  const g = await c.program().listing.bytes({ address: addr, length: shown.split(" ").length });
+  need(g.bytes === shown, `get_bytes ${g.bytes} != ${shown}`);
+  need(region.querySelector(".hx-off")!.textContent!.length > 2 && region.querySelector(".hx-ascii")!.textContent!.length === 16, "offset and ASCII columns");
+  // clicking a byte moves the shared cursor (the pane highlights it, the listing follows)
+  const other = [...region.querySelectorAll<HTMLElement>(".hx-bytes .hx-b")].find((e) => !e.classList.contains("cur") && e.textContent !== "  " && e.textContent !== "··");
+  need(other, "a byte to click");
+  const idx = [...other!.parentElement!.children].indexOf(other!), rowEl = other!.closest(".hx-row")!;
+  other!.click();
+  await waitFor(() => cur().length === 1 || cur().some((e) => e === other || (e.closest(".hx-row") === rowEl && [...e.parentElement!.children].indexOf(e) === idx)), 10000, "clicked byte becomes the cursor");
+  R.hex = { address: addr, bytes: shown, ok: true };
+}
+
 async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
   need(c.backend.capabilities.has("calls"), "provider has no calls capability");
   let pick: { f: FunctionInfo; r: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["references"]["calls"]>["result"]> } | null = null;
@@ -188,6 +212,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   await callsStep(fl, c, R);
   await stackStep(fl, c, R);
   await undefinedStep(c, R);
+  await hexStep(fl, c, R);
   await bookmarkStep(fl, c, R, result);
   return true;
 }

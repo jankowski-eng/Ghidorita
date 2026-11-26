@@ -1,4 +1,4 @@
-import { press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
+import { byLabel, press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Screenshot flows (AUTOTEST=/bin/ls AUTOTEST_FLOW=shot-<name> npm start): arrange one UI state through the real DOM, check it, and end there;
 // the autotest's last act is app/out/screenshot.png.
@@ -19,6 +19,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-calls") return callsShot(fl!, c, result);
   if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
   if (name === "shot-warnings") return warningsShot(fl!, c, result);
+  if (name === "shot-hex") return hexShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
   if (name === "shot-actions") return actionsShot(fl!, c);
@@ -308,6 +309,18 @@ async function warningsShot(fl: { name: string; entry: string; size: number }[],
   const bar = await waitFor(() => document.querySelector<HTMLElement>(".dwarn"), 15000, "warnings bar");
   need(bar!.querySelectorAll(".dw").length >= 1, "a warning line");
   result.warnings = { function: pick!.name, shown: [...bar!.querySelectorAll(".dw")].map((e) => e.textContent) };
+  await sleep(300);
+  return true;
+}
+
+async function hexShot(fl: { entry: string }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  await c.goAddr(fl[0].entry);
+  const row = await waitFor(() => document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")[2], 10000, "listing rows");
+  row.click(); await sleep(100);
+  c.command({ type: "dock", panel: "hex" });
+  const region = await waitFor(() => byLabel<HTMLElement>("region", "Bytes"), 5000, "bytes pane");
+  await waitFor(() => region.querySelectorAll(".hx-b.cur").length > 0 && ![...region.querySelectorAll(".hx-b")].some((e) => e.textContent === "··"), 10000, "bytes loaded");
+  result.hex = { rows: region.querySelectorAll(".hx-row").length, cursorBytes: region.querySelectorAll(".hx-bytes .hx-b.cur").length };
   await sleep(300);
   return true;
 }

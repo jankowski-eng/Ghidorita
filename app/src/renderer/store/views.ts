@@ -21,6 +21,7 @@ export interface Views {
   scrollReq: { address: Address; n: number; refresh?: boolean };
   listingChange: { n: number; ranges: RangeList };
   xrefVersion: number;
+  cursorAt: Address | null;            // the shared cursor: the listing row or decompiler token last clicked or moved to (the hex view follows it)
   xrefTarget: XrefTarget | null;       // pinned "show references" target; null = follow the cursor
   useHl: { name: string; address: Address } | null; // a clicked decompiler-variable use: its token is highlighted
   dock: DockId | null;
@@ -35,7 +36,7 @@ export interface Views {
   importFor: string | null;
 }
 export const initialViews: Views = {
-  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, xrefTarget: null, useHl: null,
+  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, useHl: null,
   dock: null, graphOn: false, callGraphOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
   visible: { functions: true, listing: true, decompiler: true }, dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };

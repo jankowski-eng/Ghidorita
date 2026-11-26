@@ -14,11 +14,11 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean; equate: boolean; noReturn: boolean; split: boolean; field: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, onCursor, canEdit }: {
   values?: { line: number; text: string }[]; // debugger: text after a line (the variables' values at the stop)
   pcLine?: number | null; pcSeq?: number; bpLines?: number[]; onGutter?: (line1: number) => void; // debugger: the stop line (0-based) and which stop it is, the breakpoint lines, a click in the glyph margin
   tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
-  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void;
+  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void; onCursor: (line1: number, col1: number) => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
@@ -33,6 +33,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const canRef = useRef(canAt); canRef.current = canAt;
   const xrefsRef = useRef(onXrefs); xrefsRef.current = onXrefs;
   const copyRef = useRef(onCopy); copyRef.current = onCopy;
+  const cursorRef = useRef(onCursor); cursorRef.current = onCursor;
   const keysRef = useRef<{ set(c: CanEdit): void } | null>(null);
   const syncKeys = () => { const p = editorRef.current?.getPosition(); if (p) keysRef.current?.set(canRef.current(p.lineNumber, p.column)); };
   const onMount: OnMount = (editor, monaco) => {
@@ -56,7 +57,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     // Cmd+C stays Monaco's own copy of the selection; these two are menu-only (the Edit menu has their keys)
     editor.addAction({ id: "gd.copyAddress", label: "Copy Address", contextMenuGroupId: "gd", contextMenuOrder: 6, run: () => copyRef.current("address") });
     editor.addAction({ id: "gd.copyDecompiled", label: "Copy Decompiled Function", contextMenuGroupId: "gd", contextMenuOrder: 7, run: () => copyRef.current("decompiled") });
-    editor.onDidChangeCursorPosition(syncKeys);
+    editor.onDidChangeCursorPosition((e) => { syncKeys(); cursorRef.current(e.position.lineNumber, e.position.column); });
     decorations.current = editor.createDecorationsCollection();
     hlDecor.current = editor.createDecorationsCollection();
     covDecor.current = editor.createDecorationsCollection();

@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger", stack: "stackFrame", undefined: "undefinedRefs",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger", stack: "stackFrame", undefined: "undefinedRefs", hex: "bytes",
 } as const;
 
 /** What the centre pane hosts: the decompiler (tabs, editor, control-flow graph) needs `decompile`; the call graph is a view of its own and needs only `callGraph`. */

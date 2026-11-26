@@ -39,6 +39,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Show Calls (callers and callees)", cmd: { type: "dock", panel: "calls" } },
   { label: "Undefined Data References", cmd: { type: "dock", panel: "undefined" } },
   { label: "Stack Frame", cmd: { type: "dock", panel: "stack" } },
+  { label: "Bytes (Hex View)", cmd: { type: "dock", panel: "hex" } },
   { label: "Search Memory", cmd: { type: "dock", panel: "memsearch" } },
   { label: "Data Type Manager", cmd: { type: "datatypes" } },
   { label: "Coverage", cmd: { type: "dock", panel: "coverage" } },
