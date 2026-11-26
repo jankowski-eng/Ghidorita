@@ -1,4 +1,4 @@
-# Manual test checklist (about 30 minutes)
+# Manual test checklist (about 40 minutes)
 
 These are the things the automated tests cannot do: real keystrokes, the real window buttons, a real trackpad, looking at the screen.
 **Nothing here has been run by the author.** Tick a box only for what you actually saw. Write what went wrong under "Notes".
@@ -67,5 +67,20 @@ Do not touch the mouse from step 4.1 on (except where noted).
 | 6.2 | Start a second copy of the app against the same projects dir (`SIDECAR_PROJECTS_DIR=<same> npm start` in another terminal). | The second window's "Programs in this project" shows the red text `projects dir in use by another Ghidorita (<dir>)`. | ☐ | ☐ |
 | 6.3 | Open a program you opened before, rename its file, then choose it under File > Open Recent. | An error/notice "Could not open <path>". A failed open leaves the previously open program (and its unsaved edits) as it was; with none open you stay on the welcome pane. | ☐ | ☐ |
 | 6.4 | Open `/bin/ls`, click a listing row, then the decompiler, then press Cmd+Space (or View > Control-Flow Graph) for the graph, then click the function list. Press `Cmd+K`, type `>`. | The status bar's right side changes with the focused view (listing: `L rename · ⌘⇧F refs · ⌘Space graph …`; decompiler: `… ⌘L retype …`; graph: `⌘Space back · wheel zoom …`; function list: `⌘K commands · G go to`) and never wraps. The command bar shows `L` next to Rename and `⌘⇧G` next to Toggle Call Graph. Function list dots: off-white solid = named by you, amber ring = analysis, blue solid = imports, grey dashed ring = `FUN_…`. Graph edges: true solid, false dashed, loop-back dotted. Binary map: functions light blue, renamed ones off-white. | ☐ | ☐ |
+
+## 7. Debugger with QEMU (8 min)
+Needs `brew install qemu`. In a terminal: `qemu-system-arm -M lm3s6965evb -kernel sidecar/testdata/fw/fw.bin -S -gdb tcp::1234 -display none`. In the app, open `sidecar/testdata/fw/fw.bin` with the Raw Binary loader, language `ARM:LE:32:Cortex`, base address `0`; wait for the analysis; select `scale` (it is a function once the analysis found it; otherwise `F` on its first row, `0x54`).
+| # | Step | Expected | Pass | Fail |
+|---|---|---|---|---|
+| 7.1 | Debug > Attach to QEMU…, leave `localhost:1234` and offset `0x0`, press Attach. | The dialog closes; the status bar says `Debugger: stopped at 0x28`; the listing is at `0x28` (current row tinted yellow) and the Registers tab shows `pc 0x00000028` and `sp 0x20010000`. | ☐ | ☐ |
+| 7.2 | Attach again to a port nothing listens on (detach first). | The dialog stays open and says the connection was refused, in plain words. | ☐ | ☐ |
+| 7.3 | Click the listing row `0x56` (in `scale`), press **F9**, then **F5**. | A red dot at `0x56`; the status bar says `running`, then `stopped at 0x56`; the decompiler shows `scale` with the current line highlighted and grey `←` values after lines; rows after `0x56` are tinted. | ☐ | ☐ |
+| 7.4 | Press **F5** again. | The target stops at `0x56` once more; in the Locals tab `param_1` shows a new value and the old one under "was"; the Registers tab marks changed registers. | ☐ | ☐ |
+| 7.5 | Press **F7** several times, then **F8**, then **F10** on a line with a call. | F7 moves one decompiler line (calls are run over); F8 moves one instruction; F10 enters the callee (the listing and decompiler follow into it). | ☐ | ☐ |
+| 7.6 | Press **Shift+F10**. | The target returns to the caller (the listing is right after the call). | ☐ | ☐ |
+| 7.7 | Press **Shift+F7** twice, then **Shift+F8** twice. | The panes show the earlier stops (the status bar says `recorded stop n of m` and where the target is), then return to the live stop. A step or F5 while viewing the past acts on the live stop. | ☐ | ☐ |
+| 7.8 | Open View > Target Memory, type `sp` as the address and `uint[6]` as the type, press Read. | Six rows (`[0]`..`[5]`) with decimal values. With no type, a hexdump whose changed bytes light up after the next stop and a Read. | ☐ | ☐ |
+| 7.9 | Press **F5**, then **F6** (pause) a moment later; press **F9** on a row while the target runs. | F6 stops the target somewhere in the image; toggling F9 while running keeps it running and the dot appears. | ☐ | ☐ |
+| 7.10 | Quit QEMU (Ctrl-C in its terminal). | The status bar says `detached` with the reason (lost connection or exit); the highlights go away. Debug > Detach while attached releases the target and QEMU keeps running. | ☐ | ☐ |
 
 ## Notes

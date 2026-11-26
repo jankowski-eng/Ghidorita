@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import type { Address } from "../../../protocol";
+import { bpLines, firstAddress, lineForAddress, lineValues, statementRange } from "./debug";
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
@@ -14,6 +16,7 @@ import { canForce, type TabsApi } from "./useTabs";
 import type { Navigation } from "./features/navigation";
 import type { Editing } from "./features/editing";
 import type { Copying } from "./features/copy";
+import { shownDebug } from "./store/program";
 import { useProgram, useSession, useViews } from "./store/session";
 import type { Views } from "./store/views";
 
@@ -23,6 +26,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const { caps, views, refs } = s;
   const program = useProgram((p) => p.program)!, map = useProgram((p) => p.map), funcs = useProgram((p) => p.funcs);
   const initialRows = useProgram((p) => p.initialRows), reading = useProgram((p) => p.reading), browseError = useProgram((p) => p.browseError);
+  const dbg = useProgram(shownDebug), liveDbg = useProgram((p) => p.debug), canDebug = caps.has("debugger");
   const busy = useProgram((p) => !!p.opening || p.closing || p.unavailable);
   const { xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, dataVersion } = useViews((v) => v);
   const ops = program.api;
@@ -39,6 +43,12 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
     { label: "Copy Address", run: () => void copy.copy("address") },
     ...(caps.has("bytes") ? [{ label: "Copy Bytes (Hex)", run: () => void copy.copy("bytes") }, { label: "Copy Bytes (C Array)", run: () => void copy.copy("carray") }] : []),
   ];
+  const stoppedAt = dbg?.state === "stopped" ? dbg.address ?? null : null, bps = liveDbg?.breakpoints ?? [];
+  const toggleBp = (a: Address | null) => { if (a) void s.debugAction("breakpoint", a); };
+  const pcLine = ad && stoppedAt && active && dbg?.fn === active.entry ? lineForAddress(ad.tokens, stoppedAt) : null; // only in the function that holds the stop (the containing-function lookup, not entry + size: bodies can have gaps)
+  const stmt = ad && pcLine !== null && stoppedAt ? statementRange(ad.tokens, pcLine, stoppedAt) : null; // the instructions behind the current line
+  const vals = ad && dbg?.values && active && dbg.values.entry === active.entry && pcLine !== null ? lineValues(ad.tokens, ad.text, dbg.values.items, dbg.values.was) : []; // values only in the function that holds the stop
+  const bpl = useMemo(() => (ad && bps.length ? bpLines(ad.tokens, bps) : []), [ad?.tokens, bps.join(",")]); // eslint-disable-line
 
   if (!map) return (
     <div className="notice">
@@ -58,7 +68,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {caps.has("references") && <XrefPanel references={ops.references} variableReferences={caps.has("variableReferences")} address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { set({ useHl: use ? { name: use.name, address: a } : null }); void go(a, "xrefs"); }} onFollow={() => set({ xrefTarget: null, useHl: null })} />}
         </div>
       ),
-      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
+      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} stmt={stmt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
       decompiler: (centre.decompiler || centre.callGraph) && (
         <div className="dec">
           {centre.decompiler && <><TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
@@ -72,7 +82,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {centre.callGraph && graphEntry && <CallGraphView source={ops.references.callGraph} entry={graphEntry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
             <DecompilerWarnings warnings={ad?.status === "ready" ? ad.warnings ?? [] : []} />
-            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} /></div>
+            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} /></div>
           </div>}
         </div>
       ),

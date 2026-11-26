@@ -80,6 +80,9 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: acc("dock:calls"), click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: acc("dock:bookmarks"), click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
+        { id: "registers", label: "Registers", enabled: state.hasProgram && caps.has(dockCapability.registers), click: () => send({ type: "dock", panel: "registers" }) },
+        { id: "locals", label: "Locals", enabled: state.hasProgram && caps.has(dockCapability.locals), click: () => send({ type: "dock", panel: "locals" }) },
+        { id: "memory", label: "Target Memory", enabled: state.hasProgram && caps.has(dockCapability.memory), click: () => send({ type: "dock", panel: "memory" }) },
         { id: "memsearch", label: lab("Search Memory…", "dock:memsearch"), enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: acc("dock:memsearch"), click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: acc("datatypes"), click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },
@@ -92,6 +95,12 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "goto", label: lab("Go to Address…", "goto"), enabled: state.hasProgram, accelerator: acc("goto"), click: () => send({ type: "goto" }) },
         { id: "xrefs", label: "Show References To", accelerator: acc("xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },
+      { label: "Debug", submenu: ([
+        ["Attach to QEMU…", "attach"], ["Detach", "detach"], [null, ""],
+        ["Continue", "continue"], ["Pause", "pause"], ["Step Over Statement", "step"], ["Step Into", "stepinto"], ["Step Out", "stepout"], ["Step Instruction", "stepi"], [null, ""],
+        ["Back in History", "back"], ["Forward in History", "forward"], ["Toggle Breakpoint", "breakpoint"],
+      ] as const).map(([label, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
+        : { id: "debug-" + action, label, accelerator: acc("debug:" + action), enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
       { role: "windowMenu" },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));

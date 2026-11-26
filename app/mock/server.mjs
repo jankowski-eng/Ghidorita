@@ -211,7 +211,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -241,7 +241,17 @@ const idFor = (path, o) => { // not a real hash: the mock only needs distinct ke
 // like the sidecar: edits are written to the program's stored state on save, on close and when another open replaces it
 const stored = new Map(); // programId -> saved S
 const autosave = () => { if (opened && openId) stored.set(openId, structuredClone(S)); };
-const resetProgram = () => { anCancel(); autosave(); anReset(); S = freshS(); undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+const resetProgram = () => { dbgReset(); anCancel(); autosave(); anReset(); S = freshS(); undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+// ---- debugger (mock): a fake stopped target. It stops in main (index 1) at +0x10, one step is 4 bytes within the function, continue runs to the next breakpoint
+// (or until pause); the registers follow the stop count so that some change at every stop ----
+let dbg = { state: "detached", target: "", stop: 0, bps: [], pc: 0, error: "" }, dbgTimer = null, dbgNotify = null;
+const dbgReset = () => { clearTimeout(dbgTimer); dbg = { state: "detached", target: "", stop: 0, bps: [], pc: 0, error: "" }; };
+const dbgRegs = () => Object.entries({ r0: dbg.stop * 3, r1: 0x20000000, r2: dbg.pc & 0xff, r3: 0, r4: dbg.stop % 2, sp: 0x20010000 - dbg.stop * 4, lr: BASE + 0x2d, pc: dbg.pc, xpsr: 0x01000000 })
+  .map(([name, v]) => ({ name, value: "0x" + (v >>> 0).toString(16).padStart(8, "0") }));
+const dbgPublish = () => dbgNotify?.("debug_state", { state: dbg.state, target: dbg.target, stop: dbg.stop, offset: "0x0", breakpoints: dbg.bps.map(hex),
+  ...(dbg.state === "stopped" ? { address: hex(dbg.pc), registers: dbgRegs() } : {}), ...(dbg.error ? { error: dbg.error } : {}) });
+const dbgStopAt = (pc) => { dbg.state = "stopped"; dbg.pc = pc; dbg.stop++; dbgPublish(); };
+const dbgNeed = (state) => { if (dbg.state === "detached") throw { code: -32008, message: "Not attached to a target" }; if (dbg.state !== state) throw { code: -32005, message: state === "stopped" ? "The target is running" : "The target is not running" }; };
 // ---- background analysis (mock): functions appear over MOCK_ANALYSIS_MS, the list grows, edits are Busy meanwhile ----
 const ANALYSIS_MS = +(process.env.MOCK_ANALYSIS_MS ?? 4000), TICKS = 20, ANALYZERS = ["Decompiler Parameter ID", "Function Start Search", "Stack", "Subroutine References", "ASCII Strings", "Demangler"];
 let an = { state: "idle", analysis: "none", profile: "full", analyzer: "", done: 0, pct: -1 }; // the AnalysisState of protocol.ts
@@ -479,6 +489,49 @@ const handlers = {
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },
+  debug_attach({ host = "localhost", port = 1234 }, notify) {
+    if (dbg.state !== "detached") throw { code: -32005, message: `Already attached to ${dbg.target}` };
+    if (port === 1) throw { code: -32008, message: `Connection refused by ${host}:${port}. Is QEMU running with -gdb tcp::${port}?` };
+    dbgNotify = notify; dbg.target = `${host}:${port}`; dbg.error = ""; dbg.stop = 0; dbgStopAt(BASE + STEP + 0x10); return {};
+  },
+  debug_detach(_, notify) { dbgNotify = notify; clearTimeout(dbgTimer); if (dbg.state !== "detached") { dbg.state = "detached"; dbg.error = ""; dbgPublish(); } return {}; },
+  debug_status() { return { state: dbg.state, target: dbg.target, stop: dbg.stop, offset: "0x0", breakpoints: dbg.bps.map(hex), ...(dbg.state === "stopped" ? { address: hex(dbg.pc), registers: dbgRegs() } : {}) }; },
+  debug_breakpoint({ address }, notify) {
+    const a = parseAddr(address); if (a < 0) bad("address");
+    dbgNotify = notify; dbg.bps = dbg.bps.includes(a) ? dbg.bps.filter((x) => x !== a) : [...dbg.bps, a]; dbgPublish(); return {};
+  },
+  debug_step({ mode = "instruction", boundaries } = {}, notify) {
+    dbgNotify = notify; dbgNeed("stopped"); const f = dbg.pc - ((dbg.pc - BASE) % STEP);
+    if (mode === "statement") { // the next boundary after the pc, else the first one (the sidecar stops at a boundary, a breakpoint or outside the function)
+      const b = (boundaries ?? []).map(parseAddr).filter((a) => a >= 0).sort((x, y) => x - y); if (!b.length) bad("boundaries");
+      dbgStopAt(b.find((a) => a > dbg.pc) ?? b[0]); return {};
+    }
+    if (mode === "into" || mode === "out") { // into: the next boundary; out: the instruction after the function (a return lands in the caller)
+      if (mode === "out") { dbgStopAt(f + STEP); return {}; }
+      const b = (boundaries ?? []).map(parseAddr).filter((a) => a >= 0).sort((x, y) => x - y); if (!b.length) bad("boundaries");
+      dbgStopAt(b.find((a) => a > dbg.pc) ?? b[0]); return {};
+    }
+    dbgStopAt(f + ((dbg.pc - f + 4) % 0x30)); return {};
+  },
+  debug_memory({ address, length, dataType }) { // bytes follow the address and the stop count; a type gives int components (an array of n, else one)
+    dbgNeed("stopped"); const a = parseAddr(address); if (a < 0) bad("address");
+    const arr = /\[(\d+)\]$/.exec(dataType ?? ""), n = length ?? (dataType ? (arr ? +arr[1] * 4 : 4) : 64);
+    const bytes = Array.from({ length: n }, (_, k) => ((a + k + dbg.stop) & 0xff).toString(16).padStart(2, "0")).join("");
+    const items = dataType ? Array.from({ length: arr ? +arr[1] : 1 }, (_, i) => ({ offset: i * 4, length: 4, type: dataType.replace(/\[\d+\]$/, ""), name: arr ? `[${i}]` : "", value: String(a + i + dbg.stop) })) : undefined;
+    return { address: hex(a), bytes, ...(items ? { items } : {}) };
+  },
+  debug_values({ entry }) { // the variables of the mock decompile, their values follow the stop count
+    dbgNeed("stopped"); const i = idxOfEntry(parseAddr(entry)); if (i < 0) nf();
+    const mk = (name, kind, type, v, where) => ({ name, kind, type, size: 4, where, value: String(v), raw: "0x" + (v >>> 0).toString(16).padStart(8, "0") });
+    return { pc: hex(dbg.pc), items: [mk(v(i, "param_1"), "param", "int", dbg.stop * 3, "r0"), mk(v(i, "iVar1"), "local", "int", dbg.stop, "stack-8"), mk("g_state", "global", "int", dbg.stop >> 1, GLOBAL)] };
+  },
+  debug_continue(_, notify) {
+    dbgNotify = notify; dbgNeed("stopped"); const from = dbg.pc; dbg.state = "running"; dbgPublish();
+    const next = [...dbg.bps].sort((x, y) => x - y).find((b) => b > from) ?? dbg.bps.slice().sort((x, y) => x - y)[0];
+    if (next !== undefined) dbgTimer = setTimeout(() => dbgStopAt(next), 250);
+    return {};
+  },
+  debug_pause(_, notify) { dbgNotify = notify; dbgNeed("running"); clearTimeout(dbgTimer); dbgStopAt(BASE + STEP + 0x08); return {}; },
   call_graph({ entry, depth, to, maxDepth }) { // the CALLS pattern (three callees each, three callers each); same rules as the sidecar
     const i = idxOfEntry(parseAddr(entry)), t = to === undefined ? -1 : idxOfEntry(parseAddr(to));
     if (i < 0 || (to !== undefined && t < 0)) nf();
@@ -844,7 +897,7 @@ wss.on("connection", (ws) => {
       if (req.method === "provider_info") versioned = true;
       const id = activeSession?.sessionId;
       const notify = (method, params) => ws.send(JSON.stringify({ // the session is read at send time: an analysis started by open_binary keeps this closure after the swap
-        jsonrpc: "2.0", method, params: method === "program_changed" || method === "analysis_state" ? { ...params, sessionId: activeSession?.sessionId } : params,
+        jsonrpc: "2.0", method, params: method === "program_changed" || method === "analysis_state" || method === "debug_state" ? { ...params, sessionId: activeSession?.sessionId } : params,
       }));
       const h = Object.hasOwn(handlers, req.method) && handlers[req.method];
       if (!h) throw { code: -32601, message: "MethodNotFound" };

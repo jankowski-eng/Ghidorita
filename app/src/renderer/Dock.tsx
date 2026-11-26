@@ -10,10 +10,13 @@ import { ChangesPanel } from "./ChangesPanel";
 import { CoveragePanel } from "./CoveragePanel";
 import { CallsPanel } from "./CallsPanel";
 import { BookmarksPanel } from "./BookmarksPanel";
+import { RegistersPanel } from "./RegistersPanel";
+import { LocalsPanel } from "./LocalsPanel";
+import { MemoryPanel } from "./MemoryPanel";
 import type { Bookmarks, References } from "./backend";
 
-export type DockId = "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks";
-const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["memsearch", "Search Memory"], ["changes", "Changes"], ["calls", "Calls"], ["bookmarks", "Bookmarks"], ["coverage", "Coverage"]];
+export type DockId = "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" | "locals" | "memory";
+const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["memsearch", "Search Memory"], ["changes", "Changes"], ["calls", "Calls"], ["bookmarks", "Bookmarks"], ["coverage", "Coverage"], ["registers", "Registers"], ["locals", "Locals"], ["memory", "Target Memory"]];
 
 /** Bottom dock with the navigate-and-find windows. A panel keeps its filter/results while another tab is shown (hidden, not unmounted). */
 export function Dock({ searches, capabilities, active, onActivate, onClose, version, onGo, onError, cov, calls, bookmarks }: {
@@ -43,6 +46,9 @@ export function Dock({ searches, capabilities, active, onActivate, onClose, vers
         {seen.includes("calls") && <div hidden={active !== "calls"}><CallsPanel calls={calls.op} entry={calls.entry} name={calls.name} {...P} /></div>}
         {seen.includes("bookmarks") && <div hidden={active !== "bookmarks"}><BookmarksPanel bookmarks={bookmarks} {...P} /></div>}
         {seen.includes("coverage") && <div hidden={active !== "coverage"}><CoveragePanel {...cov} onGo={onGo} /></div>}
+        {seen.includes("registers") && <div hidden={active !== "registers"}><RegistersPanel /></div>}
+        {seen.includes("locals") && <div hidden={active !== "locals"}><LocalsPanel /></div>}
+        {seen.includes("memory") && <div hidden={active !== "memory"}><MemoryPanel /></div>}
         {seen.includes("memsearch") && <div hidden={active !== "memsearch"}><MemSearchPanel searchMemory={searches.searchMemory} {...P} /></div>}
       </div>
     </section>

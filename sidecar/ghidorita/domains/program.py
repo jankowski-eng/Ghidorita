@@ -15,7 +15,7 @@ from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 CAPABILITIES = [
     "importOptions", "decompile", "editing", "variableEditing", "undo", "save", "symbolSearch",
     "symbolTable", "strings", "memorySearch", "references", "variableReferences", "dataTypes",
-    "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis",
+    "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger",
 ]
 
 
@@ -88,6 +88,8 @@ class Program:
             except Exception as e:  # noqa
                 log("close save FAILED, keeping the program open:", repr(e))
                 raise RuntimeError("save failed before closing the current program: %s" % e) from e
+        if prog is not None and self.ctx.debug is not None:
+            self.ctx.debug.teardown()  # after the analysis stopped and the save succeeded (a failure keeps the program, and its debugger, as they were); a connection and its step worker belong to the program being released
         with self.ses.lock:
             self.ses.program = None
             self.ses.session_id = self.ses.name = None

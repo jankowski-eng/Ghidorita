@@ -58,11 +58,27 @@ BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompi
 
 Never modify the Ghidra source checkout; everything here lives in this repo.
 
+### Debugger
+
+The debugger talks to a GDB remote stub; the tests and the screenshot use QEMU and two tiny bare-metal programs. `brew install qemu` (no `qemu-system-*` on the PATH skips the QEMU tests with a message; `test_gdb.py` and `test_debug_high.py` need no QEMU). The programs are checked in with their build scripts, so nothing is needed to run the tests; to rebuild them: `brew install lld llvm`, then `PATH=/opt/homebrew/opt/llvm/bin:$PATH sidecar/testdata/fw/build.sh` (Cortex-M3, `qemu-system-arm -M lm3s6965evb`) or `sidecar/testdata/fw64/build.sh` (AArch64, `qemu-system-aarch64 -M virt`; see the comment in `fw64/fw.c` for the QEMU arguments). The functions' addresses in `test_debug.py` and in `debuggerShot` (`autotestShots.ts`) come from the `nm` lines the build script prints: update them when the sources change.
+
+```bash
+qemu-system-arm -M lm3s6965evb -kernel sidecar/testdata/fw/fw.bin -S -gdb tcp::1234 -display none &   # halted, waiting for a debugger
+cd app && npm start            # open sidecar/testdata/fw/fw.bin with the Raw Binary loader, language ARM:LE:32:Cortex, base address 0; Debug > Attach to QEMU…
+# the README screenshot, with the target on port 1235 and a fresh projects dir:
+AUTOTEST=$PWD/../sidecar/testdata/fw/fw.bin AUTOTEST_FLOW=shot-debugger:1235 SIDECAR_PROJECTS_DIR=$(mktemp -d) npm start   # then sips --resampleWidth 1600 out/screenshot.png
+MOCK=1 npm start               # the mock fakes a stopped target: Debug > Attach works without QEMU
+cd ../sidecar && .venv/bin/python -m pytest -q test_gdb.py test_debug_high.py test_debug.py   # the debugger's tests; test_provider_ui.py::test_debugger_flow_in_built_electron_with_the_mock is the UI flow
+```
+
+The design and how it relates to Ghidra's own debugger: [DEBUGGER.md](DEBUGGER.md).
+
 Analyzed programs persist in a Ghidra project under `$SIDECAR_PROJECTS_DIR` (the app uses its userData dir, `~/Library/Application Support/<app>/projects`), keyed by file sha256. Delete that dir to force re-analysis.
 
 ## Editing (Ghidra's default keys)
 All keys live in `app/src/keys.ts`; the menu, the command bar and the status-bar key hints read it.
 Listing (row cursor: click or arrows): `L` rename label/function, `;` comment (kind selectable, EOL prefilled), `F` create function, `T` define data, `[` array, `P` pointer, `Y` repeat last type, `C` clear code. Decompiler (cursor on a token; also the context menu): `L` rename variable/param/function/label, `Cmd+L` retype variable, Edit menu > Edit Function Signature, `;` comment (pre). `Cmd+Z` / `Cmd+Shift+Z` program undo/redo (a text input keeps its own undo), `Cmd+S` save. Edits autosave when another binary is opened and on quit; saving drops Ghidra's undo history.
+Debugger (Debug menu; function keys are real accelerators, see `app/src/keys.ts`): `F5` continue, `F6` pause, `F7` step over statement, `F10` step into, `Shift+F10` step out, `F8` step instruction, `F9` toggle breakpoint, `Shift+F7` / `Shift+F8` back / forward through the recorded stops.
 Autotest edit flow: `AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=<fresh dir> npm start`, then `AUTOTEST_PHASE=2` with the same dir to check the edit persisted.
 `L` on a row without a label creates one (`create_label`); `;` prefills the chosen kind from `get_comments` and follows the kind selector. View > Strings opens the strings panel (filter, paging, click goes to the address). Import dialog: analysis profile Full or Fast (default Fast above 20 MB).
 Opening shows the program as soon as the import is saved; the analysis runs in the background (status bar: analyzer, count, Cancel; an interrupted analysis shows "Resume", a fast program "Run full analysis"). Edits, undo and redo are Busy while it runs (protocol.md "Analysis"). `bench/bench_background.py` and `bench/bench_headless.py` measure it against `analyzeHeadless`.

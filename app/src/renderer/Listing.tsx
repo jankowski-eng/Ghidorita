@@ -51,10 +51,11 @@ const bytesText = (r: ListingRow) => r.bytes + (r.bytesMore ? ` …+${r.bytesMor
  * fraction -> byte position -> address and jumps. Edits: `change` carries the program_changed ranges, only buffered rows intersecting them are
  * refetched (rowcache.ts spliceRows); no ranges (type edits) refetches from the top row. Neither moves the view or cancels a navigation.
  */
-export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, onLatency, onError, onRowClick, onGo, onEdit, onXrefs, menu }: {
+export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, pc, stmt, breakpoints, onGutter, onLatency, onError, onRowClick, onGo, onEdit, onXrefs, menu }: {
   reader: Pick<ListingReads, "rows">; initialRows: ListingRow[]; map: AddrMap;
   rowRef: { current: (() => ListingRow | undefined) | null }; testMode: boolean; canEdit: (a: EditAction) => boolean; scrollReq: { address: Address; n: number }; change: { n: number; ranges: Range[] | null };
   topAddrRef: { current: Address }; cursorRef: { current: Address };
+  pc?: Address | null; stmt?: { start: Address; end: Address } | null; breakpoints?: Address[]; onGutter?: (address: Address) => void; // debugger: the stop address, the breakpoint addresses, a click in the left gutter
   onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onGo?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void; menu?: () => MenuItem[];
 }) {
   const ctx = useContextMenu();
@@ -285,6 +286,10 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
   };
   const cp = st.cur ? parseAddr(st.cur) : null;
   const isCur = (r: ListingRow) => { const p = cp && parseAddr(r.address); return !!cp && !!p && p.space === cp.space && cp.off >= p.off && cp.off < p.off + BigInt(Math.max(r.length, 1)); };
+  const pp = pc ? parseAddr(pc) : null, bps = new Set(breakpoints);
+  const isPc = (r: ListingRow) => { const p = pp && parseAddr(r.address); return !!pp && !!p && p.space === pp.space && pp.off >= p.off && pp.off < p.off + BigInt(Math.max(r.length, 1)); };
+  const sp = stmt && parseAddr(stmt.start), se = stmt && parseAddr(stmt.end);
+  const inStmt = (r: ListingRow) => { const p = sp && se && parseAddr(r.address); return !!sp && !!se && !!p && p.space === sp.space && p.off >= sp.off && p.off <= se.off; };
   const vis = lines().slice(st.top, st.top + st.view);
   const body = (l: Line) => {
     const r = l.row;
@@ -311,8 +316,8 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
     <div className="lbox" ref={box} tabIndex={0} aria-label="Listing" onKeyDown={onKey}>
       <div className="lpane">
         {vis.map((l, i) => (
-          <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "") + (l.kind === "main" ? coverage.mark(l.row.address, l.row.length) : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
-            onClick={() => { setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}
+          <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "") + (l.kind === "main" ? coverage.mark(l.row.address, l.row.length) + (isPc(l.row) ? " pc" : inStmt(l.row) ? " stmt" : "") + (bps.has(l.row.address) ? " bp" : "") : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
+            onClick={(e) => { if (l.kind === "main" && onGutter && e.clientX - e.currentTarget.getBoundingClientRect().left < 16) { onGutter(l.row.address); return; } setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}
             onContextMenu={menu ? (e) => { setCur(l.row.address); box.current?.focus(); render(); ctx.open(e, menu()); } : undefined}>
             {body(l)}
           </div>
