@@ -10,6 +10,8 @@ import { usePaged, VirtualTable, type Col } from "./VirtualTable";
  */
 export function UndefinedPanel({ listUndefinedRefs, version, onGo, onError }: { listUndefinedRefs: Searches["listUndefinedRefs"]; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const sc = useRef(scanner()).current;
+  // T, [ and P are the listing's keys: hand it the focus once it has had time to show the target
+  const go = (a: Address) => { onGo(a); setTimeout(() => document.querySelector<HTMLElement>(".lbox")?.focus(), 200); };
   const t = usePaged<UndefinedRef>((offset, limit) => sc.run(listUndefinedRefs({ offset, limit })), JSON.stringify([version]), onError, sc.cancelAll);
   const cols: Col<UndefinedRef>[] = [
     { key: "address", label: "Target", width: 130, render: (r) => r.address },
@@ -23,7 +25,7 @@ export function UndefinedPanel({ listUndefinedRefs, version, onGo, onError }: { 
         <span role="status" aria-label="Reference count">{t.ready ? `${t.total} references into undefined bytes` : "scanning…"}{t.busy && t.ready ? " …" : ""}</span>
         <span className="dim">click goes to the target; T, [ or P define it there</span>
       </div>
-      <VirtualTable label="Undefined data references" count={t.total} rowAt={t.rowAt} onVisible={t.onVisible} cols={cols} onActivate={(r) => onGo(r.address)} empty={t.ready ? "nothing references undefined bytes" : ""} />
+      <VirtualTable label="Undefined data references" count={t.total} rowAt={t.rowAt} onVisible={t.onVisible} cols={cols} onActivate={(r) => go(r.address)} empty={t.ready ? "nothing references undefined bytes" : ""} />
     </div>
   );
 }

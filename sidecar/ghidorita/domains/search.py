@@ -265,8 +265,14 @@ class Search:
             cu = lst.getCodeUnitContaining(a)
             if cu is None or isinstance(cu, Instruction) or cu.isDefined():
                 continue
-            refs = sorted((r for r in rm.getReferencesTo(a) if not r.getReferenceType().isFlow()), key=lambda r: r.getFromAddress().getOffset() & 0xFFFFFFFFFFFFFFFF)
+            refs = []
+            for r in rm.getReferencesTo(a):  # a target can have very many references: check for cancellation while collecting, too
+                scan.check()
+                if not r.getReferenceType().isFlow():
+                    refs.append(r)
+            refs.sort(key=lambda r: r.getFromAddress().getOffset() & 0xFFFFFFFFFFFFFFFF)
             for r in refs:
+                scan.check()
                 t = r.getReferenceType()
                 kind = "readwrite" if t.isRead() and t.isWrite() else "read" if t.isRead() else "write" if t.isWrite() else "pointer"
                 item = {"address": fa(a), "type": kind, "from": fa(r.getFromAddress())}
@@ -274,6 +280,7 @@ class Search:
                 if f is not None:
                     item["function"] = str(f.getName())
                 out.append(item)
+        scan.check()  # a cancelled scan never reports success, however few destinations it had
         return out
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}

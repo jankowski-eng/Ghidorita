@@ -114,6 +114,7 @@ export function useEditing(tabs: TabsApi) {
       const t = equateTarget(tok);
       if (!t) return session.flash("Put the cursor on a number to set an equate on it.");
       const names = await enumMembers(ops, t.value, t.size);
+      if (session.program() !== current) return; // closed or replaced while the suggestions loaded: the dialog would be bound to the old program
       views.dispatch({ type: "set", patch: { formDlg: { title: "Set equate", submit: "Set", fields: [{ key: "name", label: "Equate name or enum member", initial: names[0]?.label ?? "", choices: names.map((n) => n.label) }],
         go: async (v) => { const typed = v.name.trim(), pick = names.find((n) => n.label === typed); await ops.edits.setEquate({ ...t, name: pick?.name ?? typed, enum: pick?.enum }); } } } });
     } else if (a === "noReturn") {
