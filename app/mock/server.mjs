@@ -37,6 +37,7 @@ const funcAt = (n) => {
 };
 const inv = (k) => { for (let x = 0; x < NFUNC; x++) if ((x * k) % NFUNC === 1) return x; };
 const INV = { 7: inv(7), 13: inv(13), 31: inv(31) };
+const refKind = (t) => (/CALL/.test(t) ? "call" : /JUMP/.test(t) ? "jump" : t === "READ" ? "read" : t === "WRITE" ? "write" : t === "DATA" ? "data" : "other");
 const CALLS = [[7, 1, 3, "UNCONDITIONAL_CALL"], [13, 2, 5, "CONDITIONAL_CALL"], [31, 3, 7, "UNCONDITIONAL_CALL"]]; // [mul, add, row offset in caller, type]: callee = (caller*mul+add) % NFUNC
 const calleeOf = (i, [mul, add]) => (i * mul + add) % NFUNC;
 const fnRange = (i) => ({ start: entryOf(i), end: hex(BASE + (i + 1) * STEP - 1) });
@@ -95,6 +96,19 @@ function decompile(i) {
   return { text: lines.join("\n"), tokens, cached: false };
 }
 
+// Symbol table of the fake program: one function symbol per function, a label every 10th, data every 25th, 20 imports.
+const symbols = () => {
+  const out = [];
+  for (let i = 0; i < NFUNC; i++) {
+    const ns = i % 7 === 0 ? "util" : "";
+    out.push({ name: nameOf(i), address: entryOf(i), kind: "function", namespace: ns, source: S.names.has(i) ? "user" : "analysis" });
+    if (i % 10 === 0) out.push({ name: `loc_${i}`, address: hex(BASE + i * STEP + 8 * STRIDE), kind: "label", namespace: ns, source: "analysis" });
+    if (i % 25 === 0) out.push({ name: `data_${i}`, address: hex(BASE + i * STEP + 16 * STRIDE), kind: "data", namespace: "", source: "analysis" });
+  }
+  for (const [a, name] of S.created) out.push({ name, address: hex(a), kind: "function", namespace: "", source: "user" });
+  for (let k = 0; k < 20; k++) out.push({ name: `imp_${k}`, address: null, kind: "external", namespace: "libc.so", source: "imported" });
+  return out;
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false, opening = false, openCancelled = false, openId = null;
 // Project contents (fake). Seeded so the welcome pane has something to show.
@@ -213,9 +227,9 @@ const handlers = {
   search_symbols({ query, limit }) {
     if (typeof query !== "string") bad("query");
     const lim = parseInt0(limit, 100, "limit"), q = query.toLowerCase(), out = [];
-    for (const f of handlers.list_functions()) {
+    for (const r of symbols()) {
       if (out.length >= lim) break;
-      if (f.name.toLowerCase().includes(q)) out.push({ name: f.name, address: f.entry, kind: "function" });
+      if (r.address && r.name.toLowerCase().includes(q)) out.push({ name: r.name, address: r.address, kind: r.kind });
     }
     return out;
   },
@@ -224,21 +238,87 @@ const handlers = {
     if (i < 0) return out;
     for (const c of CALLS) { // callers: caller = (callee - add) * inverse(mul) mod NFUNC
       const j = (((i - c[1]) % NFUNC + NFUNC) * INV[c[0]]) % NFUNC;
-      if (calleeOf(j, c) === i) out.push({ from: hex(BASE + j * STEP + c[2] * STRIDE), type: c[3], function: nameOf(j) });
+      if (calleeOf(j, c) === i) out.push({ from: hex(BASE + j * STEP + c[2] * STRIDE), type: c[3], kind: refKind(c[3]), function: nameOf(j) });
     }
+    if (i % 5 === 0) out.push({ from: hex(BASE + ((i + 1) % NFUNC) * STEP + 11 * STRIDE), type: "DATA", kind: "data", function: nameOf((i + 1) % NFUNC) }); // a pointer to every 5th function
+    out.sort((x, y) => parseInt(x.from, 16) - parseInt(y.from, 16));
     return out.slice(0, lim);
+  },
+  xrefs_to_variable({ entry, name }) { // param_1/param_2 (as named now) have references; iVar1 is a decompiler temporary: none, like the real sidecar
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (typeof name !== "string") bad("name");
+    if (i < 0) nf();
+    const o = ["param_1", "param_2"].find((o) => v(i, o) === name);
+    if (!o) return [];
+    const k = o === "param_1" ? 0 : 1;
+    return [{ from: hex(BASE + i * STEP + (4 + k) * STRIDE), type: "READ", kind: "read", function: nameOf(i) }, { from: hex(BASE + i * STEP + (9 + k) * STRIDE), type: "WRITE", kind: "write", function: nameOf(i) }];
   },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);
     if (!(i >= 0 && i < NFUNC)) return [];
     const c = CALLS.find((c) => n === BASE + i * STEP + c[2] * STRIDE);
-    return c ? [{ to: entryOf(calleeOf(i, c)), type: c[3] }] : [];
+    if (c) return [{ to: entryOf(calleeOf(i, c)), type: c[3], kind: refKind(c[3]), target: "memory" }];
+    if (n === BASE + i * STEP + 4 * STRIDE) return [{ to: null, type: "READ", kind: "read", target: "stack", label: "Stack[-0x10]" }];
+    return [];
   },
-  list_strings({ offset, limit, minLength }) {
+  list_strings({ offset, limit, minLength, query }) {
     const off = parseInt0(offset, 0, "offset"), lim = parseInt0(limit, 100, "limit"), min = parseInt0(minLength, 4, "minLength");
+    if (query !== undefined && typeof query !== "string") bad("query");
+    const q = (query ?? "").trim().toLowerCase();
     const all = Array.from({ length: 300 }, (_, k) => { const value = `mock string #${k}${"x".repeat(k % 20)}`; return { address: hex(BASE + (k * 6000 + 11) * STRIDE), value, length: value.length + 1 }; })
-      .filter((s) => s.value.length >= min);
+      .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q));
     return { total: all.length, items: all.slice(off, off + lim) };
+  },
+  list_symbols({ offset, limit, query, kinds, sort, desc }) {
+    const off = parseInt0(offset, 0, "offset"), lim = Math.min(1000, parseInt0(limit, 100, "limit")), srt = sort ?? "address";
+    if (!["name", "address", "kind", "namespace", "source"].includes(srt)) bad("sort");
+    if (query !== undefined && typeof query !== "string") bad("query");
+    if (kinds !== undefined && (!Array.isArray(kinds) || kinds.some((k) => !["function", "label", "data", "external", "variable", "other"].includes(k)))) bad("kinds");
+    const q = (query ?? "").trim().toLowerCase();
+    let rows = symbols().filter((r) => (!kinds?.length || kinds.includes(r.kind)) && r.name.toLowerCase().includes(q));
+    const key = { name: (r) => r.name.toLowerCase(), address: (r) => (r.address ? parseInt(r.address, 16) : -1), kind: (r) => r.kind, namespace: (r) => r.namespace, source: (r) => r.source }[srt];
+    rows.sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : x.name < y.name ? -1 : 1));
+    if (desc) rows.reverse();
+    return { total: rows.length, items: rows.slice(off, off + lim) };
+  },
+  // Pages of matches; a search yields to the event loop every 100k rows so cancel_search (and other requests) are served meanwhile.
+  async search_memory({ pattern, kind, encoding, caseSensitive, start, limit }, _n, rid) {
+    if (typeof pattern !== "string" || !pattern.trim()) bad("pattern");
+    if (kind !== undefined && !["bytes", "text"].includes(kind)) bad("kind");
+    if (encoding !== undefined && !["ascii", "utf16le", "utf16be"].includes(encoding)) bad("encoding");
+    const lim = parseInt0(limit, 1000, "limit");
+    if (lim < 1) bad("limit");
+    const from = start === undefined ? 0 : parseAddr(start);
+    let cancelled = false;
+    cancels.set(rid, () => { cancelled = true; });
+    try {
+      const items = [];
+      let next = null;
+      if ((kind ?? "bytes") === "text") {
+        const t = caseSensitive === false ? pattern.toLowerCase() : pattern;
+        if ((encoding ?? "ascii") === "ascii") for (const s of handlers.list_strings({ limit: 1000, minLength: 1 }).items) {
+          if (parseInt(s.address, 16) >= from && (caseSensitive === false ? s.value.toLowerCase() : s.value).includes(t)) items.push({ address: s.address, length: t.length, bytes: [...Buffer.from(s.value.slice(0, 16))].map((b) => b.toString(16).padStart(2, "0")).join(" ") });
+        }
+        return { items: items.slice(0, lim), next: null };
+      }
+      const toks = pattern.trim().split(/\s+/);
+      if (toks.some((x) => !/^([0-9a-f]{2}|\?\??|\.\.?)$/i.test(x))) bad("invalid pattern: " + pattern);
+      const rowBytes = (r) => (h8(r)).match(/../g).map((x) => parseInt(x, 16));
+      const h8 = (r) => (((r * 2654435761) >>> 0) >>> 8).toString(16).padStart(8, "0");
+      const first = Math.max(0, Math.floor((from - BASE) / STRIDE));
+      for (let r = first; r < ROWS && !next; r++) {
+        if (r % 100000 === 0 && r > first) { await sleep(0); if (cancelled) throw { code: -32002, message: "Cancelled" }; }
+        const w = [...rowBytes(r), ...(toks.length > 4 && r + 1 < ROWS ? rowBytes(r + 1) : [])];
+        for (let o = 0; o < 4 && o + toks.length <= w.length; o++) {
+          if (BASE + r * STRIDE + o < from) continue;
+          if (toks.every((x, k) => /^[?.]/.test(x) || parseInt(x, 16) === w[o + k])) {
+            if (items.length >= lim) { next = hex(BASE + r * STRIDE + o); break; }
+            items.push({ address: hex(BASE + r * STRIDE + o), length: toks.length, bytes: w.slice(o, o + Math.min(16, toks.length)).map((b) => b.toString(16).padStart(2, "0")).join(" "), function: nameOf(Math.floor(r / ROWS_PER_FUNC)) });
+          }
+        }
+      }
+      return { items, next };
+    } finally { cancels.delete(rid); }
   },
   list_data_types({ query, limit }) {
     if (typeof query !== "string") bad("query");
@@ -322,7 +402,7 @@ wss.on("connection", (ws) => {
   ws.on("message", async (data) => {
     const req = JSON.parse(data.toString());
     if (req.method === "cancel_open") return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: handlers.cancel_open() }));
-    if (req.method === "cancel_decompile") { // bypasses the queue
+    if (req.method === "cancel_decompile" || req.method === "cancel_search") { // bypasses the queue
       const c = cancels.get(req.params?.id); if (c) c();
       return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { cancelled: !!c } }));
     }
