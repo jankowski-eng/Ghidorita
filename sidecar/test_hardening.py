@@ -45,13 +45,22 @@ def test_clear_code_inside_a_defined_unit(projects):
                 start = int(unit["address"], 16)
                 fns = await c.ok("list_functions")
                 code_before = [r for r in await c.ok("listing_rows", address=fns[0]["entry"], count=400) if r["mnemonic"].isupper()]
+                # the reported case: clearing 8 bytes at 0x100000028 of /bin/ls was said to remove the instructions of the function at
+                # 0x100000812. Not reproducible (before the fix the call was refused, after it only the header unit goes); pinned here.
+                f812 = next((f for f in fns if f["entry"] == "0x100000812"), None)
+                rows812 = await c.ok("listing_rows", address="0x100000812", count=60) if f812 else None
                 await c.ok("clear_code", address=hex(start + 8), length=8)
                 after = await c.ok("listing_rows", address=hex(start), count=1)
                 assert after[0]["mnemonic"] != unit["mnemonic"]  # the whole unit went
                 assert await c.ok("list_functions") == fns
                 assert [r for r in await c.ok("listing_rows", address=fns[0]["entry"], count=400) if r["mnemonic"].isupper()] == code_before
+                if f812:
+                    assert await c.ok("listing_rows", address="0x100000812", count=60) == rows812
+                    assert (await c.ok("get_function_at", address="0x100000812"))["entry"] == "0x100000812"
                 await c.ok("undo")
                 assert (await c.ok("listing_rows", address=hex(start), count=1))[0]["mnemonic"] == unit["mnemonic"]
+                if f812:
+                    assert await c.ok("listing_rows", address="0x100000812", count=60) == rows812
                 assert await c.ok("list_functions") == fns
                 await c.err("clear_code", INVALID, address=hex(start), length=0)
         finally:
