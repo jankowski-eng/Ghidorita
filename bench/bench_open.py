@@ -79,7 +79,7 @@ async def main():
         cancels = []
         for delay in a.cancel_at:
             n0 = len(notes)
-            oid = await send("open_binary", path=a.binary)
+            oid = await send("open_binary", path=a.binary, analysis="blocking")
             while True:  # wait for the first analysis event of THIS open
                 await asyncio.sleep(0.1)
                 t_an = next((t for t, m in notes[n0:] if m["method"] == "progress" and m["params"]["phase"] == "analysis"), None)
@@ -106,7 +106,7 @@ async def main():
         if not a.no_full:
             n0 = len(notes)
             t_open = time.monotonic()
-            oid = await send("open_binary", path=a.binary)
+            oid = await send("open_binary", path=a.binary, analysis="blocking")
             try:
                 t_end, r = await asyncio.wait_for(oid, a.timeout * 60)
                 res["open_result"] = r.get("result") or r.get("error")

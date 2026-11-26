@@ -63,7 +63,7 @@ async def session(first):
             return m["result"]
 
         t = time.monotonic()
-        o = await call("open_binary", path=binary)
+        o = await call("open_binary", analysis="blocking", path=binary)
         res["open_binary_s"] = round(time.monotonic() - t, 2)
         res["persisted"] = o["persisted"]
         res["rss_after_open_mb"] = rss_mb(p.pid)

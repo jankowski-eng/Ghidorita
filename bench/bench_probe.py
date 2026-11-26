@@ -26,7 +26,7 @@ async def main():
                 m = json.loads(await ws.recv())
                 if m.get("id") == n[0]:
                     return m
-        o = (await call("open_binary", path=binary))["result"]
+        o = (await call("open_binary", path=binary, analysis="blocking"))["result"]
         assert o["persisted"], "probe needs an already analyzed (persisted) program"
         fns = (await call("list_functions"))["result"]
         res = {"functions": len(fns), "strings_total": (await call("list_strings", limit=1))["result"]["total"]}

@@ -21,7 +21,8 @@ sidecar/
       server.py        Server: websocket conn(), one-client rule, auth guard, serve(), shutdown()
     domains/           one module per feature area; each is a class taking ctx, with @rpc methods
       project.py       Ghidra project, programs.json, list_programs, delete_program, list_languages, import_candidates, program_key
-      program.py       provider_info, active_session, open_binary (import/analyze/profile; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
+      program.py       provider_info, active_session, open_binary (import, save, publish; blocking mode analyzes first; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
+      analysis.py      the analysis of the open program on its own thread: start_analysis, cancel_analysis, analysis_status; execute()/Poller/new_monitor shared with blocking opens
       listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments
       decompile.py     decompile and variable_uses (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
@@ -47,6 +48,7 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 | `project` | R | `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
 | `loop` | the asyncio loop | `cancel_*`: quick, only flip flags |
 | `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | validate, load or import the replacement, then call back onto R with `lanes.on_r()` to save and swap the current program |
+| A | one `analysis` thread per run (`domains/analysis.py`), at most one at a time | Ghidra's AutoAnalysisManager inside the program's one "Analysis" transaction, then clearUndo + save. Never waits for R, so `close()` on R can wait for it. `analysis_status`/`cancel_analysis` are `loop` lane, `start_analysis` is `R` |
 
 One more thread: the recovery snapshot loop (`program.py`, every `SIDECAR_SNAPSHOT_SECS`) only sleeps; the snapshot itself runs on R via `lanes.on_r()` and preserves undo history. The three worker queues are bounded at 128 items each. A connection admits at most 64 outstanding requests and a 2 MiB message; disconnect cancels queued requests and cancellable work.
 
@@ -58,9 +60,13 @@ never run concurrently; `session.save_lock` is held during every save and shutdo
 Duplicate method names raise at startup (`Registry.register`). `test_methods.py` pins the method table and every lane to a golden dict and
 checks that every method in `protocol.ts` is registered.
 
+## Analysis (background)
+
+While thread A runs, `ses.analyzing` is true: `Session.edit()`, `undo` and `redo` fail `Busy` ("analysis running") because a second transaction would join the analysis one (protocol.md "Analysis"). Reads (R, S, D lanes) are unaffected. `Events.bulk` is on: the listener does not parse records (it would be millions of JPype calls), it announces "everything changed" about once a second. `close()`, `save` and shutdown call `analysis.stop()` first (cancel, wait for the thread, which saves what it found). The monitor is Ghidra's `BasicTaskMonitor` polled by `analysis.Poller`; a Python callback monitor (`PyGhidraTaskMonitor`) doubled the first-open time (SPIKE_REPORT, Round 7).
+
 ## The context object
 
-`ctx` (`core/context.py`) is the only thing a domain gets: `ctx.session`, `ctx.lanes`, `ctx.events`, `ctx.project`, `ctx.notify()`,
+`ctx` (`core/context.py`) is the only thing a domain gets: `ctx.session`, `ctx.lanes`, `ctx.events`, `ctx.project`, `ctx.analysis`, `ctx.notify()`,
 `ctx.progress()`, `ctx.loop`, `ctx.shutdown_hooks`. A domain keeps `self.ctx` and `self.ses = ctx.session`. Domains never touch each
 other's attributes.
 
@@ -81,7 +87,8 @@ Everything a domain shares goes through `ctx`. The only direct calls between dom
 1. `highvars` -> `decompile.decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False)`: a context manager that decompiles on the calling scan worker
    and yields the `HighFunction`, short-lived `DecompInterface`, and task monitor. Structure inference reuses the interface and timed monitor.
    R commits only if the write revision and program still match.
-2. `program` -> `project`: `ctx.project` (Ghidra project, `lock`, `meta_touch`) and the persistence-key helpers `project.program_key`,
+2. `program` -> `analysis`: `analysis.execute/Poller/new_monitor` (the blocking open uses the same engine), `ctx.analysis.start/stop/state/reset`.
+3. `program` -> `project`: `ctx.project` (Ghidra project, `lock`, `meta_touch`) and the persistence-key helpers `project.program_key`,
    `analysis_disabled`, `FAST_PROFILE`, `RAW`, which belong to the key format in protocol.md "Persistence".
 
 Shared helpers that are not edges live in `core`: `session.edit()` (one transaction, flushes events), `session.cmd()`, `session.function()`,

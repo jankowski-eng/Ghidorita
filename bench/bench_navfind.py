@@ -68,7 +68,7 @@ async def main():
             r = await call(method, **params)
             return round((time.monotonic() - t) * 1000, 1), r
 
-        o = await call("open_binary", path=binary)
+        o = await call("open_binary", path=binary, analysis="blocking")
         assert o["persisted"], "needs the persisted program (a first open takes 17-40 min)"
         res["rss_after_open_mb"] = rss_mb(p.pid)
         info = await call("listing_info")
