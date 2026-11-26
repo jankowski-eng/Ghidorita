@@ -38,6 +38,29 @@ export function sharedBytes(a: Coverage, b: Coverage): bigint {
   return n;
 }
 
+type Spans = [bigint, bigint][];
+/** Sorted, merged inclusive spans in both `x` and `y` (intersect) or in `x` but not `y` (subtract). */
+export function intersectSpans(x: Spans, y: Spans): Spans {
+  const out: Spans = [];
+  for (let i = 0, j = 0; i < x.length && j < y.length;) {
+    const lo = x[i][0] > y[j][0] ? x[i][0] : y[j][0], hi = x[i][1] < y[j][1] ? x[i][1] : y[j][1];
+    if (hi >= lo) out.push([lo, hi]);
+    if (x[i][1] < y[j][1]) i++; else j++;
+  }
+  return out;
+}
+export function subtractSpans(x: Spans, y: Spans): Spans {
+  const out: Spans = [];
+  let j = 0;
+  for (const [a, b] of x) {
+    let lo = a;
+    while (j < y.length && y[j][1] < lo) j++;
+    for (let k = j; k < y.length && y[k][0] <= b; k++) { if (y[k][0] > lo) out.push([lo, y[k][0] - 1n]); lo = y[k][1] + 1n; if (lo > b) break; }
+    if (lo <= b) out.push([lo, b]);
+  }
+  return out;
+}
+
 export interface Run { id: number; name: string; cov: Coverage }
 
 /**

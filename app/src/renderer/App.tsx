@@ -16,8 +16,6 @@ import { allowsCommand, allowsEdit } from "../capabilities";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { coverage, Coverage } from "./coverage";
-import { coverageSpans } from "./binmap";
-import type { Layer } from "./BinaryMap";
 import { XrefPanel } from "./XrefPanel";
 import { Dock, type DockId } from "./Dock";
 import { isFailure, isObsolete, type ApplicationBackend, type OpenJob, type OpenProgress, type ProgramOperations } from "./backend";
@@ -541,12 +539,6 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
   const here = nav.current?.address ?? null;
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
-  const covLayers = useMemo<Layer[]>(() => {
-    const out: Layer[] = [], a = coverage.get(coverage.a), b = coverage.get(coverage.b);
-    if (map && a) out.push({ name: `Coverage A (${a.name})`, color: [78, 195, 107], spans: coverageSpans(map, a.cov) });
-    if (map && b) out.push({ name: `Coverage B (${b.name})`, color: [90, 160, 224], spans: coverageSpans(map, b.cov) });
-    return out;
-  }, [map, covVersion]); // eslint-disable-line
   const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
 
   return (
@@ -564,7 +556,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
           functions: (
             <div className="funcs-col">
               <div className="funcs-row">
-                <BinaryMap map={map} funcs={funcs} here={here} layers={covLayers} onGo={(a) => go(a, "goto")} />
+                <BinaryMap map={map} funcs={funcs} here={here} covVersion={covVersion} onGo={(a) => go(a, "goto")} />
                 <FunctionList searchSymbols={symbolSearch} funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={caps.has("decompile") ? (e) => { void go(e, "functions"); void tabs.show(e, true); } : undefined} />
               </div>
               {caps.has("references") && <XrefPanel references={ops!.references} variableReferences={caps.has("variableReferences")} address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />}

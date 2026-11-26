@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address, FunctionInfo } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
-import { describeAt, fill, funcSpans, type Span } from "./binmap";
-
-/** A layer is a set of byte spans drawn in one colour over the map (functions today; coverage and reviewed ranges can be added the same way). */
-export interface Layer { name: string; color: [number, number, number]; spans: Span[] }
-
-const NONE: Layer[] = [];
+import { describeAt, fill, mapLayers, type Layer } from "./binmap";
+import { coverage } from "./coverage";
 
 /** Vertical map of the whole program next to the function list: top = first loaded byte, bottom = last. Click or drag to go there; a line marks the current address. */
-export function BinaryMap({ map, funcs, here, layers = NONE, onGo }: { map: AddrMap; funcs: FunctionInfo[]; here: Address | null; layers?: Layer[]; onGo: (a: Address) => void }) {
+export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap; funcs: FunctionInfo[]; here: Address | null; covVersion: number; onGo: (a: Address) => void }) {
+  const [on, setOn] = useState({ renamed: true, coverage: true }); // which optional layers are drawn
   const box = useRef<HTMLDivElement>(null), cv = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
   const drag = useRef(false);
   const [tip, setTip] = useState<{ y: number; text: string } | null>(null);
   useEffect(() => { const el = box.current!; const ro = new ResizeObserver(() => setH(Math.floor(el.clientHeight))); ro.observe(el); setH(Math.floor(el.clientHeight)); return () => ro.disconnect(); }, []);
-  const all = useMemo(() => [{ name: "Functions", color: [90, 140, 220] as [number, number, number], spans: funcSpans(map, funcs) }, ...layers], [map, funcs, layers]);
+  const all = useMemo<Layer[]>(() => {
+    const a = coverage.get(coverage.a), b = coverage.get(coverage.b);
+    return mapLayers(map, funcs, on, { a: a && { name: a.name, spans: a.cov.spans() }, b: b && { name: b.name, spans: b.cov.spans() } });
+  }, [map, funcs, on, covVersion]); // eslint-disable-line
   const fills = useMemo(() => all.map((l) => fill(map.total, l.spans, Math.max(1, h))), [all, map, h]);
   const pos = here ? map.posOf(here) : -1;
   useEffect(() => {
@@ -31,7 +31,11 @@ export function BinaryMap({ map, funcs, here, layers = NONE, onGo }: { map: Addr
   }, [fills, all, h, pos, map]);
   const at = (e: React.PointerEvent) => Math.max(0, Math.min(1, (e.clientY - box.current!.getBoundingClientRect().top) / box.current!.clientHeight)) * map.total;
   const go = (e: React.PointerEvent) => onGo(map.addr(at(e)));
+  const toggle = (k: "renamed" | "coverage", label: string, off?: boolean) => (
+    <button aria-label={`${label} layer`} title={`${label} layer`} aria-pressed={on[k] && !off} disabled={off} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>{label[0]}</button>
+  );
   return (
+    <div className="bmapcol">
     <div className="bmap" ref={box} role="slider" aria-label="Binary map" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pos >= 0 && map.total ? Math.round((pos / map.total) * 100) : 0} aria-valuetext={here ?? "no location"} tabIndex={0}
       aria-description={`Layers: ${all.map((l) => l.name).join(", ")}. Click or drag to go to an address.`}
       onPointerDown={(e) => { drag.current = true; e.currentTarget.setPointerCapture(e.pointerId); go(e); }}
@@ -39,6 +43,8 @@ export function BinaryMap({ map, funcs, here, layers = NONE, onGo }: { map: Addr
       onKeyDown={(e) => { const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0; if (d && pos >= 0) { e.preventDefault(); onGo(map.addr(pos + d * Math.max(1, map.total / 100))); } }}>
       <canvas ref={cv} />
       {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
+    </div>
+    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed")}{toggle("coverage", "Coverage", !coverage.shown)}</div>
     </div>
   );
 }
