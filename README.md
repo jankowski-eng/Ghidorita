@@ -46,6 +46,7 @@ cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: tes
 cd ../app && npm test                                          # address map unit test
 BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompile measurements in the renderer
 ../sidecar/.venv/bin/python ../bench/bench_sidecar.py <binary> /tmp/bench-projects out.json   # sidecar-level measurements
+../sidecar/.venv/bin/python ../bench/bench_navfind.py <binary> <projects dir with the analyzed program> out.json   # symbol table / strings / memory search (row 6)
 ```
 
 Never modify the Ghidra source checkout; everything here lives in this repo.
@@ -90,3 +91,6 @@ For Developer ID + notarization later (not attempted):
 - Ghidra: keep `os/linux_x86_64` or `os/win_x86_64` natives instead of `mac_arm_64` (and decompile binaries become `.exe` on Windows); the `GPL/` demangler natives likewise.
 - Packaging targets (AppImage/deb or NSIS/MSI), no dmg, Windows executable bits not needed; signing via signtool/GPG rather than codesign.
 - `userData` path, default `SIDECAR_PROJECTS_DIR` fallback in `sidecar/main.py` (`~/Library/Application Support/…`) and the macOS menu/dock code.
+
+## Navigate and find
+View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Memory… (Cmd+Shift+F) open a dock under the panes; each window is server-paged (a click or Enter navigates the listing and the decompiler). Search Memory takes hex bytes with `??` wildcards or ASCII / UTF-16 text and streams pages until done; Cancel keeps what was found, Continue resumes. `X` on a listing row or a decompiler token (also Go > Show References To, and the decompiler context menu) pins the References panel to it ("follow cursor" unpins); its "from…" button lists what the current instruction references.
