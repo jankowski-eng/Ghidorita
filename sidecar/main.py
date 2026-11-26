@@ -4,6 +4,7 @@ thread model: ARCHITECTURE.md). This file only checks the environment, starts th
 import asyncio, os, signal, sys, threading, time
 
 from ghidrette.app import App
+from ghidrette.core import jscans
 from ghidrette.core.errors import log
 
 
@@ -37,6 +38,7 @@ def main():
     if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
     launcher.add_vmargs("-Xmx%s" % max_heap())
+    jscans.build()  # compile the Java helper before the JVM exists
     launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
     launcher.start()
     from java.lang import Runtime

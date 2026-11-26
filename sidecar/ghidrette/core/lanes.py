@@ -26,6 +26,25 @@ class Scan:
     def __init__(self, epoch):
         self.cancelled, self.mon, self.epoch = False, None, epoch
 
+    def monitor(self):
+        """A Ghidra TaskMonitor that cancel() cancels, for loops that run inside Java (core/jscans.py)."""
+        from ghidra.pyghidra import PyGhidraTaskMonitor
+        mon = PyGhidraTaskMonitor(None, None)
+        self.mon = mon
+        if self.cancelled:
+            mon.cancel()
+        return mon
+
+    def java(self, fn, *args):
+        """Runs a GhidretteScans call (GIL released while it runs); a cancelled monitor surfaces as the Cancelled error."""
+        import jpype
+        try:
+            return fn(*args, self.monitor())
+        except jpype.JException as e:
+            if str(e.getClass().getSimpleName()) == "CancelledException":
+                raise RpcError(CANCELLED, "cancelled")
+            raise
+
     def cancel(self):
         self.cancelled = True
         if self.mon is not None:

@@ -1,13 +1,13 @@
 """Slow reads on the scan workers (thread S): symbol search and table, strings, memory search; cancel_search on the loop.
 They never run on R, so a long scan cannot delay listing fetches. Results are cached as snapshots until the program changes."""
-import functools, threading
+import functools, json, threading
 from collections import OrderedDict
 
-from ..core.args import MASK64, lim, text_arg
+from ..core import jscans
+from ..core.args import lim, text_arg
 from ..core.errors import CANCELLED, INVALID, RpcError
 from ..core.rpc import rpc
 
-STRING_VALUE_CAP = 1000
 
 
 class StaleRead(Exception):
@@ -130,20 +130,6 @@ class Search:
         return {"name": str(s.getName()), "address": self.ses.fmt(a, prog) if a.isMemoryAddress() else None, "kind": self._sym_kind(prog, s),
                 "namespace": "" if ns.isGlobal() else str(ns.getName(True)), "source": self.SOURCES.get(str(s.getSource()), "other")}
 
-    def _sym_key(self, prog, s, sort):
-        name = str(s.getName()).lower()
-        if sort == "name":
-            return name
-        if sort == "address":
-            a = s.getAddress()
-            return (a.getOffset() & MASK64) if a.isMemoryAddress() else -1
-        if sort == "kind":
-            return (self._sym_kind(prog, s), name)
-        if sort == "namespace":
-            ns = s.getParentNamespace()
-            return ("" if ns.isGlobal() else str(ns.getName(True)).lower(), name)
-        return (self.SOURCES.get(str(s.getSource()), "other"), name)
-
     @rpc(lane="scan")
     @retry_stale
     def list_symbols(self, offset=0, limit=100, query="", kinds=None, sort="address", desc=False, scan=None):
@@ -180,63 +166,31 @@ class Search:
                             scan.check()
                     syms, total = sn.syms[offset:offset + limit], sn.total
             else:
-                def build():
-                    it = st.getSymbolIterator("*" + q + "*", False) if q else st.getSymbolIterator(True)
-                    out, n = [], 0
-                    for s in it:
-                        n += 1
-                        if n & 255 == 0:
-                            scan.check()
-                        if kinds and self._sym_kind(prog, s) not in kinds:
-                            continue
-                        out.append(s)
-                    if sort == "address" and not q:  # the iterator already is in address order
-                        return out
-                    keys = []
-                    for i, s in enumerate(out):
-                        if i & 255 == 0:
-                            scan.check()
-                        keys.append(self._sym_key(prog, s, sort))
-                    return [out[i] for i in sorted(range(len(out)), key=keys.__getitem__)]
+                scans = jscans.scans()
+                mask = sum(1 << self.SYM_KINDS.index(k) for k in kinds)  # K_FUNCTION=1, K_LABEL=2, ... in SYM_KINDS order
+                build = lambda: scan.java(scans.symbols, prog, q, mask, sort)  # filter + sort inside Java, GIL released
                 full = self.snap(("sym", q.lower(), kinds, sort), build)
                 total = len(full)
-                syms = (full[::-1] if desc else full)[offset:offset + limit]
+                syms = scans.slice(full, offset, limit, desc)
             try:
                 items = [self._sym_item(prog, s) for s in syms]
             except Exception as e:  # noqa  a symbol of a stale snapshot was deleted by an edit meanwhile
                 raise StaleRead(str(e))
             return {"total": total, "items": items}
 
-    def _scan_strings(self, prog, minLength, scan):
-        from ghidra.program.util import DefinedStringIterator
-        from ghidra.program.model.data import StringDataInstance
-        items, fa = [], self.ses.fmtr(prog)
-        for d in DefinedStringIterator.forProgram(prog):
-            if len(items) & 255 == 0:
-                scan.check()
-            v = d.getValue()  # the String for string data types; the StringDataInstance is the fallback (e.g. a pointer-typed string)
-            if not isinstance(v, str):
-                v = StringDataInstance.getStringDataInstance(d).getStringValue()
-            if v is not None:
-                v = str(v)
-                if len(v) >= minLength:
-                    items.append({"address": fa(d.getMinAddress()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
-        return items
-
     @rpc(lane="scan")
     def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
         """Defined strings in address order. The full scan is cached per `minLength` until the next program change (first call on a
         big binary takes seconds, on a scan worker); `query` is a case-insensitive substring filter over the cached values; `total` is the
         count after both filters. Values are cut at 1000 UTF-16 units, `length` stays the byte length of the defined string.
-        shortcut: one full scan per minLength, upgrade to an index or lazy paging on huge binaries."""
+        shortcut: one full scan per minLength (in Java, GIL released), upgrade to an index or lazy paging on huge binaries."""
         with self.ctx.lanes.scanning(scan) as prog:
             offset, limit, minLength = lim(offset, 0), lim(limit, 500, 5000), lim(minLength, 4)
             text_arg(query, "query")
-            items = self.snap(("str", minLength), lambda: self._scan_strings(prog, minLength, scan))
-            q = query.strip().lower()
-            if q:
-                items = [i for i in items if q in i["value"].lower()]  # not cached: one snapshot per typed prefix would evict the symbol snapshots from the LRU
-            return {"total": len(items), "items": items[offset:offset + limit]}
+            scans = jscans.scans()
+            strings = self.snap(("str", minLength), lambda: scan.java(scans.strings, prog, minLength))  # Java object: the 164k values stay in the JVM
+            # the query filter runs in Java too (it keeps the hits of the last query, so paging a query is cheap); not part of the snapshot key
+            return json.loads(str(strings.page(offset, limit, query.strip().lower())))
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
 
