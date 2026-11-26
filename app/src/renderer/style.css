@@ -14,7 +14,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .edwrap { flex: 1; min-height: 0; }
 .dwarn { flex: none; max-height: 40%; overflow-y: auto; background: #3a3320; color: #e8d9a0; font-size: 12px; padding: 2px 8px; border-bottom: 1px solid #5a4d25; }
 .dwarn .dw { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dwarn .dim { opacity: 0.75; }
+.dwarn .dim { opacity: 0.75; color: inherit; } /* the global .dim grey is unreadable on this background */
 .dwarn summary { cursor: pointer; opacity: 0.85; }
 .listing { flex: 1; min-height: 0; }
 .scroll { height: 100%; overflow: auto; font: 12px ui-monospace, Menlo, monospace; }

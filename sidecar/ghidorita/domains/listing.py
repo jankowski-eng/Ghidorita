@@ -145,9 +145,9 @@ class Listing:
 
     @staticmethod
     def _dt_ref(dt):
-        """The data type as define_data takes it: its name, or its category path for structures, unions, enums and typedefs (two `S` in different
+        """The data type as define_data takes it: its name, or its category path for structures, unions, enums, typedefs and function definitions (two `S` in different
         categories are different types; the name alone would be ambiguous)."""
-        from ghidra.program.model.data import Array, Composite, Enum, Pointer, TypeDef
+        from ghidra.program.model.data import Array, Composite, Enum, FunctionDefinition, Pointer, TypeDef
         if isinstance(dt, Array):  # the wrappers keep their element's identity: "/A/S[2][3]", outermost dimension first
             dims = ""
             while isinstance(dt, Array):
@@ -157,7 +157,7 @@ class Listing:
         if isinstance(dt, Pointer) and dt.getDataType() is not None:
             width = "" if dt.hasLanguageDependantLength() else str(int(dt.getLength()) * 8)  # an explicit width ("int *32") stays
             return Listing._dt_ref(dt.getDataType()) + " *" + width
-        return str(dt.getPathName()) if isinstance(dt, (Composite, Enum, TypeDef)) else str(dt.getName())
+        return str(dt.getPathName()) if isinstance(dt, (Composite, Enum, TypeDef, FunctionDefinition)) else str(dt.getName())
 
     def _row_parts(self, cu):
         # shortcut: one level (nested structs/arrays show as one component with their display value), at most ROW_PARTS_MAX; upgrade with a get_components RPC by path

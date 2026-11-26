@@ -146,7 +146,7 @@ class Decompile:
         blocks.sort(key=lambda b: akey(fa(b.getMinAddress())))
         starts = {fa(b.getMinAddress()): i for i, b in enumerate(blocks)}
         c_lines = [[] for _ in blocks]
-        parsed = self._tokens(prog, res)
+        parsed = self._tokens(prog, res, keep_warnings=True)  # the graph has no warnings bar: the comments stay in the blocks
         first = {}
         for t in parsed["tokens"]:
             if "address" in t:
@@ -257,7 +257,7 @@ class Decompile:
             out.setdefault(str(sym.getName()), rows)
         return out
 
-    def _tokens(self, prog, res):
+    def _tokens(self, prog, res, keep_warnings=False):
         from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken, ClangVariableToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
@@ -313,7 +313,7 @@ class Decompile:
                             tok["targetFunction"] = fa(f.getEntryPoint())
                 line_tokens.append(tok)
             found = WARNING_LINE.fullmatch(text.strip()) and WARNING_ONE.findall(text)
-            if found:  # a line of nothing but WARNING comments moves to `warnings` (shown once, above the code)
+            if found and not keep_warnings:  # a line of nothing but WARNING comments moves to `warnings` (shown once, above the code)
                 warnings += [w for w in found if w not in warnings]
                 continue
             tokens += line_tokens
