@@ -98,6 +98,8 @@ Full run, slowest analyzers (Ghidra task times): Call Convention ID 574 s, Decom
 
 Reading this: the fast profile keeps the function set and nearly all references; the visible loss is recovered switch tables (5 of 9 in the sample) and some call references. Calling-convention and stack-variable quality was not compared beyond the `undefined` count. JVM peak was higher in the fast run (4.1 vs 3.5 GB), not explained; the Editing session's autotests ran for part of it, so treat time and memory as approximate.
 
+**Decompile on the fast-profile program** (`results_llvm-exegesis_fast_sidecar.json`, same workload): 50 random median 16 ms (p95 235 ms, max 9.8 s, 0 failed); 50 largest median 11.2 s (full: 19 s), **9 of 50 failed** at the 30 s timeout (full: 15); listing median 4.8 ms. Large functions stay slow either way (largest 100 KB): the 30 s timeout, not the profile, is what fails them. Not isolated: whether the faster result is the missing calling-convention/stack info or noise (single run). Timing caveat: another session ran app autotests on this Mac during the fast-profile first open, so its time and JVM peak are not clean-room numbers (the task asked for nothing in parallel).
+
 **Cancel works at real size:** cancelling at 10 s, 60 s and 180 s into analysis was acknowledged in 1-21 ms and `open_binary` failed with `Cancelled` 33-365 ms later.
 
 **Code changes** (`sidecar/main.py`):
