@@ -91,3 +91,28 @@ button.primary { background: #0e639c; color: #fff; border: 1px solid #0e639c; }
 .dlg .ac { max-height: 160px; overflow: auto; border: 1px solid #555; }
 .dlg .ac div { padding: 1px 6px; cursor: pointer; font: 12px ui-monospace, Menlo, monospace; } .dlg .ac div.cur { background: #094771; }
 .dirty { color: #ffd866; }
+.dock { height: 260px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #555; background: #1e1e1e; }
+.dock .tabstrip .tab button { padding: 3px 10px; }
+.dock .x { background: none; border: 0; color: #aaa; cursor: pointer; font-size: 16px; padding: 0 10px; }
+.dock-body { flex: 1; min-height: 0; display: flex; }
+.dock-body > div { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.dock-body > div[hidden] { display: none; }
+.panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ph-bar { display: flex; gap: 10px; align-items: center; padding: 3px 8px; background: #252526; flex: none; flex-wrap: wrap; }
+.ph-bar input[type=text], .ph-bar input:not([type]), .ph-bar input[type=number], .ph-bar select { background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 2px 6px; font: inherit; }
+.ph-bar > input:not([type]), .ph-bar > input[type=text] { flex: 1; min-width: 160px; }
+.chip { display: inline-flex; gap: 3px; align-items: center; color: #bbb; font-size: 12px; }
+.vt { flex: 1; display: flex; flex-direction: column; min-height: 0; font: 12px ui-monospace, Menlo, monospace; }
+.vt-head, .vt-row { display: flex; gap: 8px; padding: 0 8px; }
+.vt-head { background: #2d2d30; flex: none; line-height: 20px; }
+.vt-head button { background: none; border: 0; color: #ddd; font: inherit; cursor: pointer; padding: 0; }
+.vt-body { flex: 1; overflow: auto; position: relative; }
+.vt-row { line-height: 20px; white-space: nowrap; cursor: pointer; }
+.vt-row > div { overflow: hidden; text-overflow: ellipsis; }
+.vt-row:hover { background: #2a2d2e; } .vt-row.cur { background: #094771; } .vt-row.ph { color: #555; }
+.vt-row .c-address { color: #9cdcfe; } .vt-row .c-kind, .vt-row .c-source { color: #888; } .vt-row .c-function { color: #dcdcaa; }
+.vt-empty { padding: 8px; color: #888; }
+.xk { color: #c586c0; display: inline-block; width: 64px; }
+.xh { display: flex; gap: 6px; align-items: center; }
+.xh button { background: none; border: 1px solid #555; color: #ddd; font-size: 11px; cursor: pointer; padding: 0 4px; }
+.xh button[aria-pressed=true] { background: #094771; }

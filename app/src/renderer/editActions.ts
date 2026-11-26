@@ -43,6 +43,25 @@ export const retypeTarget = (tok: Token | undefined): string | null =>
 export const isOwnName = (tok: Token | undefined, text: string, fn: { name: string } | null) =>
   !!tok && !!fn && tok.kind === "function" && !tok.targetFunction && text === fn.name;
 
+/** What "show references" targets: an address, or a program variable of a function (found by the name the decompiler shows). */
+export type XrefTarget = { type: "address"; address: Address; label: string } | { type: "variable"; entry: Address; name: string; label: string };
+
+/**
+ * X on a decompiler token. Variable/param -> its program variable (xrefs_to_variable; empty for decompiler-invented temporaries and globals);
+ * a call target or the function's own name -> the function; a label -> its address. Anything else has no target.
+ */
+export function xrefTargetOf(tok: Token | undefined, text: string, fn: { entry: Address; name: string } | null): XrefTarget | null {
+  if (!tok) return null;
+  if ((tok.kind === "variable" || tok.kind === "param") && tok.varName && fn) return { type: "variable", entry: fn.entry, name: tok.varName, label: tok.varName };
+  if (tok.kind === "function") {
+    if (tok.targetFunction) return { type: "address", address: tok.targetFunction, label: text };
+    if (fn && text === fn.name) return { type: "address", address: fn.entry, label: fn.name };
+    return null;
+  }
+  if (tok.kind === "label" && tok.address) return { type: "address", address: tok.address, label: text };
+  return null;
+}
+
 /** The token covering a 1-based Monaco position (colEnd exclusive, so a cursor right after the token still hits it). */
 export function tokenAt(tokens: Token[], line1: number, col1: number): Token | undefined {
   return tokens.find((t) => t.line + 1 === line1 && col1 >= t.colStart + 1 && col1 <= t.colEnd + 1 && t.kind !== "default");

@@ -15,6 +15,7 @@ import { reopenParams } from "./openOptions";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { XrefPanel } from "./XrefPanel";
+import { Dock, type DockId } from "./Dock";
 import { RpcError } from "./backend";
 import { onProgramChanged } from "./changes";
 import { latest } from "./latest";
@@ -27,7 +28,7 @@ import { emptyNav, push, goBack, goForward, type Nav, type Loc, type Source } fr
 import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } from "./symbols";
 import { useTabs } from "./useTabs";
 import { EditDialog, type EditSpec } from "./EditDialog";
-import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, type EditAction, type Focus } from "./editActions";
+import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus, type XrefTarget } from "./editActions";
 import type { CommentKind, UndoState } from "../../../protocol";
 
 export function App() {
@@ -57,6 +58,9 @@ export function App() {
   const setNotice = (m: string) => { noticeRef.current = m; setNoticeState(m); };
   const [fn, setFn] = useState<FuncAt | null>(null);
   const [xrefVersion, setXrefVersion] = useState(0);
+  const [xrefTarget, setXrefTarget] = useState<XrefTarget | null>(null); // pinned "show references" target; null = follow the cursor
+  const [dock, setDock] = useState<DockId | null>(null);
+  const [dataVersion, setDataVersion] = useState(0); // bumped on every program change: the dock windows refetch
   const [visible, setVisible] = useState<Record<PaneId, boolean>>({ functions: true, listing: true, decompiler: true });
   const navRef = useRef(nav);
   const openingRef = useRef(false);
@@ -116,7 +120,7 @@ export function App() {
 
   // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
   const clearProgram = () => {
-    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); funcsRef.current = [];
+    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); funcsRef.current = [];
     tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
     clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
   };
@@ -189,7 +193,7 @@ export function App() {
   const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
     if (!openedRef.current) return;
     if (p.ranges && !p.ranges.length && !p.kinds.length) { setUndo(p.undo); return; } // save: only `dirty` changed
-    clearFunctionCache();
+    clearFunctionCache(); setDataVersion((v) => v + 1);
     onProgramChanged(p, {
       refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
       tabs: () => tabsRef.current().tabs,
@@ -291,12 +295,28 @@ export function App() {
     if (dlgRef.current) return;
     await send(() => ((kind === "decompiler" || (kind !== "listing" && lastPane.current === "decompiler")) ? decompEdit(a) : listingEdit(a)));
   };
+  // X: references to the listing cursor row, or to the decompiler token under the cursor (pinned in the xref panel)
+  const showXrefs = () => {
+    if (!openedRef.current || openingRef.current) return;
+    const kind = focusKind(document.activeElement);
+    if (kind === "decompiler" || (kind !== "listing" && lastPane.current === "decompiler")) {
+      const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined, pos = editorRef.current?.getPosition();
+      if (!tab || !d || !pos) return;
+      const tok = tokenAt(d.tokens, pos.lineNumber, pos.column);
+      const text = tok ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
+      const t = xrefTargetOf(tok, text, { entry: tab.entry, name: names.get(tab.entry) ?? "" });
+      if (t) setXrefTarget(t); else setFlash("No references for the token at the cursor.");
+    } else {
+      const a = cursorRef.current || topAddrRef.current;
+      if (a) { const at = ((window as any).__listing?.rowAt(a)?.address as Address | undefined) ?? a; setXrefTarget({ type: "address", address: at, label: at }); }
+    }
+  };
   const canAt = (line1: number, col1: number) => {
     const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined;
     const tok = d ? tokenAt(d.tokens, line1, col1) : undefined;
     const text = tok && d ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
     const fn = tab ? { entry: tab.entry, name: names.get(tab.entry) ?? "" } : null;
-    return { rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn) };
+    return { rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!xrefTargetOf(tok, text, fn) };
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
@@ -309,6 +329,8 @@ export function App() {
     else if (c.type === "goto") { if (openedRef.current) setGotoOpen(true); }
     else if (c.type === "close-tab") goTab(tabs.closeActive());
     else if (c.type === "edit") void edit(c.action);
+    else if (c.type === "dock") { if (openedRef.current) setDock(c.panel); }
+    else if (c.type === "xrefs") showXrefs();
     else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
   };
   const apiNow = { go, back, forward, clickAt, open, cancelOpen, programChanged, edit, handleMenu };
@@ -403,10 +425,10 @@ export function App() {
           functions: (
             <div className="funcs-col">
               <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
-              <XrefPanel address={here} version={xrefVersion} onGo={(a) => go(a, "xrefs")} />
+              <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a) => go(a, "xrefs")} onFollow={() => setXrefTarget(null)} />
             </div>
           ),
-          listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} />,
+          listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} onXrefs={(a) => setXrefTarget({ type: "address", address: a, label: a })} />,
           decompiler: (
             <div className="dec">
               <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
@@ -414,13 +436,14 @@ export function App() {
               {ad?.status === "loading" && <div className="empty">Decompiling…</div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}</div>}
               <div className="editor" style={{ display: active ? undefined : "none" }}>
-                <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} />
+                <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>
             </div>
           ),
         }}</Panes>
       ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
         <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
+      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash} />
       {dlg && <EditDialog spec={dlg.spec} onSubmit={dlg.submit} onClose={() => setDlg(null)} />}
     </div>

@@ -18,9 +18,9 @@ const nextAddr = (r: ListingRow): Address => "0x" + (BigInt(r.address) + BigInt(
  * Wheel scrolls by lines inside the buffer; the (fixed-height) scrollbar maps fraction -> byte position -> address and jumps.
  * shortcut: no cache beyond the one contiguous buffer; a jump refetches even if the target is already buffered.
  */
-export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onError, onRowClick, onEdit }: {
+export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onError, onRowClick, onEdit, onXrefs }: {
   map: AddrMap; scrollReq: { address: Address; n: number; refresh?: boolean }; topAddrRef: { current: Address }; cursorRef: { current: Address };
-  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onEdit?: (a: EditAction) => void;
+  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -163,6 +163,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
   const onKey = (e: React.KeyboardEvent) => { // arrows/page move the row cursor (scrolling into view); letters are Ghidra's edit keys
     const n = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "PageDown" ? st.view - 1 : e.key === "PageUp" ? 1 - st.view : 0;
     if (n) { e.preventDefault(); moveCursor(n); return; }
+    if (e.key.toLowerCase() === "x" && !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) && st.cur) { e.preventDefault(); onXrefs?.(st.rows[curIndex()]?.address ?? st.cur); return; } // references to the cursor row
     const a = listingKey(e.nativeEvent);
     if (a) { e.preventDefault(); onEdit?.(a); }
   };

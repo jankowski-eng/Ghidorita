@@ -10,29 +10,31 @@ type Monaco = Parameters<OnMount>[1];
  * One Monaco instance, one model per tab (path "tab-<id>"): the wrapper saves/restores scroll and cursor per path.
  * Call tokens of the active tab are underlined and clickable.
  */
-export type CanEdit = { rename: boolean; retype: boolean; signature: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRef, onEdit, canAt }: {
+export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
+export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRef, onEdit, canAt, onXrefs }: {
   tabId: number | null; liveIds: number[]; text: string; tokens: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
-  onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit;
+  onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const clickRef = useRef(onCallClick); clickRef.current = onCallClick;
   const editRef = useRef(onEdit); editRef.current = onEdit;
   const canRef = useRef(canAt); canRef.current = canAt;
+  const xrefsRef = useRef(onXrefs); xrefsRef.current = onXrefs;
   const keysRef = useRef<{ set(c: CanEdit): void } | null>(null);
   const syncKeys = () => { const p = editorRef.current?.getPosition(); if (p) keysRef.current?.set(canRef.current(p.lineNumber, p.column)); };
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor; monacoRef.current = monaco;
     // Ghidra's keys through Monaco's action API (also the context menu); preconditions follow the token under the cursor
-    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false) };
-    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); } };
+    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false) };
+    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); } };
     const act = (id: string, label: string, action: EditAction, order: number, precondition?: string, keybindings?: number[]) =>
       editor.addAction({ id: "gd." + id, label, keybindings, precondition, contextMenuGroupId: "gd", contextMenuOrder: order, run: () => editRef.current(action) });
     act("rename", "Rename…", "rename", 1, "gdRename && !findInputFocus && !replaceInputFocus", [monaco.KeyCode.KeyL]);
     act("retype", "Retype Variable…", "retype", 2, "gdRetype && !findInputFocus && !replaceInputFocus", [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL]);
     act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && !findInputFocus && !replaceInputFocus");
     act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
+    editor.addAction({ id: "gd.xrefs", label: "Show References To", keybindings: [monaco.KeyCode.KeyX], precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
     editor.onDidChangeCursorPosition(syncKeys);
     decorations.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });

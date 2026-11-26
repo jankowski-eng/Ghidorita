@@ -1,28 +1,50 @@
 import { useEffect, useRef, useState } from "react";
-import type { Address, XrefTo } from "../../../protocol";
+import type { Address, XrefFrom, XrefTo } from "../../../protocol";
 import { rpc } from "./client";
 import { latest } from "./latest";
+import type { XrefTarget } from "./editActions";
 
 const LIMIT = 200;
+type Row = { go: Address | null; where: string; kind: string; type: string; fn?: string };
 
-/** Read-only references to the current address; click or Enter navigates to the referencing address. */
-export function XrefPanel({ address, version, onGo }: { address: Address | null; version: number; onGo: (a: Address) => void }) {
-  const [rows, setRows] = useState<XrefTo[]>([]);
+/**
+ * References to the current address (follows the cursor), or to a pinned target: the row under the listing cursor (X), or a decompiler token
+ * (X on a variable/param -> references to that program variable, on a call target / function name / label -> to its address).
+ * "From" lists what the instruction at the current address references (also stack, register and external references, which have no address).
+ * Click or Enter navigates to the referencing / referenced address.
+ */
+export function XrefPanel({ address, target, version, onGo, onFollow }: { address: Address | null; target: XrefTarget | null; version: number; onGo: (a: Address) => void; onFollow: () => void }) {
+  const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
+  const [dir, setDir] = useState<"to" | "from">("to");
   const run = useRef(latest()).current;
+  const mode = target ? "to" : dir;
+  const at = target?.type === "address" ? target.address : address;
   useEffect(() => {
-    if (!address) { run(Promise.resolve(null)); setRows([]); setMsg(""); return; }
+    const toRows = (r: XrefTo[]): Row[] => r.map((x) => ({ go: x.from, where: x.from, kind: x.kind, type: x.type, fn: x.function }));
+    const fromRows = (r: XrefFrom[]): Row[] => r.map((x) => ({ go: x.to, where: x.to ?? x.label ?? x.target, kind: x.kind, type: x.type }));
+    let q: Promise<Row[] | null>;
+    if (target?.type === "variable") q = run(rpc.call("xrefs_to_variable", { entry: target.entry, name: target.name, limit: LIMIT + 1 }).then(toRows));
+    else if (!at) q = run(Promise.resolve(null));
+    else if (mode === "from") q = run(rpc.call("xrefs_from", { address: at }).then(fromRows));
+    else q = run(rpc.call("xrefs_to", { address: at, limit: LIMIT + 1 }).then(toRows));
+    if (!at && !target) { setRows([]); setMsg(""); return; }
     setRows([]);
-    run(rpc.call("xrefs_to", { address, limit: LIMIT + 1 })).then((r) => { if (r) { setRows(r.slice(0, LIMIT)); setMsg(r.length > LIMIT ? `showing ${LIMIT}, more exist` : r.length ? "" : "no references"); } },
+    q.then((r) => { if (r) { setRows(r.slice(0, LIMIT)); setMsg(r.length > LIMIT ? `showing ${LIMIT}, more exist` : r.length ? "" : target?.type === "variable" ? "no references (decompiler temporaries and globals have no program variable)" : "no references"); } },
       (e) => { setRows([]); setMsg(e instanceof Error ? e.message : String(e)); });
-  }, [address, version]); // eslint-disable-line
+  }, [at, target?.type === "variable" ? target.entry + target.name : "", mode, version]); // eslint-disable-line
+  const what = target ? target.label : at ?? "-";
   return (
     <div className="xrefs" role="region" aria-label="References to current address">
-      <div className="xh">References to {address ?? "-"} ({rows.length}{msg.startsWith("showing") ? "+" : ""})</div>
+      <div className="xh">
+        <span>References {mode} {what} ({rows.length}{msg.startsWith("showing") ? "+" : ""})</span>
+        {!target && <button aria-label="Show references from" aria-pressed={dir === "from"} onClick={() => setDir(dir === "to" ? "from" : "to")}>{dir === "to" ? "from…" : "to…"}</button>}
+        {target && <button aria-label="Follow cursor" onClick={onFollow}>follow cursor</button>}
+      </div>
       <div className="xl">
         {rows.map((x, i) => (
-          <button key={i} className="xr" onClick={() => onGo(x.from)} title={x.type}>
-            <span className="a">{x.from}</span> <span className="t">{x.type}</span> {x.function && <span className="f">{x.function}</span>}
+          <button key={i} className="xr" disabled={!x.go} onClick={() => x.go && onGo(x.go)} title={x.type}>
+            <span className="a">{x.where}</span> <span className="xk">{x.kind}</span> <span className="t">{x.type}</span> {x.fn && <span className="f">{x.fn}</span>}
           </button>
         ))}
         {msg && <div className="msg">{msg}</div>}

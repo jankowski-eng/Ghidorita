@@ -29,10 +29,11 @@ export class WebSocketBackend implements Backend {
   }
 
   callCancellable<M extends keyof Methods>(method: M, params: Methods[M]["params"]) {
-    // shortcut: only decompile is cancellable server-side (cancel_decompile); extend when the sidecar cancels more
-    if (method !== "decompile") throw new Error(`${method} is not cancellable`);
+    // decompile: cancel_decompile; the scan requests (symbols, strings, searches): cancel_search
+    const cancelWith = method === "decompile" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory"].includes(method) ? "cancel_search" : null;
+    if (!cancelWith) throw new Error(`${method} is not cancellable`);
     const id = this.nextId++;
-    return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, "cancel_decompile", { id }).catch(() => {}); } };
+    return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, cancelWith, { id }).catch(() => {}); } };
   }
 
   private send<M extends keyof Methods>(id: number, method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {

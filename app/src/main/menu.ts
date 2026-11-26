@@ -50,6 +50,10 @@ export function createMenu({ getWin, pick }: Deps) {
       ] },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
+        { type: "separator" },
+        { label: "Symbol Table", accelerator: "CmdOrCtrl+Shift+Y", click: () => send({ type: "dock", panel: "symbols" }) },
+        { label: "Defined Strings", accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
+        { label: "Search Memory…", accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [
@@ -57,6 +61,8 @@ export function createMenu({ getWin, pick }: Deps) {
         { label: "Forward", accelerator: "CmdOrCtrl+]", enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
         { label: "Search Symbols…", accelerator: "CmdOrCtrl+Shift+O", click: () => send({ type: "search" }) },
         { label: "Go to Address…", accelerator: "CmdOrCtrl+G", click: () => send({ type: "goto" }) },
+        // the key is only a hint in the label (a real accelerator would swallow a typed x): Listing and Decompiler handle X themselves
+        { label: `Show References To   (X)`, enabled: state.canEdit, click: () => send({ type: "xrefs" }) },
       ] },
       { role: "windowMenu" },
     ];
