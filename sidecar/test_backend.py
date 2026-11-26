@@ -553,7 +553,7 @@ def test_raw_import_options_save_reopen_dirty_undo(bproc):
             assert after["dirty"] is False
             print("undo state after save:", after)
             await c.ok("save")  # unchanged: still a success
-            # MEASURED (protocol.md "Save and undo"): saving clears Ghidra's undo AND redo stacks
+            # MEASURED (protocol.md "Persistence and crash safety"): saving clears Ghidra's undo AND redo stacks
             assert after == {"canUndo": False, "canRedo": False, "dirty": False}
             await c.err("undo", INVALID)
             await c.ok("set_comment", address=BASE, kind="eol", text="second")
@@ -563,14 +563,14 @@ def test_raw_import_options_save_reopen_dirty_undo(bproc):
             await c.ok("save")
             assert (await c.ok("undo_state")) == {"canUndo": False, "canRedo": False, "dirty": False}
 
-            # unsaved edit is lost on reopen, saved one is not
+            # an unsaved edit is autosaved when another open replaces the program (protocol.md, Persistence)
             await c.ok("open_binary", **opts)
-            await c.ok("set_comment", address="0x8000010", kind="eol", text="lost")
+            await c.ok("set_comment", address="0x8000010", kind="eol", text="autosaved")
             assert (await c.ok("undo_state"))["dirty"] is True
             await c.ok("open_binary", **opts)
             assert (await c.ok("undo_state"))["dirty"] is False
             rows = {x["address"]: x for x in await c.ok("listing_rows", address=BASE, count=26)}
-            assert rows[BASE].get("comment") == "second" and "comment" not in rows["0x8000010"]
+            assert rows[BASE].get("comment") == "second" and rows["0x8000010"].get("comment") == "autosaved"
     run(go())
 
 
@@ -658,7 +658,7 @@ def test_busy_during_open_for_project_methods(tmp_path):
 
 
 def test_dirty_clean_on_ls_and_close_program(env):
-    """Reads and decompiles never dirty; close_program cancels queued decompiles, later requests fail NoProgram."""
+    """Reads and decompiles never dirty; close_program autosaves, cancels queued decompiles, later requests fail NoProgram."""
     fns = env["fns"]
 
     async def go():
@@ -683,9 +683,12 @@ def test_dirty_clean_on_ls_and_close_program(env):
                 await c.err(m, NO_PROGRAM, **kw)
             assert (await c.ok("close_program")) == {}  # idempotent
             await c.err("delete_program", NOT_FOUND, programId="a" * 64)
-            # the unsaved rename was discarded; the persisted program is clean again
+            # close autosaved the rename; the reopened program is clean
             assert (await c.ok("open_binary", path=BIN))["persisted"] is True
-            assert not any(f["name"] == "cache_clear_probe" for f in await c.ok("list_functions"))
+            assert (await c.ok("undo_state"))["dirty"] is False
+            assert any(f["name"] == "cache_clear_probe" for f in await c.ok("list_functions"))
+            await c.ok("rename_symbol", address=ranked[0]["entry"], newName=ranked[0]["name"])  # leave the shared /bin/ls program as it was
+            await c.ok("save")
     run(go())
 
 
