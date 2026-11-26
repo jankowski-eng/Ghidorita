@@ -29,10 +29,10 @@ export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRe
     keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); } };
     const act = (id: string, label: string, action: EditAction, order: number, precondition?: string, keybindings?: number[]) =>
       editor.addAction({ id: "gd." + id, label, keybindings, precondition, contextMenuGroupId: "gd", contextMenuOrder: order, run: () => editRef.current(action) });
-    act("rename", "Rename…", "rename", 1, "gdRename && editorTextFocus", [monaco.KeyCode.KeyL]);
-    act("retype", "Retype Variable…", "retype", 2, "gdRetype && editorTextFocus", [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL]);
-    act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && editorTextFocus");
-    act("comment", "Set Comment…", "comment", 4, "editorTextFocus", [monaco.KeyCode.Semicolon]);
+    act("rename", "Rename…", "rename", 1, "gdRename && !findInputFocus && !replaceInputFocus", [monaco.KeyCode.KeyL]);
+    act("retype", "Retype Variable…", "retype", 2, "gdRetype && !findInputFocus && !replaceInputFocus", [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL]);
+    act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && !findInputFocus && !replaceInputFocus");
+    act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
     editor.onDidChangeCursorPosition(syncKeys);
     decorations.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });

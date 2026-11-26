@@ -155,8 +155,8 @@ export function App() {
   // ---- editing ----
   const focusKind = (el: Element | null): Focus => {
     if (!el) return "other";
-    // Monaco's own hidden textarea (.inputarea) is the editor; its find widget input is a real text input
-    if (el.matches("input, textarea, select, [contenteditable]") && !el.classList.contains("inputarea")) return "input";
+    // Monaco's hidden textarea is the editor itself; only its find/replace widget inputs are real text inputs
+    if (el.matches("input, textarea, select, [contenteditable]") && (!el.closest(".monaco-editor") || el.closest(".find-widget"))) return "input";
     if (el.closest(".monaco-editor")) return "decompiler";
     return el.closest(".lbox") ? "listing" : "other";
   };
