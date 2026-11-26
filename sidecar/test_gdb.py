@@ -76,3 +76,14 @@ def test_unanswered_request_gives_the_connection_up():
     assert lost.get(timeout=3) == 1 and g.closed
     with pytest.raises(GdbError):
         g.request("p0")
+
+
+def test_resume_can_be_vetoed_under_the_pause_lock():
+    """`before` decides at the moment the resume would start; vetoed, nothing is sent and a synthetic SIGINT stop comes back."""
+    def script(read, send, c):
+        assert read() == "p0"  # the vetoed `c` never arrived
+        send("2a000000")
+    port = serve(script)
+    g = Gdb("127.0.0.1", port, print, print)
+    assert g.resume("c", wait=True, before=lambda: False) == "T02" and not g.running
+    assert g.request("p0") == "2a000000"

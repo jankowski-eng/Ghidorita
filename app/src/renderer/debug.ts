@@ -43,7 +43,7 @@ export function firstAddress(tokens: Token[], line: number): Address | null {
 
 export function debugLabel(d: DebugState | null): string {
   if (!d) return "";
-  if (d.state === "stopped") return `stopped at ${d.address}`;
+  if (d.state === "stopped") return `stopped at ${d.address}` + (d.signal ? ` (signal ${d.signal})` : "");
   return d.state === "running" ? "running" : d.error ? `detached (${d.error})` : "detached";
 }
 

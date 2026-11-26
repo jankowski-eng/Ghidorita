@@ -370,6 +370,7 @@ export interface DebugState {
   breakpoints: Address[];         // kept while detached and installed on the next attach
   address?: Address;              // state "stopped": the program counter as a program address
   registers?: { name: string; value: string }[]; // state "stopped": the program language's names, target order, "0x" + hex of the register's width
+  signal?: number;                // state "stopped": the signal when the target stopped on one other than the single-step trap (a fault)
   error?: string;                 // state "detached": why the connection ended (target exited, connection lost)
 }
 

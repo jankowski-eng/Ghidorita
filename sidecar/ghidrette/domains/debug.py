@@ -9,6 +9,7 @@
 Every RPC is on thread R (it needs the language); none waits for the target to run."""
 import queue, threading, time
 
+from ..core.args import MASK64
 from ..core.errors import BUSY, INVALID, NOT_FOUND, TARGET, RpcError, log
 from ..core.gdb import Gdb, GdbError
 from ..core.rpc import rpc
@@ -30,6 +31,8 @@ class Debug:
         self.state, self.target, self.error = "detached", "", ""
         self.offset = 0
         self.cancel = threading.Event()  # pause during a statement step
+        self.deferred = []  # breakpoint changes owed to a target that was still running when a step gave up waiting: done at its stop
+        self.signal = None  # the signal of the last stop when it was neither the single-step trap nor our own interrupt
         self.stops = 0  # stops announced since the process started: a client tells a new stop from a repeated state (a breakpoint toggled while stopped)
         self.address, self.registers, self.bps = None, [], []  # bps: program addresses (ints) in the order they were set
         self.regs, self.pc, self.sp, self.big, self.bp_kind = [], None, None, False, 4
@@ -40,6 +43,8 @@ class Debug:
     # ---- state ----
     def snapshot(self):
         st = {"state": self.state, "target": self.target, "offset": hex(self.offset), "stop": self.stops, "breakpoints": [hex(a) for a in self.bps]}
+        if self.signal is not None and self.state == "stopped":
+            st["signal"] = self.signal
         if self.address is not None and self.state == "stopped":
             st["address"], st["registers"] = hex(self.address), self.registers
         if self.error:
@@ -110,6 +115,11 @@ class Debug:
             with self.lock:
                 if self.g is not g:
                     return
+                for op, a in self.deferred:
+                    self._z(g, op, a)
+                self.deferred = []
+                sig = self._sig(packet)
+                self.signal = sig if sig not in (None, 5, 2) else None
                 regs = self._read_registers(g)
                 pc = next((int(r["value"], 16) for r in regs if r["name"] == self.pc), None)
                 if pc is None:
@@ -248,16 +258,34 @@ class Debug:
             self.publish()
             return {}
 
-    def _single_step(self, g, pc):
+    def _single_step(self, g, pc, before=None):
         """One instruction, waited for, with a breakpoint at the pc taken out meanwhile (like gdb); returns the stop reply."""
         at = pc in self.bps
         if at:
             self._z(g, "z", pc)
         try:
-            return g.resume("s", wait=True)
+            return g.resume("s", wait=True, before=before)
         finally:
-            if at and not g.closed:
-                self._z(g, "Z", pc)
+            if at:
+                self._restore(g, "Z", pc)
+
+    def _addr(self, prog, off):
+        """A Ghidra Address for an unsigned 64-bit offset (Java's long is signed: the session's helper does the conversion)."""
+        return self.ses.addr("0x%x" % (off & MASK64), prog)
+
+    @staticmethod
+    def _sig(r):
+        """The signal of a stop reply (T05..., S05), None for anything else."""
+        return int(r[1:3], 16) if r[:1] in ("T", "S") and len(r) >= 3 else None
+
+    def _restore(self, g, op, addr):
+        """Undo a temporary breakpoint change after a step: at once if the target is stopped, else (a step that gave up waiting) at its stop."""
+        if g.closed:
+            return
+        if g.running:
+            self.deferred.append((op, addr))
+        else:
+            self._z(g, op, addr)
 
     def _sp_of(self, g):
         n = next((n for n, name in self.names.items() if name == self.sp), None)
@@ -309,32 +337,33 @@ class Debug:
         (a return, or "into" a callee; "out" and "statement" run a call over to the instruction after it), or pause. A call is run over with a
         temporary breakpoint after it, ignoring returns of deeper (recursive) frames by comparing sp."""
         r = "T05"
+        notcancelled = lambda: not self.cancel.is_set()  # asked by Gdb.resume under the lock a pause takes: a pause is never lost between the check and the resume
         try:
             prog = self.ses.need()
-            space = prog.getAddressFactory().getDefaultAddressSpace()
-            func = prog.getFunctionManager().getFunctionContaining(space.getAddress(pc))
+            func = prog.getFunctionManager().getFunctionContaining(self._addr(prog, pc))
             body, listing = (func.getBody() if func is not None else None), prog.getListing()
             for _ in range(MAX_STEPS):
-                ins = listing.getInstructionAt(space.getAddress(pc))
+                ins = listing.getInstructionAt(self._addr(prog, pc))
                 sp0 = self._sp_of(g)
-                r = self._single_step(g, pc)
-                if r[0] in "WX" or self.cancel.is_set():
+                r = self._single_step(g, pc, notcancelled)
+                if r[0] in "WX" or self._sig(r) != 5 or self.cancel.is_set():  # the target ended, a signal other than the step's trap, or a pause
                     break
                 npc = self._pc_of(g)
-                inside = body is not None and body.contains(space.getAddress(npc))
+                inside = body is not None and body.contains(self._addr(prog, npc))
                 if npc in self.bps:
                     break
                 after = ins.getFallThrough() if ins is not None and ins.getFlowType().isCall() else None
-                if after is not None and npc != after.getOffset():  # a call was taken (a recursive one stays inside the body)
+                if after is not None and npc != after.getOffset() & MASK64:  # a call was taken (a recursive one stays inside the body)
                     if mode == "into":
                         break
-                    back, temp = after.getOffset(), after.getOffset() not in self.bps
+                    back = after.getOffset() & MASK64
+                    temp = back not in self.bps
                     if temp:
                         self._z(g, "Z", back)
                     try:
                         while True:
-                            r = g.resume("c", wait=True, timeout=CALL_SECS)
-                            if r[0] in "WX" or self.cancel.is_set():
+                            r = g.resume("c", wait=True, timeout=CALL_SECS, before=notcancelled)
+                            if r[0] in "WX" or self._sig(r) != 5 or self.cancel.is_set():
                                 break
                             pc = self._pc_of(g)
                             sp = self._sp_of(g)
@@ -342,14 +371,16 @@ class Debug:
                                 break
                             # a deeper (recursive) frame returned to the same address: step off the temporary breakpoint, put it back, go on
                             self._z(g, "z", back)
-                            r = g.resume("s", wait=True)
-                            self._z(g, "Z", back)
-                            if r[0] in "WX" or self.cancel.is_set():
+                            try:
+                                r = g.resume("s", wait=True, before=notcancelled)
+                            finally:
+                                self._restore(g, "Z", back)
+                            if r[0] in "WX" or self._sig(r) != 5 or self.cancel.is_set():
                                 break
                     finally:
-                        if temp and not g.closed:
-                            self._z(g, "z", back)
-                    if r[0] in "WX" or self.cancel.is_set() or pc != back or pc in self.bps or (pc in starts and mode != "out"):
+                        if temp:
+                            self._restore(g, "z", back)
+                    if r[0] in "WX" or self._sig(r) != 5 or self.cancel.is_set() or pc != back or pc in self.bps or (pc in starts and mode != "out"):
                         break
                     continue
                 if ins is not None and ins.getFlowType().isTerminal():  # a return (or an exit): this frame is done, also when the caller is the same function
@@ -382,7 +413,7 @@ class Debug:
             try:
                 if self.address in self.bps:  # off the breakpoint first, or it would hit again at once
                     r = self._single_step(g, self.address)
-                    if r[0] in "WX" or self._pc_of(g) in self.bps:
+                    if r[0] in "WX" or self._sig(r) != 5 or self._pc_of(g) in self.bps:
                         self._stopped(g, r)
                         return {}
                 g.resume("c")
@@ -399,9 +430,10 @@ class Debug:
             if self.state != "running":
                 raise RpcError(BUSY, "The target is not running")
             try:
-                self.cancel.set()  # a statement step ends after its current instruction
-                if g.running:
-                    g.interrupt()
+                with g.ctl:  # excludes the start of a resume: either it sees `cancel` and does not start, or we see `running` and interrupt
+                    self.cancel.set()  # a statement step ends after its current instruction
+                    if g.running:
+                        g.interrupt()
             except GdbError as e:
                 raise RpcError(TARGET, str(e))
             return {}
@@ -429,7 +461,7 @@ class Debug:
         from jpype import JArray, JByte
         from ghidra.program.model.mem import ByteMemBufferImpl
         from ghidra.docking.settings import SettingsImpl
-        buf = ByteMemBufferImpl(prog.getAddressFactory().getDefaultAddressSpace().getAddress(addr), JArray(JByte)([b - 256 if b > 127 else b for b in data]), self.big)
+        buf = ByteMemBufferImpl(self._addr(prog, addr), JArray(JByte)([b - 256 if b > 127 else b for b in data]), self.big)
         from ghidra.program.model.scalar import Scalar
         v = dt.getValue(buf, SettingsImpl.NO_SETTINGS, len(data))
         if isinstance(v, Scalar):  # integers in decimal (the default representation is hex with an "h")
@@ -498,12 +530,11 @@ class Debug:
             func = prog.getFunctionManager().getFunctionAt(self.ses.addr(entry, prog))
             if func is None:
                 raise RpcError(NOT_FOUND, "no function at %s" % entry)
-            space = prog.getAddressFactory().getDefaultAddressSpace()
             sp = regs.get(self.sp)
             depth = None
             if sp is not None and pc is not None:
                 try:
-                    d = CallDepthChangeInfo(func, TaskMonitor.DUMMY).getDepth(space.getAddress(pc))
+                    d = CallDepthChangeInfo(func, TaskMonitor.DUMMY).getDepth(self._addr(prog, pc))
                     depth = int(d) if abs(int(d)) < 0x100000 else None  # Function.UNKNOWN_STACK_DEPTH_CHANGE is huge
                 except Exception:  # noqa
                     depth = None
@@ -545,8 +576,8 @@ class Debug:
                     where = str(reg.getName())
                     data = (((v >> int(reg.getLeastSignificantBit())) & ((1 << (size * 8)) - 1))).to_bytes(size, "big" if self.big else "little")
                 elif st.isMemoryStorage():
-                    addr = int(st.getMinAddress().getOffset())
-                    where, data = hex(addr), self._read_mem(g, addr + self.offset, size)
+                    addr = int(st.getMinAddress().getOffset()) & MASK64  # Ghidra offsets are signed longs
+                    where, data = hex(addr), self._read_mem(g, (addr + self.offset) & MASK64, size)
                 else:
                     continue
             except RpcError:

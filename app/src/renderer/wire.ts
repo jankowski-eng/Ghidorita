@@ -34,7 +34,7 @@ const analysisFields = { state: oneOf("idle", "running", "done", "cancelled", "f
   analyzer: str, done: count, pct: number, error: optional(str) };
 const analysisState = shape(analysisFields);
 const debugFields = { state: oneOf("detached", "running", "stopped"), target: str, stop: count, offset: nonempty, breakpoints: array(address), address: optional(address),
-  registers: optional(array(shape({ name: nonempty, value: nonempty }))), error: optional(str) };
+  registers: optional(array(shape({ name: nonempty, value: nonempty }))), signal: optional(count), error: optional(str) };
 const options = shape({ loader: optional(str), language: optional(str), compilerSpec: optional(str), baseAddress: optional(address), profile: optional(profile) });
 const comments = { eol: optional(str), pre: optional(str), post: optional(str), plate: optional(str), repeatable: optional(str) };
 const row = shape({

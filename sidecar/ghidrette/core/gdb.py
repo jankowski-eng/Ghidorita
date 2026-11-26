@@ -39,6 +39,7 @@ class Gdb:
         self.sock.settimeout(None)
         self.on_stop, self.on_lost = on_stop, on_lost
         self.replies, self.lock, self.running, self.closed = queue.Queue(), threading.Lock(), False, False
+        self.ctl = threading.Lock()  # a resume's start and a pause's check of `running` exclude each other: no Ctrl-C is lost between them
         self.sync = None  # a queue.Queue while a resume is waited for on the calling thread (step over a breakpoint)
         threading.Thread(target=self._read, daemon=True, name="gdb-reader").start()
 
@@ -111,16 +112,20 @@ class Gdb:
             raise GdbError("Lost the connection to the target")
         return r
 
-    def resume(self, payload, wait=False, timeout=5.0):
-        """`c` or `s`. Without wait the stop reply goes to on_stop; with wait it is returned here."""
+    def resume(self, payload, wait=False, timeout=5.0, before=None):
+        """`c` or `s`. Without wait the stop reply goes to on_stop; with wait it is returned here. `before` is asked once the resume is
+        about to start (under ctl, which a pause also takes): false means do not start, and "T02" (a stop by SIGINT, nothing was sent) is returned."""
         with self.lock:
-            self.sync = queue.Queue() if wait else None
-            self.running = True
-            try:
-                self._send(frame(payload))
-            except GdbError:
-                self.running = False
-                raise
+            with self.ctl:
+                if before is not None and not before():
+                    return "T02"
+                self.sync = queue.Queue() if wait else None
+                self.running = True
+                try:
+                    self._send(frame(payload))
+                except GdbError:
+                    self.running = False
+                    raise
             if not wait:
                 return None
             try:

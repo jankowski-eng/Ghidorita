@@ -80,8 +80,6 @@ class Program:
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
         prog, res, consumer = self.ses.program, self.ses.results, self.ses.consumer
-        if prog is not None and self.ctx.debug is not None:
-            self.ctx.debug.teardown()  # a debugger connection and its step worker belong to the program being released
         if prog is not None and not self.ctx.analysis.stop():  # cancel + wait: the analysis saves what it found, then edits are possible again
             raise RuntimeError("analysis did not stop in time, not closing the current program")
         if prog is not None:  # autosave: closing must never lose edits (see protocol.md, Persistence and crash safety)
@@ -90,6 +88,8 @@ class Program:
             except Exception as e:  # noqa
                 log("close save FAILED, keeping the program open:", repr(e))
                 raise RuntimeError("save failed before closing the current program: %s" % e) from e
+        if prog is not None and self.ctx.debug is not None:
+            self.ctx.debug.teardown()  # after the analysis stopped and the save succeeded (a failure keeps the program, and its debugger, as they were); a connection and its step worker belong to the program being released
         with self.ses.lock:
             self.ses.program = None
             self.ses.session_id = self.ses.name = None
