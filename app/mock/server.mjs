@@ -312,7 +312,7 @@ const handlers = {
   async open_program({ programId, analysis }, notify, rid) {
     const e = typeof programId === "string" && programs.get(programId);
     if (!e) throw { code: -32004, message: "NotFound" };
-    return handlers.open_binary({ path: e.sourcePath, ...e.options, analysis }, notify, rid);
+    return handlers.open_binary({ path: e.sourcePath, ...e.options, analysis, programId }, notify, rid); // programId: the catalog entry, not idFor(path) (seeded entries differ)
   },
   async open_binary(p, notify, rid) {
     const { path } = p;
@@ -325,7 +325,7 @@ const handlers = {
       throw { code: -32603, message: "Failed to flush pending changes" };
     }
     opening = true; openingRequest = rid; openCancelled = false;
-    const programId = idFor(path, opts), known = programs.get(programId), persisted = !!known;
+    const programId = p.programId ?? idFor(path, opts), known = programs.get(programId), persisted = !!known;
     const stat = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
     const steps = [{ phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" }];
     if (blocking && !(persisted && known.analysis === "done")) steps.push(stat("Decompiler Parameter ID", 0, 0), stat("Decompiler Parameter ID", 50, 0), stat("Function Start Search", -1, 1), stat("Stack", 30, 2, 8),

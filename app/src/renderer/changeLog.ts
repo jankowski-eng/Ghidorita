@@ -45,7 +45,7 @@ export class ChangeLog {
    */
   reconcile(u: { canUndo: boolean; canRedo: boolean; dirty: boolean }) {
     if (u.canUndo || u.canRedo) return;
-    const next = this.items.filter((c) => !c.undone).map((c) => (c.saved || c.locked ? c : u.dirty ? { ...c, locked: true } : { ...c, saved: true }));
+    const next = this.items.filter((c) => !c.undone).map((c) => (c.saved ? c : u.dirty ? (c.locked ? c : { ...c, locked: true }) : { ...c, saved: true, locked: false }));
     if (next.length === this.items.length && next.every((c, i) => c === this.items[i])) return;
     this.redo = [];
     this.set(next);

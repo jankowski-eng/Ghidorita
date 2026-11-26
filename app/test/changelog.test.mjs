@@ -91,4 +91,6 @@ test("reconcile: history cleared but the save failed keeps the edit unsaved and 
   assert.deepEqual([l.items[0].saved, l.items[0].locked], [false, true]);
   l.record("undo", {}, {});
   assert.deepEqual(live(l), ["Rename to a"]);
+  l.reconcile({ canUndo: false, canRedo: false, dirty: false }); // a later analysis saves them
+  assert.deepEqual([l.items[0].saved, l.items[0].locked], [true, false]);
 });
