@@ -18,8 +18,8 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .frow.sel { background: #094771; }
 .lrow { position: absolute; left: 0; right: 0; height: 16px; line-height: 16px; white-space: nowrap; display: flex; gap: 12px; padding: 0 8px; }
 .lrow.ph { color: #555; }
-.lrow .a { color: #9cdcfe; width: 90px; } .lrow .b { color: #888; width: 130px; }
-.lrow .m { color: #c586c0; width: 60px; } .lrow .l { color: #dcdcaa; } .lrow .c { color: #6a9955; }
+.lrow .a { color: #9cdcfe; min-width: 90px; flex-shrink: 0; } .lrow .b { color: #888; width: 24ch; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+.lrow .m { color: #c586c0; min-width: 9ch; flex-shrink: 0; } .lrow .l { color: #dcdcaa; } .lrow .c { color: #6a9955; }
 .status { padding: 3px 8px; background: #007acc; color: #fff; font: 12px ui-monospace, Menlo, monospace; }
 .use-token { background: rgba(255, 213, 79, 0.35); border-radius: 2px; }
 .call-token { text-decoration: underline; cursor: pointer; color: #4fc1ff !important; }

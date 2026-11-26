@@ -296,7 +296,7 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
       case "more": return <span className="c">{l.text}</span>;
       default: return (<>
         <span className="a">{r.parts ? <b className="fold" role="button" aria-label={st.unfolded.has(r.address) ? "Fold components" : "Unfold components"} onClick={(e) => { e.stopPropagation(); toggleFold(r); }}>{st.unfolded.has(r.address) ? "▾" : "▸"}</b> : null}{r.address}</span>
-        <span className="b">{bytesText(r)}</span><span className="m">{r.mnemonic}</span>
+        <span className="b" title={bytesText(r)}>{bytesText(r)}</span><span className="m">{r.mnemonic}</span>
         <span>{r.operands}</span>{r.comment && <span className="c">; {r.comment}</span>}{r.repeatable && <span className="c rp">; {r.repeatable}</span>}
       </>);
     }
