@@ -91,6 +91,8 @@ class Edits:
         def go(p):
             dtm = p.getDataTypeManager()
             dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
+            if dt is None and dataType.startswith("/"):
+                dt = self._path_with_suffix(dtm, dataType)  # "/A/S[4]", "/A/S *": the parser takes no category path in front of a suffix
             if dt is None:
                 try:
                     dt = DataTypeParser(dtm, dtm, None, AllowedDataTypes.ALL).parse(dataType)
@@ -104,6 +106,26 @@ class Edits:
         self.ses.edit("Define data", go)
         self.ctx.events.record({"data"}, [out["range"]])
         return {}
+
+    @staticmethod
+    def _path_with_suffix(dtm, text):
+        """`/Category/Name` followed by array (`[n]`) and pointer (`*`) suffixes, resolved by hand; None when it is not that shape or the path is unknown."""
+        import re
+        from ghidra.program.model.data import ArrayDataType, PointerDataType
+        m = re.fullmatch(r"(/[^\[\]*]*?)\s*((?:\[\d+\]|\*|\s)+)", text)
+        base = dtm.getDataType(m.group(1)) if m else None
+        if base is None:
+            return None
+        dt = base
+        for s in re.findall(r"\[\d+\]|\*", m.group(2)):
+            if s == "*":
+                dt = PointerDataType(dt)
+            else:
+                n = int(s[1:-1])
+                if n < 1 or dt.getLength() <= 0:
+                    return None
+                dt = ArrayDataType(dt, n, dt.getLength())
+        return dt
 
     @rpc(lane="R")
     def clear_code(self, address, length=None):

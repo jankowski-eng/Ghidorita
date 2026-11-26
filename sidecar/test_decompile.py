@@ -202,3 +202,10 @@ def test_decompile_warnings(env):
             assert all(t["line"] < n for t in warned["tokens"])  # tokens renumbered with the removed lines
             assert clean is not None and "warnings" not in clean
     run(go())
+
+
+def test_warning_regex_never_crosses_a_comment_end():
+    from ghidorita.domains.decompile import WARNING_LINE, WARNING_ONE
+    assert WARNING_LINE.fullmatch("/* WARNING: a */ /* WARNING: b */") and WARNING_ONE.findall("/* WARNING: a */ /* WARNING: b */") == ["WARNING: a", "WARNING: b"]
+    for line in ("/* WARNING: a */ /* my note */", "/* WARNING: a */ x = 1; /* my note */", "x = 1; /* WARNING: a */"):
+        assert not WARNING_LINE.fullmatch(line.strip()), line

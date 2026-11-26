@@ -130,6 +130,13 @@ class Listing:
                    for k, t in ((k, getattr(CommentType, k.upper())) for k in ROW_COMMENT_KINDS)},
         }
 
+    @staticmethod
+    def _dt_ref(dt):
+        """The data type as define_data takes it: its name, or its category path for structures, unions, enums and typedefs (two `S` in different
+        categories are different types; the name alone would be ambiguous)."""
+        from ghidra.program.model.data import Composite, Enum, TypeDef
+        return str(dt.getPathName()) if isinstance(dt, (Composite, Enum, TypeDef)) else str(dt.getName())
+
     def _row_parts(self, cu):
         # shortcut: one level (nested structs/arrays show as one component with their display value), at most ROW_PARTS_MAX; upgrade with a get_components RPC by path
         from ghidra.program.model.data import Array
@@ -198,7 +205,7 @@ class Listing:
                 b = bytes(x & 0xFF for x in buf)
             row = {"address": key, "length": n, "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
             if not is_ins:
-                row["dataType"] = str(cu.getDataType().getName())  # "undefined" for an undefined byte
+                row["dataType"] = self._dt_ref(cu.getDataType())  # "undefined" for an undefined byte
             if n > 16:
                 row["bytesMore"] = n - 16
             if key in marks["bm"]:

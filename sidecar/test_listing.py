@@ -110,3 +110,23 @@ def test_row_data_type(sc):
     assert rows["0x600000"]["dataType"] == "char[4]"
     assert rows["0x600008"]["dataType"] == "dword" and rows["0x600010"]["dataType"] == "pointer"
     assert rows["0x600004"]["dataType"] == "undefined"  # an undefined byte
+
+
+def test_row_data_type_same_name_in_two_categories(sc):
+    from ghidra.program.model.data import CategoryPath, StructureDataType, DataTypeConflictHandler
+    build(sc, "t_dtype2", [("ram", 0x610000, bytes(64), False)])
+
+    def mk(p):
+        dtm = p.getDataTypeManager()
+        for cat in ("/A", "/B"):
+            s = StructureDataType(CategoryPath(cat), "S", 0)
+            s.add(__import__("ghidra.program.model.data", fromlist=["ByteDataType"]).ByteDataType.dataType, "x", None)
+            dtm.resolve(s, DataTypeConflictHandler.REPLACE_HANDLER)
+        return True
+    sc.edit("mk", mk)
+    sc.define_data("0x610000", "/A/S")
+    sc.define_data("0x610008", "/B/S")
+    rows = {r["address"]: r for r in sc.listing_rows("0x610000", 20)}
+    assert rows["0x610000"]["dataType"] == "/A/S" and rows["0x610008"]["dataType"] == "/B/S"
+    sc.define_data("0x610010", "/A/S[3]")  # the client builds `<dataType>[n]`
+    assert sc.listing_rows("0x610010", 1)[0]["length"] == 3

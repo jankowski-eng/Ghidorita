@@ -61,7 +61,7 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
     const hintKeys: [string, MenuCommand][] = [["goto", { type: "goto" }], ["dock:memsearch", { type: "dock", panel: "memsearch" }], ["nav-back", { type: "nav-back" }], ["nav-forward", { type: "nav-forward" }]];
     const hintKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (!s.program() || !(t === document.body || t.closest(".lbox, .editor, .graph, .monaco-editor")) || focusKind(t) === "input") return;
+      if (!s.program() || t.closest('[role="dialog"], .dlg, .modal') || focusKind(t) === "input") return; // anywhere in the program UI except dialogs and text inputs
       const hit = hintKeys.find(([id]) => matchesKey(KEYS[id], e));
       if (hit) { e.preventDefault(); e.stopPropagation(); api().handleMenu(hit[1]); }
     };
