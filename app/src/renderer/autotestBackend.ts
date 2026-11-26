@@ -3,12 +3,14 @@ import type { AutotestControls } from "./autotest";
 
 export function autotestBackend(backend: ApplicationBackend, requests: AutotestControls["requests"]) {
   let held: { entry: string; started: boolean; cancelled: number } | undefined;
+  let release: (() => void) | undefined, holdOpen = false;
   let cancelOpen: Parameters<AutotestControls["cancelOpenWhen"]>[0];
   const openAttempts: AutotestControls["openAttempts"] = [];
   const controls: AutotestControls = {
     requests, openAttempts,
     holdDecompile: (entry) => held = { entry, started: false, cancelled: 0 },
     cancelOpenWhen: (predicate) => { cancelOpen = predicate; },
+    holdNextOpen: () => { holdOpen = true; return () => release?.(); },
   };
   const instrumented: ApplicationBackend = {
     capabilities: backend.capabilities, recovery: backend.recovery, imports: backend.imports, projects: backend.projects, events: backend.events,
@@ -17,6 +19,11 @@ export function autotestBackend(backend: ApplicationBackend, requests: AutotestC
       open(path, options, progress) {
         const params = { ...options, path };
         openAttempts.push(params);
+        if (holdOpen) {
+          holdOpen = false;
+          const result = new Promise<never>((_, reject) => { release = () => reject(new BackendError("cancelled", "Open cancelled")); });
+          return { result, cancel: async () => false };
+        }
         if (cancelOpen?.(params)) {
           return { result: Promise.reject(new BackendError("cancelled", "Open cancelled")), cancel: async () => false };
         }

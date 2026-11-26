@@ -46,7 +46,7 @@ export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin }
   return (
     <div className="funcs" onKeyDown={onKey}>
       <input aria-label="Filter functions" placeholder={`filter ${funcs.length} functions`} value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <label className="chip todo"><input type="checkbox" aria-label="Not yet renamed" checked={todo} onChange={(e) => setTodo(e.target.checked)} /> not yet renamed{todo ? ` (${shown.length})` : ""}</label>
+      {funcs.some((f) => f.source) && <label className="chip todo"><input type="checkbox" aria-label="Not yet renamed" checked={todo} onChange={(e) => setTodo(e.target.checked)} /> not yet renamed{todo ? ` (${shown.length})` : ""}</label>}
       {!funcs.length && <div className="empty">No functions</div>}
       {err && <div className="err" role="alert">{err}</div>}
       <div className="scroll" ref={ref} style={{ flex: 1 }} role="listbox" tabIndex={0} aria-label="Functions" aria-activedescendant={shown[cursor] ? `fn-${shown[cursor].entry}` : undefined}>

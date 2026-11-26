@@ -76,7 +76,7 @@ What the bundle contains (`Contents/Resources/`):
 - `python/`: python-build-standalone 3.12 with websockets, jpype1, packaging, typing_extensions, pyghidra (wheel from the Ghidra build). Links only against system libs.
 - `sidecar/main.py` and the `sidecar/ghidrette/` package (code layout: [sidecar/ARCHITECTURE.md](sidecar/ARCHITECTURE.md)).
 
-The main process (`startSidecar`, `app/src/main/index.ts`) uses these when `app.isPackaged` (JAVA_HOME, GHIDRA_INSTALL_DIR, PYTHONNOUSERSITE set; the shell's values are ignored); in dev it still uses the env vars and `sidecar/.venv`. `SIDECAR_MAXMEM`, `SIDECAR_ANALYSIS_DISABLE`, `SIDECAR_PROJECTS_DIR` (default `userData/projects`) pass through. Autotest output in the packaged app goes to `userData/out` (asar is read-only). `MOCK`/`AUTOTEST`/`BENCH` work as before.
+The PyGhidra launch configuration (`app/src/main/providers.ts`) uses these when `app.isPackaged` (JAVA_HOME, GHIDRA_INSTALL_DIR, PYTHONNOUSERSITE set; the shell's values are ignored); in dev it still uses the env vars and `sidecar/.venv`. `SIDECAR_MAXMEM`, `SIDECAR_ANALYSIS_DISABLE`, `SIDECAR_PROJECTS_DIR` (default `userData/projects`) pass through. Autotest output in the packaged app goes to `userData/out` (asar is read-only). `MOCK`/`AUTOTEST`/`BENCH` work as before.
 
 ### Memory
 Round 4 on a 66 MB binary: JVM 3.5–4.1 GB peak plus up to 5.6 GB in the native decompiler (≈ 10 GB together). **Minimum 8 GB** (small and medium binaries; the default heap is half of RAM, so 4 GB on an 8 GB Mac; very large binaries will swap), **recommended 16 GB or more** for binaries in the 50+ MB range.
@@ -104,7 +104,7 @@ Data types: View > Data Type Manager (Cmd+Shift+T) or "Data Type Manager" in the
 
 ## Round 9 additions
 - `sidecar/jscans/GhidretteScans.java`: the strings scan and the symbol kind filter/sort run in Java. `ghidrette/core/jscans.py` compiles it with `$JAVA_HOME/bin/javac` at start when the class is missing or older (`prepare.sh` ships it precompiled). Do not name a directory `java` next to `main.py` (the sidecar directory): it shadows JPype's `java` package.
-- Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron and needs a display. Its focused flows are `AUTOTEST_FLOW=locked|big|replacement`. Set `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` to exercise the decompile timeout.
+- Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron and needs a display. Its focused flows are `AUTOTEST_FLOW=locked|big`; `sidecar/test_provider_ui.py` runs the browsing, replacement and open-preserve flows against each provider. Set `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` to exercise the decompile timeout.
 - Benchmarks wait for a quiet machine (`bench/common.py: wait_quiet`) and exit 3 instead of measuring under load. `bench/run_round9.sh` runs the repeats.
 - A failed replacement open preserves the active program and undo history (protocol.md).
 - `MANUAL_TEST.md`: the 30-minute checklist for what scripts cannot do.

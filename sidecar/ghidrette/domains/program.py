@@ -148,7 +148,7 @@ class Program:
         self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
         self.ses.results, self.ses.consumer = res, consumer
         self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
-        return self.ses.publish(prog, key, name)
+        return self.ses.publish(prog, key, name)  # keep this last: nothing after attach may raise, or the listener would stay on a program we release
 
     @staticmethod
     def _check_options(loader, language, compilerSpec, baseAddress):

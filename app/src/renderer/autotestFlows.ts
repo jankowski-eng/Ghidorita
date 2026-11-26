@@ -6,9 +6,35 @@ import { LARGE_FUNCTION } from "./tabs";
 export async function runFocusedFlow(flow: string, file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   if (flow === "browsing") return browsingFlow(file, c, result);
   if (flow === "replacement") return replacementFlow(c, result);
+  if (flow === "open-preserve") return openPreserveFlow(file, c, result);
   if (flow === "locked") return lockedFlow(c, result);
   if (flow === "big") return bigFlow(file, c, result);
   throw new Error("unknown AUTOTEST_FLOW " + flow);
+}
+
+// An edit event for the old session arrives while a replacement open is pending, then the open fails: the old session keeps its view,
+// is not refreshed during the open (its RPCs wait for the swap), and is refreshed once afterwards.
+async function openPreserveFlow(file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  const functions = await c.open(file);
+  const entry = functions?.find((f) => f.size > 0)?.entry;
+  if (!entry) throw new Error("no test function");
+  await c.select(entry);
+  const title = c.title();
+  const release = c.holdNextOpen();
+  const count = () => c.requests.filter(({ method }) => method === "list_functions").length;
+  const replacement = c.open(file);
+  await waitFor(() => c.status().opening, 5000, "replacement open");
+  const before = count();
+  await c.program().edits.renameSymbol({ address: entry, newName: "open_preserve_probe" });
+  await sleep(500); // the event is coalesced, not applied, while the open is pending
+  const during = count() - before;
+  release();
+  await replacement;
+  await waitFor(() => c.lastMenu()?.dirty && count() > before, 5000, "preserved session refresh");
+  const undo = await c.program().history.state();
+  result.openPreserve = { opened: c.status().opened, selection: c.selected(), title, activeTitle: c.title(), notice: c.status().notice, refreshesDuringOpen: during, undo };
+  return c.status().opened && c.selected() === entry && c.status().notice === "Open cancelled."
+    && c.title().includes(title) && undo.canUndo && during === 0;
 }
 
 // Another Ghidrette holds the projects dir: the welcome pane must say so (the sidecar answers ProjectLocked to list_programs).
@@ -83,12 +109,9 @@ async function bigFlow(file: string, c: AutotestCtx, result: Record<string, any>
 async function browsingFlow(file: string, c: AutotestCtx, result: Record<string, unknown>) {
   const expectReadOnly = !c.backend.capabilities.has("decompile");
   const check = (value: unknown, message: string) => { if (!value) throw new Error(message); };
-  const input = byLabel<HTMLInputElement>("textbox", "Binary path")
-    ?? document.querySelector<HTMLInputElement>('input[aria-label="Binary path"]')!;
-  check(input && !input.disabled, "Welcome must offer Open");
-  typeInto(input, file);
-  await sleep(60);
-  press(input, "Enter");
+  const openButton = document.querySelector<HTMLButtonElement>('button[aria-label="Open binary"]');
+  check(openButton && !openButton.disabled, "Welcome must offer Open");
+  c.command({ type: "open-path", path: file }); // the native file dialog's result takes this same route
   if (c.backend.capabilities.has("importOptions")) {
     const confirm = await waitFor(() => {
       const button = byLabel("dialog", "Import binary")?.querySelector<HTMLButtonElement>("button.primary");

@@ -16,6 +16,8 @@ export interface AutotestControls {
   holdDecompile(entry: Address): { started: boolean; cancelled: number };
   cancelOpenWhen(predicate?: (params: ImportOptions & { path: string }) => boolean): void;
   openAttempts: (ImportOptions & { path: string })[];
+  /** the next open never reaches the provider and stays pending until the returned function makes it fail as cancelled */
+  holdNextOpen(): () => void;
 }
 export interface AutotestCtx extends AutotestControls {
   backend: ApplicationBackend;
