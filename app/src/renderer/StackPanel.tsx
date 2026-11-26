@@ -43,16 +43,16 @@ export function StackPanel({ stackFrame, entry, name, version, onError, onRename
     return () => { live = false; };
   }, [entry, version]); // eslint-disable-line
   useEffect(() => setSel(null), [entry]);
-  const slots = data?.slots ?? [], slot = slots.find((s) => s.name === sel);
+  const slots = data && data.entry === entry ? data.slots : [], slot = slots.find((s) => s.name === sel);
   return (
     <div className="panel" role="region" aria-label="Stack frame">
       <div className="ph-bar">
-        <span role="status" aria-label="Frame summary">{entry ? `${name}: ${data ? `${slots.length} slots, ${data.parameterSize} B parameters, ${data.localSize} B locals${slot ? ` · ${slot.name} selected` : ""}` : msg}` : msg}</span>
+        <span role="status" aria-label="Frame summary">{entry ? `${name}: ${data && data.entry === entry ? `${slots.length} slots, ${data.parameterSize} B parameters, ${data.localSize} B locals${slot ? ` · ${slot.name} selected` : ""}` : msg}` : msg}</span>
         {onRename && <button disabled={!slot || !entry} aria-label="Rename slot" onClick={() => slot && entry && onRename(entry, slot)}>Rename…</button>}
         {onRetype && <button disabled={!slot || !entry} aria-label="Retype slot" onClick={() => slot && entry && onRetype(entry, slot)}>Retype…</button>}
       </div>
       <VirtualTable label="Stack frame" count={slots.length} rowAt={(i) => slots[i]} onVisible={() => {}} cols={COLS}
-        onActivate={(s) => setSel(s.name)} empty={data ? "no stack variables" : ""} />
+        onActivate={(s) => setSel(s.name)} empty={data && data.entry === entry ? "no stack variables" : ""} />
     </div>
   );
 }

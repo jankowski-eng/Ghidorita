@@ -859,9 +859,11 @@ const handlers = {
   stack_frame({ entry }) {
     const i = idxOfEntry(parseAddr(entry));
     if (i < 0) nf();
-    const slots = [{ offset: -16, size: 8, name: "local_10", dataType: "long", parameter: false, source: "default" }, { offset: -8, size: 4, name: "count", dataType: "int", parameter: false, source: "user" },
-      { offset: 8, size: 8, name: "param_1", dataType: "char *", parameter: true, source: "analysis" }];
-    return { entry: hex(BASE + i * STEP), name: nameOf(i), localSize: 16, parameterSize: 8, slots };
+    // the same variables the decompiler and rename/retype_variable use, so an edit shows here after the refresh
+    const at = { iVar1: [-8, false], param_1: [4, true], param_2: [8, true] };
+    const slots = Object.keys(VARS).map((o) => ({ offset: at[o][0], size: ty(i, o).includes("*") ? 8 : 4, name: v(i, o), dataType: ty(i, o), parameter: at[o][1],
+      source: S.vars.has(`${i}|${o}`) || S.types.has(`${i}|${o}`) ? "user" : "analysis" })).sort((a, b) => a.offset - b.offset);
+    return { entry: hex(BASE + i * STEP), name: nameOf(i), localSize: 8, parameterSize: 16, slots };
   },
   // decompilerEdits: the mock's decompiler has no numbers or unions to point at, so these only validate and record an undo step
   set_equate({ address, value, size, name }, notify) {

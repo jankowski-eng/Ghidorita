@@ -9,11 +9,11 @@ import type { TabsApi } from "../useTabs";
 
 const NO_FIELD = "(no field)";
 /** Enum members whose value is `value` (suggestions for Set Equate; best effort: the program's enums among the first 1000 matches of list_data_types). */
-async function enumMembers(ops: Program["api"], value: string): Promise<{ label: string; name: string; enum: string }[]> {
+async function enumMembers(ops: Program["api"], value: string, size: number): Promise<{ label: string; name: string; enum: string }[]> {
   try {
     const enums = (await ops.types.listDataTypes({ query: "", limit: 1000 }).result).filter((t) => t.kind === "enum" && t.source === "program").slice(0, 20);
     const out: { label: string; name: string; enum: string }[] = [];
-    for (const e of enums) for (const m of (await ops.types.getDataType({ path: e.path })).values ?? []) if (m.value === value) out.push({ label: `${e.name}.${m.name}`, name: m.name, enum: e.path });
+    for (const e of enums) for (const m of (await ops.types.getDataType({ path: e.path })).values ?? []) if (BigInt.asUintN(size * 8, BigInt(m.value)) === BigInt.asUintN(size * 8, BigInt(value))) out.push({ label: `${e.name}.${m.name}`, name: m.name, enum: e.path });
     return out;
   } catch { return []; }
 }
@@ -113,7 +113,7 @@ export function useEditing(tabs: TabsApi) {
     } else if (a === "setEquate") {
       const t = equateTarget(tok);
       if (!t) return session.flash("Put the cursor on a number to set an equate on it.");
-      const names = await enumMembers(ops, t.value);
+      const names = await enumMembers(ops, t.value, t.size);
       views.dispatch({ type: "set", patch: { formDlg: { title: "Set equate", submit: "Set", fields: [{ key: "name", label: "Equate name or enum member", initial: names[0]?.label ?? "", choices: names.map((n) => n.label) }],
         go: async (v) => { const typed = v.name.trim(), pick = names.find((n) => n.label === typed); await ops.edits.setEquate({ ...t, name: pick?.name ?? typed, enum: pick?.enum }); } } } });
     } else if (a === "noReturn") {
@@ -128,7 +128,7 @@ export function useEditing(tabs: TabsApi) {
     } else if (a === "forceField") {
       const t = fieldTarget(d.tokens, tok, (x) => (d.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd));
       if (!t) return session.flash("Force Field works on a union access.");
-      const members = (await ops.types.getDataType({ path: t.union })).components?.filter((c) => !c.undefined).map((c) => c.name ?? c.defaultName) ?? [];
+      const members = caps.has("dataTypes") ? (await ops.types.getDataType({ path: t.union })).components?.filter((c) => !c.undefined).map((c) => c.name ?? c.defaultName) ?? [] : []; // suggestions only: without type browsing the field is typed
       views.dispatch({ type: "set", patch: { formDlg: { title: "Force field", submit: "Force", fields: [{ key: "field", label: "Field", initial: members.includes(t.text) ? t.text : "", choices: [...members, NO_FIELD] }],
         go: async (v) => { const f = v.field.trim(); await ops.edits.forceUnionField({ entry, address: t.address, text: t.text, occurrence: t.occurrence, field: f === NO_FIELD ? null : f }); } } } });
     } else if (a === "bookmark") {

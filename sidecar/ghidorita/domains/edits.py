@@ -231,7 +231,7 @@ class Edits:
             dt = prog.getDataTypeManager().getDataType(enum)
             if not isinstance(dt, Enum):
                 raise RpcError(NOT_FOUND, "no enum %s" % enum)
-            if not any(str(dt.getName(v)) == name and v & mask == val & mask for v in dt.getValues()):
+            if not dt.contains(name) or dt.getValue(name) & mask != val & mask:  # several names may share a value: ask for this one directly
                 raise RpcError(INVALID, "%s has no member %s = %s" % (enum, name, value))
             eq_name = EquateManager.formatNameForEquate(dt.getUniversalID(), scalar.getValue())
 

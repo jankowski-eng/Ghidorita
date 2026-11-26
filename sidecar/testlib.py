@@ -193,7 +193,7 @@ def edit_blob(tmp_path, name="edit.bin"):
     put(0x100, bytes.fromhex("a1") + le(int(BASE, 16) + 0x1F0) + bytes.fromhex("c3"))
     g3, at = bytearray(bytes.fromhex("5589e5")), 0x120
     for _ in range(2):
-        g3 += call(at + len(g3), 0x100) + b"\x50" + call(at + len(g3) + 1, 0x40) + bytes.fromhex("83c404")
+        g3 += call(at + len(g3), 0x100) + b"\x50" + call(at + len(g3) + 6, 0x40) + bytes.fromhex("83c404")
     put(0x120, bytes(g3) + bytes.fromhex("5dc3"))
     k = bytearray(bytes.fromhex("5589e583ec08c745fc05000000"))  # a local at [ebp-4] written, its address passed to callee, then read and passed again
     k += bytes.fromhex("8d45fc50") + call(0x160 + 17, 0x40) + bytes.fromhex("83c4048b45fc50") + call(0x160 + 29, 0x40) + bytes.fromhex("83c404c9c3")

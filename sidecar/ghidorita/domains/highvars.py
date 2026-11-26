@@ -194,7 +194,7 @@ class HighVars:
             dt = high.getDataType()
             dt = dt.getBaseDataType() if isinstance(dt, TypeDef) else dt
             inner = dt.getDataType() if isinstance(dt, Pointer) else dt.getParent() if isinstance(dt, PartialUnion) else dt
-            inner = inner.getBaseDataType() if isinstance(dt, PartialUnion) and isinstance(inner, TypeDef) else inner
+            inner = inner.getBaseDataType() if isinstance(inner, TypeDef) else inner  # a pointer's target or a partial union's parent may be a typedef too (union_of looks through it)
             if inner == union:
                 return dt
             sym = high.getSymbol()
