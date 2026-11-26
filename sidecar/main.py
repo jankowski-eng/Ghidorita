@@ -483,9 +483,13 @@ class Sidecar:
     @staticmethod
     def _program_key(sha, opts):
         """protocol.md "Persistence key"."""
-        if not opts:
+        disabled = analysis_disabled()
+        if not opts and not disabled:
             return sha
-        canon = json.dumps({k: opts.get(k) for k in ("loader", "language", "compilerSpec", "baseAddress")}, separators=(",", ":"))
+        c = {k: opts.get(k) for k in ("loader", "language", "compilerSpec", "baseAddress")}
+        if disabled:  # a reduced analysis never shares a key with a full one
+            c["analysisDisable"] = sorted(disabled)
+        canon = json.dumps(c, separators=(",", ":"))
         return sha + "-" + hashlib.sha256(canon.encode()).hexdigest()[:12]
 
     async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None):
@@ -646,14 +650,34 @@ class Sidecar:
         tx = prog.startTransaction("Analysis")
         try:
             mgr = AutoAnalysisManager.getAnalysisManager(prog)
+            self._disable_analyzers(prog)
             mgr.initializeOptions()
             mgr.reAnalyzeAll(None)
             mgr.startAnalysis(mon)  # blocks this thread; cancel_open cancels mon from the loop thread
+            log("analysis task times (cancelled=%s):\n%s" % (op.cancelled, mgr.getTaskTimesString()))
             op.check()
             GhidraProgramUtilities.markProgramAnalyzed(prog)
         finally:
             prog.endTransaction(tx, True)
             GhidraScriptUtil.releaseBundleHostReference()
+
+    @staticmethod
+    def _disable_analyzers(prog):
+        """SIDECAR_ANALYSIS_DISABLE="Name 1;Name 2" switches analyzers off for the first-open analysis (exact analyzer
+        names, see bench/ for the measured trade-off). Unknown names are logged and ignored. The list is part of the
+        programId (_program_key), so a reduced analysis is stored apart from a full one.
+        shortcut: env var for the whole process; upgrade to an open_binary param once the UI offers profiles."""
+        from ghidra.program.model.listing import Program
+        names = analysis_disabled()
+        if not names:
+            return
+        opts = prog.getOptions(Program.ANALYSIS_PROPERTIES)
+        for n in names:
+            if opts.contains(n):
+                opts.setBoolean(n, False)
+            else:
+                log("SIDECAR_ANALYSIS_DISABLE: unknown analyzer %r" % n)
+        log("analyzers disabled: %s" % names)
 
     def _save(self, res, op):
         from ghidra.util.task import TaskMonitor
@@ -1395,6 +1419,22 @@ class Sidecar:
         os._exit(0)
 
 
+def analysis_disabled():
+    """Analyzer names from SIDECAR_ANALYSIS_DISABLE ("Name 1;Name 2"), empty if unset."""
+    return [n for n in os.environ.get("SIDECAR_ANALYSIS_DISABLE", "").split(";") if n]
+
+
+def max_heap():
+    """JVM -Xmx. Without it the JVM takes 1/4 of RAM (8 GB on a 32 GB Mac), which is neither tuned nor predictable.
+    SIDECAR_MAXMEM (e.g. "6g") overrides; default is half of physical RAM, capped at 24 GB (leaves room for the
+    native decompiler processes, the renderer and the OS)."""
+    v = os.environ.get("SIDECAR_MAXMEM")
+    if v:
+        return v
+    ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    return "%dm" % (min(ram // 2, 24 << 30) >> 20)
+
+
 def main():
     if not os.environ.get("SIDECAR_TOKEN") and os.environ.get("SIDECAR_ALLOW_NO_AUTH") != "1":
         print("SIDECAR_TOKEN is not set: refusing to start without auth (SIDECAR_ALLOW_NO_AUTH=1 is the test-only escape)", file=sys.stderr)
@@ -1413,9 +1453,11 @@ def main():
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(os.environ["GHIDRA_INSTALL_DIR"]))
     if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
+    launcher.add_vmargs("-Xmx%s" % max_heap())
     launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
     launcher.start()
-    log("jvm start: %.2fs" % (time.monotonic() - t0))
+    from java.lang import Runtime
+    log("jvm start: %.2fs, max heap %d MB" % (time.monotonic() - t0, Runtime.getRuntime().maxMemory() // (1 << 20)))
 
     sc = Sidecar()
 

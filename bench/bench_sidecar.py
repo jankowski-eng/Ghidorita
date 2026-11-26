@@ -9,7 +9,7 @@ ROOT = os.path.dirname(HERE)
 binary, projects = sys.argv[1], sys.argv[2]
 out_path = sys.argv[3] if len(sys.argv) > 3 else None
 os.makedirs(projects, exist_ok=True)
-env = dict(os.environ, SIDECAR_PROJECTS_DIR=projects,
+env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", SIDECAR_PROJECTS_DIR=projects,
            GHIDRA_INSTALL_DIR=os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(ROOT + "/ghidra-install/ghidra_*"))[-1])
 random.seed(1)
 

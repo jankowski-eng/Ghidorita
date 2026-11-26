@@ -67,3 +67,47 @@ Decompile cache: only comment/code changes are invalidated by range, any symbol/
 **Tested:** pytest 16 passed (each new method, raw blob with explicit language + base address and a different key from the default import, save → reopen, delete-while-open `Busy`, close cancels decompile, auth refusal); `npm test` 14 passed; autotest passes on the mock and on the real sidecar with `/bin/ls` (dirty/save, close → welcome, import dialog defaults and explicit options, quit prompt through a real `win.close()` via the main-process handler, Cancel keeps the app alive). A fresh review found the sidecar commit had mangled two blocks (fixed), a UI/sidecar desync after a rejected open (fixed), and View > Reload bypassing the prompt (menu item removed).
 
 **Not tested / limits:** real Cmd+Q and the red button by hand (only `win.close()` and the shared handler); the raw import only with x86-32 and 6502 languages; the explicit-options open in the real autotest is answered locally, so no second analysis of `/bin/ls`; language picker with hundreds of entries is a filter plus a `size=6` select, not looked at by a person; explicit base `0` creates a second entry next to the default import (no collision, duplicate analysis); `_close()` leaves the coalescer's armed flag set (harmless today); no editing UI yet. Benchmark hunks in `sidecar/main.py`, `sidecar/timings.json`, `bench/` were left uncommitted throughout; pytest ran with them present.
+
+## Round 4: one 66 MB binary (the round-2 GO condition)
+Binary: `llvm-exegesis` (Homebrew llvm 23.1.3, arm64, 66.7 MB, 2 ranges, 48,800 functions, 164k strings). Apple Silicon Mac, JDK 25. Single runs. Sources: `bench/results_llvm-exegesis_{first_open,fast_open,sidecar,probe_full,probe_fast}.json`; Ghidra's per-analyzer times are in the git-ignored `.stderr.log` next to each first-open result (the slowest are quoted below); scripts `bench/bench_open.py` (first open, cancel, memory every 5 s), `bench/bench_sidecar.py`, `bench/bench_probe.py` (what an analysis found).
+
+**Listing: GO confirmed.** Per-fetch cost does not depend on binary size.
+
+| Item | 66.7 MB | 7 MB (round 2) |
+|---|---|---|
+| Listing 100 rows, 300 random positions | median 8.6 ms, p95 20.7 ms, max 86 ms | 7.1 / 12.1 ms |
+| Listing 100 rows backward | median 7.7 ms, p95 16.9 ms | 7.7 / 11.4 ms |
+| Listing while the 50 largest functions decompile | median 6.8 ms, p95 15.5 ms, max 321 ms | 9.3 / 38.8 ms |
+| Reopen from project | 2.6 s `open_binary`, 6.2 s spawn to ready, 362 MB | 2.3 s |
+| Decompile, 50 random functions (median 156 bytes) | median 29 ms, p95 518 ms, max 14.5 s | |
+| Decompile, 50 largest (34-101 KB) | **median 19 s, max 33 s, 15 of 50 failed** (30 s timeout) | p95 2.8 s |
+
+**First open is the problem.**
+
+| | Full analysis | Fast profile |
+|---|---|---|
+| Analyzers off (`SIDECAR_ANALYSIS_DISABLE`) | none | Decompiler Switch Analysis; Call Convention ID; Stack |
+| Import + analysis + save | **2,396 s (40 min)** | **1,003 s (17 min)** |
+| Peak RSS, JVM / native decompiler | 3.5 GB / 5.6 GB | 4.1 GB / 48 MB |
+| Functions / strings | 48,800 / 164,276 | 48,833 / 164,306 |
+| Sample of 2,440 entries still function entries | 2,440 | 2,440 |
+| References to that sample (calls) | 18,248 (10,765) | 17,670 (10,210), -3% (-5%) |
+| 40 mid-size decompiles: `switch` statements / `undefined` / lines | 9 / 1,416 / 19,395 | 5 / 1,422 / 18,767 |
+
+Full run, slowest analyzers (Ghidra task times): Call Convention ID 574 s, Decompiler Switch Analysis 362 + 220 s (one-time), Stack 298 s, Create Address Tables (one-time) 284 s. The three disabled ones are ~1,450 s of 2,384 s and the only users of the native decompiler during analysis, hence the 48 MB. Fast run, slowest: Create Address Tables (one-time) 224 s, Basic Constant Reference 207 s, Disassemble Entry Points 158 s.
+
+Reading this: the fast profile keeps the function set and nearly all references; the visible loss is recovered switch tables (5 of 9 in the sample) and some call references. Calling-convention and stack-variable quality was not compared beyond the `undefined` count. JVM peak was higher in the fast run (4.1 vs 3.5 GB), not explained; the Editing session's autotests ran for part of it, so treat time and memory as approximate.
+
+**Cancel works at real size:** cancelling at 10 s, 60 s and 180 s into analysis was acknowledged in 1-21 ms and `open_binary` failed with `Cancelled` 33-365 ms later.
+
+**Code changes** (`sidecar/main.py`):
+- `SIDECAR_ANALYSIS_DISABLE="Name;Name"` switches analyzers off for first-open analysis. The list is part of the `programId` (fifth key `analysisDisable` in the options hash, protocol.md "Persistence key"), so a reduced analysis never shares a key with a full one (`test_keys.py`). shortcut: process-wide env var, no UI.
+- JVM `-Xmx`: `SIDECAR_MAXMEM`, default half of RAM capped at 24 GB (was the JVM default of 1/4).
+- Ghidra's per-analyzer task times are logged after each analysis.
+
+**Next, re-ranked:**
+1. First open: offer the fast profile as the default and run the disabled analyzers in the background after the program is usable (needs analysis on thread R or a second program handle, progress, and the UI to show "analysis still running").
+2. Huge functions: timeout per request from the UI ("decompile anyway"), and a size warning before decompiling >30 KB functions.
+3. The higher JVM peak in the fast run: re-measure alone.
+
+**Not done:** no run of the app UI (`BENCH=1`) on this binary, only sidecar-level measurements; no repeat runs; the fast-profile program from the run was stored under the old (plain sha256) key before the key change, so the probe numbers above came from it.
