@@ -150,3 +150,19 @@ def test_search_memory(env):
             await c.err("search_memory", INVALID, pattern="90", start="nothex")
             await c.err("search_memory", INVALID)
     run(go())
+
+
+def test_top_symbols_and_refs(env):
+    async def go():
+        async with Client(env["proc"].port) as c:
+            top = await c.ok("top_symbols", limit=10)
+            assert top and top[0]["group"] == "entry", top[:2]
+            for g in ("import", "function"):
+                refs = [t["refs"] for t in top if t["group"] == g]
+                assert refs == sorted(refs, reverse=True) and all(r > 0 for r in refs), (g, refs)
+            fn = [t for t in top if t["group"] == "function"]
+            assert fn and len(fn) <= 10
+            hit = next(h for h in await c.ok("search_symbols", query=fn[0]["name"]) if h["address"] == fn[0]["address"])
+            assert hit["refs"] == fn[0]["refs"]
+            await c.err("top_symbols", INVALID, limit=-1)
+    run(go())

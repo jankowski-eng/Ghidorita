@@ -165,6 +165,7 @@ export interface Methods {
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
+  top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
@@ -246,7 +247,8 @@ export type CommentKind = "eol" | "pre" | "post" | "plate" | "repeatable";
 export type SymbolKind = "function" | "label" | "data" | "external" | "variable" | "other";
 export type SymbolSource = "user" | "analysis" | "imported" | "default" | "other";
 export type SymbolSort = "name" | "address" | "kind" | "namespace" | "source";
-export interface SymbolHit { name: string; address: Address; kind: SymbolKind }
+export interface SymbolHit { name: string; address: Address; kind: SymbolKind; refs?: number } // refs: references to the address (search_symbols, top_symbols)
+export interface TopSymbol extends SymbolHit { refs: number; group: "entry" | "import" | "function" }
 export interface SymbolRow { name: string; address: Address | null; kind: SymbolKind; namespace: string; source: SymbolSource } // address null: external or not in the default memory space (not navigable)
 /** Page of the symbol table in `sort` order (default address ascending), after the name substring `query` (case-insensitive, `*`/`?` wildcards) and `kinds` (any of; empty = all). limit <= 1000. */
 export interface ListSymbolsParams { offset?: number; limit?: number; query?: string; kinds?: SymbolKind[]; sort?: SymbolSort; desc?: boolean }

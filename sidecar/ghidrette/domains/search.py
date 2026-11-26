@@ -90,6 +90,7 @@ class Search:
             text_arg(query, "query")
             limit = lim(limit, 100, 5000)
             st, out, seen, fa = prog.getSymbolTable(), [], set(), self.ses.fmtr(prog)
+            refs = prog.getReferenceManager().getReferenceCountTo
             q = query.strip()
             if not q:
                 return []
@@ -98,9 +99,9 @@ class Search:
                 if prog.getMemory().contains(a):
                     syms = list(st.getSymbols(a))
                     for s in syms:
-                        out.append({"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)})
+                        out.append({"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s), "refs": int(refs(a))})
                     if not syms:
-                        out.append({"name": fa(a), "address": fa(a), "kind": "other"})
+                        out.append({"name": fa(a), "address": fa(a), "kind": "other", "refs": int(refs(a))})
                     seen.update(o["name"] + o["address"] for o in out)
             except RpcError:
                 pass
@@ -114,10 +115,37 @@ class Search:
                 a = s.getAddress()
                 if not a.isMemoryAddress():
                     continue
-                o = {"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)}
+                o = {"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s), "refs": int(refs(a))}
                 if o["name"] + o["address"] not in seen:
                     out.append(o)
             return out[:limit]
+
+    @rpc(lane="scan")
+    def top_symbols(self, limit=30, scan=None):
+        """What an empty command bar suggests: the program's entry points, then the `limit` most referenced imports (functions that thunk an
+        external function) and the `limit` most referenced other functions, each by reference count to its entry (callers and other references)."""
+        with self.ctx.lanes.scanning(scan) as prog:
+            limit = lim(limit, 30, 500)
+            st, rm, fa = prog.getSymbolTable(), prog.getReferenceManager(), self.ses.fmtr(prog)
+            out, seen = [], set()
+            for a in st.getExternalEntryPointIterator():
+                sym = st.getPrimarySymbol(a)
+                if sym is not None and a.isMemoryAddress():
+                    seen.add(fa(a))
+                    out.append({"name": str(sym.getName()), "address": fa(a), "kind": self._sym_kind(prog, sym), "refs": int(rm.getReferenceCountTo(a)), "group": "entry"})
+            groups = {"import": [], "function": []}
+            for n, f in enumerate(prog.getFunctionManager().getFunctions(True)):
+                if n & 255 == 0:
+                    scan.check()
+                a = f.getEntryPoint()
+                if f.isExternal() or not a.isMemoryAddress() or fa(a) in seen:
+                    continue
+                th = f.getThunkedFunction(True) if f.isThunk() else None
+                groups["import" if th is not None and th.isExternal() else "function"].append((int(rm.getReferenceCountTo(a)), str(f.getName()), fa(a)))
+            for g, rows in groups.items():
+                rows.sort(key=lambda r: -r[0])
+                out += [{"name": n, "address": a, "kind": "function", "refs": r, "group": g} for r, n, a in rows[:limit] if r > 0]
+            return out
 
     SYM_SORTS = ("name", "address", "kind", "namespace", "source")
 

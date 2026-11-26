@@ -346,6 +346,10 @@ const handlers = {
   },
   // ---- reads ----
   get_function_at: ({ address }) => funcAt(parseAddr(address)),
+  top_symbols({ limit }) {
+    const n = Math.min(limit ?? 30, 500), f = (i, group) => ({ name: nameOf(i), address: entryOf(i), kind: "function", refs: (i * 37) % 50 + 1, group });
+    return [f(0, "entry"), ...[1, 2, 3].map((i) => f(i, "import")), ...Array.from({ length: n }, (_, k) => f(k + 4, "function")).sort((a, b) => b.refs - a.refs)];
+  },
   search_symbols({ query, limit }) {
     if (typeof query !== "string") bad("query");
     const lim = parseInt0(limit, 100, "limit"), q = query.toLowerCase(), out = [];

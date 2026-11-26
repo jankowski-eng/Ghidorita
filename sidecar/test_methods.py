@@ -11,7 +11,7 @@ GOLDEN = {
     "open_binary": "open",
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
-    "search_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "search_memory": "scan", "list_data_types": "scan",
+    "search_symbols": "scan", "top_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "search_memory": "scan", "list_data_types": "scan",
     "decompile": "decomp", "variable_uses": "decomp", "function_graph": "decomp",
     "rename_variable": "edit", "retype_variable": "edit", "auto_create_structure": "edit", "load_coverage": "file",
     **{m: "R" for m in (

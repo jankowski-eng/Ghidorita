@@ -9,6 +9,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   const fl = await c.open(file);
   need(fl?.length, "no functions");
   if (name === "shot-graph") return graphShot(fl!, c, result);
+  if (name === "shot-bar") return barShot(c, result);
   throw new Error("unknown shot flow " + name);
 }
 
@@ -28,6 +29,18 @@ async function graphShot(fl: { name: string; entry: string; size: number }[], c:
   nodes().find((n) => n.getAttribute("aria-label") === `Block ${other.start}`)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await waitFor(() => nodes().find((n) => n.getAttribute("aria-label") === `Block ${other.start}`)?.getAttribute("aria-current"), 10000, "clicked block becomes current");
   result.graph = { function: f.name, blocks: g.blocks.length, edges: g.edges.length, cKind: g.blocks.filter((b) => b.kind === "c").length };
+  await sleep(300);
+  return true;
+}
+
+async function barShot(c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  c.command({ type: "search" });
+  const rows = () => [...document.querySelectorAll<HTMLElement>('[role="listbox"] .hit')].map((r) => r.textContent ?? "");
+  await waitFor(() => rows().length > 3, 15000, "suggestions with an empty query");
+  const r = rows();
+  need(/entry point/.test(r[0]), "entry point first: " + r[0]);
+  need(r.some((t) => /used in \d+ places?/.test(t)), "a row says why it ranks: " + r.slice(0, 4).join(" | "));
+  result.bar = r.slice(0, 8);
   await sleep(300);
   return true;
 }
