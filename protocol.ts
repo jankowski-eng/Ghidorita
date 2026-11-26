@@ -114,7 +114,7 @@ export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "
 export interface Notifications {
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
   progress: { phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
-  // ranges null = unknown/broad, refetch everything. Coalesced ~50 ms. Fired for edits, undo and redo; not during open_binary.
+  // ranges null = unknown/broad, refetch everything; start/end inclusive. Coalesced ~50 ms. Fired for edits, undo and redo; not during open_binary.
   program_changed: { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }
