@@ -1,7 +1,9 @@
 """Exports: the JSON symbol map and the C header, after a rename and a new structure."""
 import json, os, re
 
-from testlib import Client, INVALID, Proc, run
+import pytest
+
+from testlib import CANCELLED, Client, INVALID, Proc, run
 
 
 def test_export_symbols_and_header_after_rename(env, tmp_path):
@@ -65,3 +67,46 @@ def test_export_gzf_reopens_with_same_functions_and_unsaved_edit(env, tmp_path):
         finally:
             proc2.stop()
     run(go())
+
+
+@pytest.fixture(scope="module")
+def small(sc):
+    from inproc import build
+    build(sc, "t_export", [("text", 0x1000, bytes.fromhex("5589e5b801000000" "5dc3"), False)])
+    return sc
+
+
+EXPORTS = [("export_symbols", "syms.json", True), ("export_header", "prog.h", True), ("export_gzf", "prog.gzf", False)]
+
+
+@pytest.mark.parametrize("method,name,scanned", EXPORTS)
+def test_export_failure_leaves_existing_file(small, tmp_path, monkeypatch, method, name, scanned):
+    from ghidrette.core.errors import RpcError
+    from ghidrette.core.lanes import Scan
+    call = lambda p: getattr(small, method)(p, **({"scan": Scan(small.ses.epoch)} if scanned else {}))
+    dest = tmp_path / name
+    dest.write_bytes(b"keep me")
+
+    def boom(fd):
+        raise OSError(5, "injected I/O error")
+    with monkeypatch.context() as m:
+        m.setattr(os, "fsync", boom)  # the temp file is written, the flush to disk fails
+        with pytest.raises(OSError, match="injected"):
+            call(str(dest))
+    assert dest.read_bytes() == b"keep me" and os.listdir(tmp_path) == [name]
+
+    if scanned:  # cancelled after the write, before the replace
+        def late_cancel(scan):
+            if len(os.listdir(tmp_path)) > 1:  # the temp file is there: the write is done
+                raise RpcError(CANCELLED, "cancelled")
+        with monkeypatch.context() as m:
+            m.setattr(Scan, "check", late_cancel)
+            with pytest.raises(RpcError) as e:
+                call(str(dest))
+        assert e.value.code == CANCELLED and dest.read_bytes() == b"keep me" and os.listdir(tmp_path) == [name]
+
+    call(str(dest))
+    assert dest.read_bytes() != b"keep me" and dest.stat().st_size > 0 and os.listdir(tmp_path) == [name]
+    with pytest.raises(RpcError) as e:
+        call(str(tmp_path / "no" / "such" / name))
+    assert e.value.code == INVALID and "existing folder" in str(e.value)

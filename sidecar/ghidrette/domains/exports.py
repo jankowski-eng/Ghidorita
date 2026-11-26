@@ -1,5 +1,5 @@
 """Exports: a JSON symbol map and a C header (scan lane: reads only) and a Ghidra archive (.gzf, lane R), written to a path the client picked with its native save dialog."""
-import json, os, re
+import json, os, re, secrets
 
 from ..core.args import text_arg
 from ..core.errors import BUSY, INTERNAL, INVALID, RpcError, java_error
@@ -18,6 +18,36 @@ class Exports:
         text_arg(path, "path")
         if not os.path.isabs(path) or not os.path.isdir(os.path.dirname(path)):
             raise RpcError(INVALID, "path must be absolute, in an existing folder: %r" % path[:200])
+
+    @staticmethod
+    def _replace(path, write, check=None):
+        """write(tmp) to a fresh sibling of `path`, fsync it, check(), then os.replace: a failure or cancel leaves an existing `path`
+        untouched and no temp file behind. The sibling keeps the extension (an exporter may want it)."""
+        root, ext = os.path.splitext(path)
+        tmp = "%s.%s.tmp%s" % (root, secrets.token_hex(4), ext)
+        try:
+            write(tmp)
+            fd = os.open(tmp, os.O_RDWR)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            if check:
+                check()
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
+    def _text(text):
+        def write(tmp):
+            with open(tmp, "x", encoding="utf-8") as f:
+                f.write(text)
+        return write
 
     @rpc(lane="scan")
     def export_symbols(self, path, scan=None):
@@ -56,8 +86,7 @@ class Exports:
                         comments.append({"address": fa(a), "kind": k, "text": str(t)})
             key = lambda r: (len(r["address"]), r["address"])  # shortcut: address order as text (same width within a space), upgrade with akey when mixed spaces matter
             out = {"program": str(prog.getName()), "functions": sorted(funcs, key=key), "labels": sorted(labels, key=key), "data": sorted(data, key=key), "comments": sorted(comments, key=key)}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(out, f, indent=1)
+        self._replace(path, self._text(json.dumps(out, indent=1)), scan.check)
         return {"path": path, "functions": len(funcs), "labels": len(labels), "data": len(data), "comments": len(comments)}
 
     @rpc(lane="scan")
@@ -89,8 +118,7 @@ class Exports:
             w = StringWriter()
             DataTypeWriter(dtm, w).write(types, TaskMonitor.DUMMY)
             text = str(w.toString()) + "\n/* functions */\n" + "\n".join(protos) + "\n"  # shortcut: prototypes use Ghidra's type names (undefined8 ...), upgrade by typedef-ing them
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
+        self._replace(path, self._text(text), scan.check)
         return {"path": path, "types": len(types), "functions": len(protos), "skipped": skipped}
 
     @rpc(lane="R")
@@ -110,10 +138,13 @@ class Exports:
         if os.path.isdir(path):
             raise RpcError(INVALID, "path is a folder: %r" % path[:200])
         exp = GzfExporter()
-        try:
-            ok = bool(exp.export(File(path), prog, None, TaskMonitor.DUMMY))
-        except jpype.JException as e:
-            raise java_error(e)
-        if not ok:
-            raise RpcError(INTERNAL, "export failed: " + str(exp.getMessageLog().toString())[:500])
+
+        def write(tmp):
+            try:
+                ok = bool(exp.export(File(tmp), prog, None, TaskMonitor.DUMMY))
+            except jpype.JException as e:
+                raise java_error(e)
+            if not ok:
+                raise RpcError(INTERNAL, "export failed: " + str(exp.getMessageLog().toString())[:500])
+        self._replace(path, write)
         return {"path": path, "bytes": os.path.getsize(path)}
