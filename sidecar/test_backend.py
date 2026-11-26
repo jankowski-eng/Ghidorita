@@ -1011,7 +1011,7 @@ def test_open_profile_fast_and_full(tmp_path):
 
 def test_open_profile_on_raw_blob(bproc):
     proc, d = bproc
-    raw = blob(d, "profile.bin")
+    raw = blob(d, "profile.bin", pad=7)  # other bytes than the shared blob: its own program, no comments left by earlier tests
     opts = dict(path=raw, loader="Raw Binary", language=X86, baseAddress=BASE)
 
     async def go():

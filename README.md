@@ -40,7 +40,7 @@ cd app && npm start
 Other modes:
 
 ```bash
-MOCK=1 npm start                    # fake sidecar, 2M fake rows
+MOCK=1 npm start                    # fake sidecar, 2M fake rows (MOCK_LOCKED=1: every project call answers ProjectLocked)
 AUTOTEST=/bin/ls npm start          # scripted flow, prints AUTOTEST_RESULT, writes app/out/screenshot.png
 cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: test_smoke.py (timings.json) + test_backend.py (v1 API)
 cd ../app && npm test                                          # address map unit test
@@ -56,7 +56,8 @@ Analyzed programs persist in a Ghidra project under `$SIDECAR_PROJECTS_DIR` (the
 ## Editing (Ghidra's default keys)
 Listing (row cursor: click or arrows): `L` rename label/function, `;` comment (kind selectable, EOL prefilled), `F` create function, `T` define data, `C` clear code. Decompiler (cursor on a token; also the context menu): `L` rename variable/param/function/label, `Cmd+L` retype variable, Edit menu > Edit Function Signature, `;` comment (pre). `Cmd+Z` / `Cmd+Shift+Z` program undo/redo (a text input keeps its own undo), `Cmd+S` save. Edits autosave when another binary is opened and on quit; saving drops Ghidra's undo history.
 Autotest edit flow: `AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=<fresh dir> npm start`, then `AUTOTEST_PHASE=2` with the same dir to check the edit persisted.
-Backend gaps: listing shows EOL comments only (no pre/plate/post, function headers, xref columns); no way to read non-EOL comments (comment dialog prefills EOL only); `rename_symbol` cannot create a label where none exists.
+`L` on a row without a label creates one (`create_label`); `;` prefills the chosen kind from `get_comments` and follows the kind selector. View > Strings opens the strings panel (filter, paging, click goes to the address). Import dialog: analysis profile Full or Fast (default Fast above 20 MB).
+Backend gaps: listing shows EOL comments only (no pre/plate/post in rows, function headers, xref columns); xrefs list memory references and imports, not stack/register references.
 
 ## Packaging (macOS, Apple Silicon)
 
