@@ -34,3 +34,20 @@ test("functionsMayChange", () => {
   assert.equal(functionsMayChange(p(["function"], []), f), true);
   assert.equal(functionsMayChange(p(["data", "code"], null), f), false);
 });
+
+test("qualified function entries (overlay, other spaces) and entries above 2^63 never throw and match only their own space", async () => {
+  const f = [{ name: "hi", entry: "0xffffffff80000000", size: 0x20 }, { name: "ov", entry: "OVL1::1000", size: 0x20 }, { name: "lo", entry: "0x1000", size: 0x20 }];
+  const p = (kinds, ranges) => ({ kinds, ranges, undo });
+  assert.equal(functionsMayChange(p(["symbol"], [{ start: "OVL1::1000", end: "OVL1::1000" }]), f), true);
+  assert.equal(functionsMayChange(p(["symbol"], [{ start: "OVL1::1004", end: "OVL1::1004" }]), f), false);
+  assert.equal(functionsMayChange(p(["symbol"], [{ start: "0xffffffff80000000", end: "0xffffffff80000000" }]), f), true);
+  assert.equal(functionsMayChange(p(["symbol"], [{ start: "OVL2::1000", end: "OVL2::1000" }]), f), false); // same offset, another space
+  const log = [];
+  const d = { refetchFunctions: async () => f, currentFunctions: () => f, tabs: () => [{ id: 1, entry: "0xffffffff80000000" }, { id: 2, entry: "OVL1::1000" }, { id: 3, entry: "0x1000" }],
+    reloadTab: (id) => log.push("tab" + id), refreshListing: () => {}, refreshXrefs: () => {}, setUndo: () => {} };
+  await onProgramChanged({ ranges: [{ start: "OVL1::1008", end: "OVL1::1008" }], kinds: ["comment"], undo }, d);
+  assert.deepEqual(log, ["tab2"]); // the comment in the overlay function reloads only that tab; 0x1008 would have hit tab 3 if the space were ignored
+  log.length = 0;
+  await onProgramChanged({ ranges: [{ start: "0xffffffff8000001f", end: "0xffffffff8000001f" }], kinds: ["comment"], undo }, d);
+  assert.deepEqual(log, ["tab1"]);
+});

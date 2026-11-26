@@ -49,3 +49,8 @@ test("token -> references target", () => {
   assert.equal(xrefTargetOf({ kind: "const" }, "5", fn), null); assert.equal(xrefTargetOf(undefined, "", fn), null);
   assert.equal(xrefTargetOf({ kind: "variable", varName: "x" }, "x", null), null); // no function: nothing to look the variable up in
 });
+
+test("a global's token (varAddress) targets its address, with or without a function", () => {
+  assert.deepEqual(xrefTargetOf({ kind: "variable", varName: "g_counter", varAddress: "0xffffffff80000100" }, "g_counter", fn), { type: "address", address: "0xffffffff80000100", label: "g_counter" });
+  assert.deepEqual(xrefTargetOf({ kind: "variable", varName: "g", varAddress: "OVL1::1000" }, "g", null), { type: "address", address: "OVL1::1000", label: "g" });
+});

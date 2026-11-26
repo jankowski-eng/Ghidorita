@@ -47,3 +47,12 @@ test("address parsing, arithmetic, intersection", () => {
   assert.ok(!intersects(parseAddr("0x5"), 1, r));   // same offset, other space
   assert.ok(intersects(parseAddr("OVL1::4"), 2, r));
 });
+
+test("offIn: offset in a given space, null otherwise", async () => {
+  const { offIn } = await bundle("address.ts");
+  assert.equal(offIn("0xffffffffffffffff", ""), 0xffffffffffffffffn);
+  assert.equal(offIn("OVL1::1000", "OVL1::"), 0x1000n);
+  assert.equal(offIn("OVL1::1000", ""), null);
+  assert.equal(offIn("0x1000", "OVL1::"), null);
+  assert.equal(offIn("code:10", "code:"), 0x10n);
+});

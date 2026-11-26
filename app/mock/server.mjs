@@ -3,6 +3,7 @@ import { WebSocketServer } from "ws";
 
 const NFUNC = 5000, ROWS_PER_FUNC = 400, ROWS = NFUNC * ROWS_PER_FUNC; // 2,000,000
 const BASE = 0x401000, STRIDE = 4;
+const GLOBAL = "0x601040"; // the global g_state of every decompiled function: xrefs_to it returns a few data references
 const hex = (n) => "0x" + n.toString(16);
 const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
@@ -119,24 +120,27 @@ function decompile(i) {
   const a = (i * 7 + 1) % NFUNC, b = (i * 13 + 2) % NFUNC, c = (i * 31 + 3) % NFUNC;
   const tokens = [];
   const lines = [];
-  const add = (parts) => { // parts: string | [string, targetIdx]
+  const add = (parts) => { // parts: string | [functionIdx] (call target) | {v: name, kind, at: instruction row, g?: true} (variable token)
     let s = "";
     for (const p of parts) {
       if (typeof p === "string") s += p;
-      else { tokens.push({ line: lines.length, colStart: s.length, colEnd: s.length + nameOf(p[0]).length, kind: "function", targetFunction: entryOf(p[0]) }); s += nameOf(p[0]); }
+      else if (Array.isArray(p)) { tokens.push({ line: lines.length, colStart: s.length, colEnd: s.length + nameOf(p[0]).length, kind: "function", targetFunction: entryOf(p[0]) }); s += nameOf(p[0]); }
+      else { tokens.push({ line: lines.length, colStart: s.length, colEnd: s.length + p.v.length, kind: p.kind, varName: p.v, address: hex(BASE + i * STEP + p.at * STRIDE), ...(p.g ? { varAddress: GLOBAL } : {}) }); s += p.v; }
     }
     lines.push(s);
   };
   const [p1, p2, iv] = [v(i, "param_1"), v(i, "param_2"), v(i, "iVar1")];
+  const P1 = { v: p1, kind: "param", at: 4 }, P2 = { v: p2, kind: "param", at: 6 }, V = (at) => ({ v: iv, kind: "variable", at });
   add([sigOf(i).replace(/;$/, "")]);
   add(["{"]);
   add([`  ${decl(ty(i, "iVar1"), iv)};`]);
-  add([`  ${iv} = `, [a], `(${p1});`]);
-  add([`  if (${iv} != 0) {`]);
-  add([`    `, [b], `(${p2}, ${iv});`]);
+  add([`  `, V(4), ` = `, [a], `(`, P1, `);`]);
+  add([`  if (`, V(5), ` != 0) {`]);
+  add([`    `, [b], `(`, P2, `, `, V(6), `);`]);
   add([`  }`]);
-  add([`  ${iv} = `, [c], `(${iv} + ${i});`]);
-  add([`  return ${iv};`]);
+  add([`  `, V(7), ` = `, [c], `(`, V(7), ` + ${i});`]);
+  add([`  `, { v: "g_state", kind: "variable", at: 8, g: true }, ` = `, V(8), `;`]);
+  add([`  return `, V(8), `;`]);
   add(["}"]);
   return { text: lines.join("\n"), tokens, cached: false };
 }
@@ -332,6 +336,7 @@ const handlers = {
   },
   xrefs_to({ address, limit }) {
     const n = parseAddr(address), lim = parseInt0(limit, 100, "limit"), i = idxOfEntry(n), out = [];
+    if (n === parseInt(GLOBAL, 16)) return [3, 5, 9].map((j, k) => ({ from: hex(BASE + j * STEP + 8 * STRIDE), type: k ? "READ" : "WRITE", kind: k ? "read" : "write", function: nameOf(j) })).slice(0, lim);
     if (i < 0) return out;
     for (const c of CALLS) { // callers: caller = (callee - add) * inverse(mul) mod NFUNC
       const j = (((i - c[1]) % NFUNC + NFUNC) * INV[c[0]]) % NFUNC;
@@ -354,6 +359,20 @@ const handlers = {
     if (typeof path !== "string") bad("path");
     if (/missing/.test(path)) throw { code: -32004, message: "NotFound" };
     return { ranges: [{ start: hex(BASE), end: hex(BASE + STEP - 1) }] }; // mock: the first function was reached
+  },
+  variable_uses({ entry, name, timeoutSecs }, notify, rid) { // decompiler lane like decompile; iVar1 (as named now) has uses, nothing else does
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (typeof name !== "string") bad("name");
+    if (i < 0) nf();
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        cancels.delete(rid);
+        if (name !== v(i, "iVar1")) return resolve([]);
+        const u = (k, kind, type) => ({ from: hex(BASE + i * STEP + k * STRIDE), type, kind, function: nameOf(i) });
+        resolve([u(4, "write", "CALL"), u(5, "read", "INT_NOTEQUAL"), u(6, "read", "CALL"), u(7, "read", "INT_ADD"), u(7, "write", "CALL"), u(8, "read", "COPY")]);
+      }, 60);
+      cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
+    });
   },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);

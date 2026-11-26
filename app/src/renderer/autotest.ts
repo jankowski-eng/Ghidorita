@@ -8,6 +8,7 @@ import { runNavFlow } from "./autotestNav";
 import { runR5Flow } from "./autotestR5";
 import { runListingFlow } from "./autotestListing";
 import { runFocusedFlow } from "./autotestFlows";
+import { runAddrFlow } from "./autotestAddr";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -17,7 +18,7 @@ export interface AutotestCtx {
   goAddr(address: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
   cancelFile: string | null;
-  /** AUTOTEST_ONLY=listing: open the file and run just that flow (fast iteration) */
+  /** AUTOTEST_ONLY=listing|addr: open the file and run just that flow (fast iteration) */
   only?: string | null;
   /** AUTOTEST_FLOW: a focused scripted flow (see autotestFlows.ts) instead of the full run */
   flow: string | null;
@@ -40,6 +41,8 @@ export interface AutotestCtx {
   title(): string;
 }
 
+/** The mock sidecar names its functions fn_<n> (the real one never does for a stripped binary). Flows that need Ghidra's decompiler variables skip it. */
+export const isMock = (fl: { name: string }[]) => fl.some((f) => /^fn_\d+$/.test(f.name));
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
   const t0 = Date.now();
@@ -74,6 +77,12 @@ export async function runAutotest(file: string, c: AutotestCtx) {
     let persist: unknown;
     try {
       c.setPath(file);
+      if (c.only === "addr") {
+        await c.open(file);
+        result.ok = (await runAddrFlow(file, await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+        result.errors = c.errors;
+        return window.host.autotestDone(result);
+      }
       if (c.only === "listing") {
         await c.open(file);
         result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
@@ -248,6 +257,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
       result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+      if (result.ok) result.ok = (await runAddrFlow(file, await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
       if (result.ok) {
         const ed = await runEditFlow(fl, c, result);
         let ok = ed.ok;

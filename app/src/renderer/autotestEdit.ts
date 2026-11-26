@@ -1,6 +1,6 @@
 import type { FunctionInfo } from "../../../protocol";
 import { rpc } from "./client";
-import { byLabel, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
+import { byLabel, isMock, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Edit flow of the real-sidecar autotest. Everything goes through the UI: key events on the listing / Monaco's input,
 // dialogs found by role + label, real application-menu items for Redo and Save.
@@ -46,7 +46,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
     }
     if (pick) break;
   }
-  if (!sawVar) { R.skipped = "decompiler has no variable tokens (mock sidecar)"; return { ok: true }; }
+  if (!sawVar || isMock(fl)) { R.skipped = "decompiler has no real variables (mock sidecar)"; return { ok: true }; }
   if (!pick) throw new Error("no function with a retypeable local found");
   const { f, v: origVar, type: origType } = pick, newFn = "autotest_fn", newVar = "autotest_var", newType = RETYPE[origType];
   Object.assign(R, { function: f.name, variable: origVar, type: origType + "->" + newType });
@@ -304,11 +304,11 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
   R.fromDataUndoRedo = true;
 
-  // 8b. Auto Create Structure on a decompiler variable (real sidecar only: the mock's decompiler has no variable tokens).
+  // 8b. Auto Create Structure on a decompiler variable (real sidecar only: the mock's variables are not Ghidra's).
   // Find a variable with inferable field accesses by trying the RPC (then undo it), then do it through the UI: cursor on the variable + Edit menu.
   let auto: { entry: string; v: string } | undefined;
   const hasVars = (await rpc.call("decompile", { entry })).tokens.some((t) => t.kind === "variable" || t.kind === "param");
-  for (const f of (hasVars ? [...fl] : []).sort((x, y) => y.size - x.size).slice(0, 60)) {
+  for (const f of (hasVars && !isMock(fl) ? [...fl] : []).sort((x, y) => y.size - x.size).slice(0, 60)) {
     if (f.entry === entry || f.entry === edit?.entry) continue;
     const r = await rpc.call("decompile", { entry: f.entry }).catch(() => null); // (huge functions may time out)
     if (!r) continue;
