@@ -142,6 +142,22 @@ def test_sigkill_loses_unsaved_but_keeps_saved(projects):
     assert persisted is True and name == "saved_name"  # old version intact, in-memory edit lost
 
 
+def test_snapshot_survives_sigkill(projects):
+    async def go():
+        proc = Proc(projects, {"SIDECAR_SNAPSHOT_SECS": "1"})
+        async with Client(proc.port) as c:
+            await c.ok("open_binary", path=BIN)
+            a = await fn5(c)
+            await c.ok("rename_symbol", address=a, newName="snapshot_name")
+            await asyncio.sleep(3.5)  # a recovery snapshot has been taken
+        proc.p.kill()
+        proc.p.wait()
+        return a
+    a = run(go())
+    persisted, name = asyncio.run(reopen_name(projects, a))
+    assert persisted is True and name == "snapshot_name"  # recovered, never saved
+
+
 def test_save_while_decompiling(projects):
     async def go():
         proc = Proc(projects, {"SIDECAR_DECOMP_WORKERS": "2"})

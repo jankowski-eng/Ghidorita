@@ -15,6 +15,22 @@ export function affectedTabs(ranges: Params["ranges"], tabs: { id: number; entry
 /** Kinds that can rename things shown in other functions (callers show a callee's name): every open tab is stale then. */
 export const nameAffecting = (kinds: Params["kinds"]) => kinds.some((k) => k === "symbol" || k === "function" || k === "type" || k === "other");
 
+/**
+ * Can the function list (name, entry, size) have changed? A renamed function fires only a symbol event, so a symbol change counts when its range
+ * covers a known entry (list sorted by entry, as the sidecar sends it) or has no range. Type, data, comment and code edits never rename a function.
+ */
+export function functionsMayChange(p: Params, funcs: FunctionInfo[]): boolean {
+  if (p.kinds.some((k) => k === "function" || k === "other")) return true;
+  if (!p.kinds.includes("symbol")) return false;
+  if (!p.ranges) return true;
+  return p.ranges.some((r) => {
+    const s = BigInt(r.start), e = BigInt(r.end);
+    let lo = 0, hi = funcs.length; // first entry >= s
+    while (lo < hi) { const m = (lo + hi) >> 1; if (BigInt(funcs[m].entry) < s) lo = m + 1; else hi = m; }
+    return lo < funcs.length && BigInt(funcs[lo].entry) <= e;
+  });
+}
+
 export interface ChangeDeps {
   refetchFunctions(): Promise<FunctionInfo[]>;
   currentFunctions(): FunctionInfo[];
@@ -34,7 +50,7 @@ export interface ChangeDeps {
 export async function onProgramChanged(p: Params, d: ChangeDeps): Promise<void> {
   d.setUndo(p.undo);
   const broad = nameAffecting(p.kinds);
-  const funcs = broad ? await d.refetchFunctions() : d.currentFunctions();
+  const funcs = broad && functionsMayChange(p, d.currentFunctions()) ? await d.refetchFunctions() : d.currentFunctions();
   const open = d.tabs();
   for (const id of broad ? open.map((t) => t.id) : affectedTabs(p.ranges, open, funcs)) d.reloadTab(id);
   d.refreshListing();

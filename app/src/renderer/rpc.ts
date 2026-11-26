@@ -39,7 +39,7 @@ export class WebSocketBackend implements Backend {
   private send<M extends keyof Methods>(id: number, method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      try { this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params })); } catch (e) { this.pending.delete(id); reject(e); } // closed socket
     });
   }
 }

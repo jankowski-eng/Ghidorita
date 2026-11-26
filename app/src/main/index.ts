@@ -86,7 +86,7 @@ function startSidecar(): Promise<number> {
   sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env });
   return new Promise((resolve, reject) => {
     sidecar!.on("error", reject);
-    sidecar!.on("exit", (code) => { reject(new Error(`sidecar exited early (${code})`)); if (!quitting) { console.error(`sidecar exited (${code})`); } });
+    sidecar!.on("exit", (code, signal) => { reject(new Error(`sidecar exited early (${code})`)); if (!quitting) { console.error(`sidecar exited (${code})`); if (ready) sidecarDied(code ?? signal); } });
     createInterface({ input: sidecar!.stdout! }).once("line", (l) => {
       const port = parseInt(l, 10);
       Number.isFinite(port) ? resolve(port) : reject(new Error("bad port line: " + l));
@@ -94,6 +94,15 @@ function startSidecar(): Promise<number> {
   });
 }
 let quitting = false;
+let ready = false; // the sidecar printed its port: from now on an exit that nobody asked for is a crash
+/** The backend died under a running app (out of memory, kill): say so once. Restarting reopens the program and restores the sidecar's recovery snapshot. */
+function sidecarDied(why: unknown) {
+  if (stopped || autotest) return; // autotest: the renderer's failing calls report it
+  stopped = quitting = true;
+  const opts = { type: "error" as const, buttons: ["Restart", "Quit"], defaultId: 0, cancelId: 1, message: "The analysis backend stopped unexpectedly",
+    detail: `Exit: ${why}. Edits made since the last save or automatic recovery snapshot (every 2 minutes) are lost. Restart reopens the app; open the binary again to get the snapshot back.` };
+  (win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)).then((r) => { if (r.response === 0) app.relaunch(); app.exit(r.response === 0 ? 0 : 1); });
+}
 
 let win: BrowserWindow;
 const autotest = process.env.AUTOTEST;
@@ -153,7 +162,7 @@ app.setName("Ghidrette");
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
-  try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
+  try { port = await startSidecar(); ready = true; } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
   ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null }));
   win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   menu = createMenu({ getWin: () => win, pick: pickFile });

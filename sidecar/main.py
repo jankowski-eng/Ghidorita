@@ -155,6 +155,8 @@ class Sidecar:
         self.plock = threading.Lock()
         self.tl = threading.local()
         threading.Thread(target=self._worker, args=(self.jobs,), daemon=True).start()
+        if float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120")) > 0:
+            threading.Thread(target=self._snapshot_loop, daemon=True).start()
         for _ in range(max(1, int(os.environ.get("SIDECAR_SCAN_WORKERS", "2")))):
             threading.Thread(target=self._worker, args=(self.sjobs,), daemon=True).start()
         for _ in range(max(1, int(os.environ.get("SIDECAR_DECOMP_WORKERS", "2")))):
@@ -171,6 +173,23 @@ class Sidecar:
             except BaseException as e:  # noqa
                 res, exc = None, e
             self._deliver(fut, res, exc)
+
+    def _snapshot_loop(self):
+        """Crash safety: every SIDECAR_SNAPSHOT_SECS, unsaved edits go to Ghidra's recovery file (what the GUI does). Unlike save it
+        keeps the undo history; the next open of the program restores them (_consume). Runs on thread R, like every program write."""
+        secs = float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120"))
+        while True:
+            time.sleep(secs)
+            try:
+                self.on_r(self._snapshot)
+            except Exception as e:  # noqa
+                log("recovery snapshot failed:", repr(e))
+
+    def _snapshot(self):
+        prog = self.program
+        if prog is not None and prog.isChanged():
+            with self.save_lock:
+                prog.getDomainFile().takeRecoverySnapshot()
 
     def _pool_worker(self, w):
         self.tl.w = w
@@ -494,7 +513,7 @@ class Sidecar:
         lst = self._make_listener(prog)
         prog.addListener(lst)  # only now: progress covers the initial analysis
         self.listener, self.results, self.consumer = lst, res, consumer
-        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}  # just cleared and saved; no Program read on thread O
+        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
         self.program_id = key
         with self.pool_lock:
             self.epoch += 1
@@ -603,10 +622,10 @@ class Sidecar:
             if persisted:
                 self.progress("import", 100, "loading persisted analysis")
                 try:
-                    prog, consumer = pyghidra.consume_program(proj, "/" + key)
+                    prog, consumer = self._consume(proj, "/" + key)
                 except Exception as e:  # noqa
                     # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
-                    if op.cancelled or re.search(r"lock|in use|already open|upgrade", repr(e), re.I):
+                    if op.cancelled or self._not_corruption(e):
                         raise  # not corruption: never delete a program that may hold saved edits
                     log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
                     proj.getProjectData().getFile("/" + key).delete()
@@ -655,6 +674,34 @@ class Sidecar:
             raise RpcError(INTERNAL, "open failed: %s" % e)
         finally:
             self.proj_lock.release()
+
+    @staticmethod
+    def _not_corruption(e):
+        """True for load failures that say nothing about the file being damaged: locked, a Ghidra version mismatch (older or newer
+        build than the one that saved it), or the JVM running out of memory."""
+        if re.search(r"lock|in use|already open|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
+            return True
+        try:
+            name = str(e.getClass().getSimpleName())
+            return name == "OutOfMemoryError" or (name == "VersionException" and int(e.getVersionIndicator()) in (1, 2))  # OLDER, NEWER
+        except Exception:
+            return False
+
+    @staticmethod
+    def _consume(proj, path):
+        """pyghidra.consume_program, but with okToRecover: unsaved edits of a crashed session (see _snapshot_loop) come back."""
+        from java.lang import Object
+        from ghidra.program.model.listing import Program
+        from ghidra.util.task import TaskMonitor
+        consumer = Object()
+        df = proj.getProjectData().getFile(path)
+        if df is None:
+            raise FileNotFoundError(path)
+        dobj = df.getDomainObject(consumer, True, True, TaskMonitor.DUMMY)
+        if not Program.class_.isAssignableFrom(dobj.getClass()):
+            dobj.release(consumer)
+            raise TypeError("%s is not a Program" % path)
+        return dobj, consumer
 
     def _import_and_analyze(self, path, key, proj, op, opts, disabled):
         from ghidra.app.util.importer import ProgramLoader
@@ -1193,20 +1240,24 @@ class Sidecar:
                 last = ad
             return {"items": items, "next": None if done or last is None else hx(last.getOffset() + 1)}
 
-    def list_data_types(self, query, limit=100):
+    def list_data_types(self, query, limit=100, scan=None):
+        """Scan worker (thread S): walks every program and built-in type, so it must not hold up listing fetches on R."""
         from ghidra.program.model.data import BuiltInDataTypeManager
-        prog = self.need()
-        text_arg(query, "query")
-        limit, q = lim(limit, 100, 1000), query.strip().lower()
-        hits, seen = [], set()
-        for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
-            for dt in dtm.getAllDataTypes():
-                n = str(dt.getName())
-                if q in n.lower() and str(dt.getPathName()) not in seen:
-                    seen.add(str(dt.getPathName()))
-                    hits.append((0 if n.lower().startswith(q) else 1, len(n), dict(self._dt_node(dt), source=src)))
-        hits.sort(key=lambda h: h[:2])
-        return [h[2] for h in hits[:limit]]
+        with self.scanning(scan) as prog:
+            text_arg(query, "query")
+            limit, q = lim(limit, 100, 1000), query.strip().lower()
+            hits, seen, n = [], set(), 0
+            for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
+                for dt in dtm.getAllDataTypes():
+                    n += 1
+                    if n & 255 == 0:
+                        scan.check()
+                    name = str(dt.getName())
+                    if q in name.lower() and str(dt.getPathName()) not in seen:
+                        seen.add(str(dt.getPathName()))
+                        hits.append((0 if name.lower().startswith(q) else 1, len(name), dict(self._dt_node(dt), source=src)))
+            hits.sort(key=lambda h: h[:2])
+            return [h[2] for h in hits[:limit]]
 
     # ---- data types: tree, detail, editors (reads on R; edits are one transaction each) ----
     @staticmethod
@@ -2038,9 +2089,9 @@ class Sidecar:
     def cancel_open(self):
         return {"cancelled": bool(self.opening is not None and self.opening.cancel())}
 
-    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory")  # scan workers, see the module docstring
+    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory", "list_data_types")  # scan workers, see the module docstring
     R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable",
-                 "xrefs_from", "list_data_types", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
+                 "xrefs_from", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
                  "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
                  "define_data", "clear_code", "save", "dt_sources", "dt_children", "get_data_type", "create_data_type",
                  "delete_data_type", "rename_data_type", "edit_struct", "edit_enum", "create_struct_from_data", "auto_create_structure")

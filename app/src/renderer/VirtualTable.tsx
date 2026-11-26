@@ -70,13 +70,13 @@ const PAGE = 100;
  * (query, sort, program version) drop everything; replies of an older generation are ignored. Cancelled/NoProgram errors are not errors.
  */
 export function usePaged<T>(fetch: (offset: number, limit: number) => Promise<{ total: number; items: T[] }>, resetKey: string, onError: (e: unknown) => void, cancel: () => void) {
-  const st = useRef({ gen: 0, pages: new Map<number, T[]>(), loading: new Set<number>() });
+  const st = useRef({ gen: 0, pages: new Map<number, T[]>(), loading: new Set<number>(), failed: new Set<number>() });
   const fetchRef = useRef(fetch); fetchRef.current = fetch;
   const [state, setState] = useState({ total: 0, ready: false, busy: false });
   const [, tick] = useState(0);
   const load = (p: number) => {
     const s = st.current, gen = s.gen;
-    if (s.pages.has(p) || s.loading.has(p)) return;
+    if (s.pages.has(p) || s.loading.has(p) || s.failed.has(p)) return; // a failed page is retried on the next reset, not on every render
     s.loading.add(p);
     fetchRef.current(p * PAGE, PAGE).then((r) => {
       if (gen !== s.gen) return;
@@ -86,12 +86,12 @@ export function usePaged<T>(fetch: (offset: number, limit: number) => Promise<{ 
     }, (e) => {
       if (gen !== s.gen) return;
       s.loading.delete(p); setState((x) => ({ ...x, busy: s.loading.size > 0 }));
-      if (!isCancelled(e) && !isNoProgram(e)) onError(e);
+      if (!isCancelled(e) && !isNoProgram(e)) { s.failed.add(p); onError(e); }
     });
   };
   useEffect(() => {
     const s = st.current;
-    cancel(); s.gen++; s.pages.clear(); s.loading.clear();
+    cancel(); s.gen++; s.pages.clear(); s.loading.clear(); s.failed.clear();
     setState({ total: 0, ready: false, busy: true }); load(0);
   }, [resetKey]); // eslint-disable-line
   useEffect(() => () => { st.current.gen++; cancel(); }, []); // eslint-disable-line
