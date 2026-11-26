@@ -1,10 +1,11 @@
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { randomBytes } from "node:crypto";
 const token = randomBytes(24).toString("hex");
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createMenu } from "./menu";
 import { validPath } from "./recent";
+import { checkDrop } from "./drop";
 import { CAPABILITIES } from "../../../protocol";
 import { providerLaunch } from "./providers";
 import { ProviderProcess } from "./providerProcess";
@@ -88,6 +89,7 @@ ipcMain.handle("pick-save-path", async (e, name: unknown) => {
 ipcMain.handle("clipboard-write", (e, text: unknown) => { if (fromWin(e) && typeof text === "string" && text.length <= 8 << 20) clipboard.writeText(text); });
 ipcMain.handle("pick-file", async (e) => (fromWin(e) ? pickFile() : null));
 
+ipcMain.handle("drop-check", (e, paths: unknown) => fromWin(e) ? checkDrop(paths, (p) => { try { const st = statSync(p); return st.isDirectory() ? "dir" : st.isFile() ? "file" : "none"; } catch { return "none"; } }) : { error: "Refused." });
 ipcMain.handle("recent-add", (e, p: unknown) => { if (fromWin(e) && validPath(p)) menu?.addRecent(p); });
 ipcMain.handle("menu-state", (e, s: unknown) => {
   const o = s as Record<string, unknown> | null;

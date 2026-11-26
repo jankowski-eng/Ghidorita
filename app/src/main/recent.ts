@@ -1,15 +1,13 @@
 import { app } from "electron";
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
+import { validPath } from "./validPath";
 
 const MAX = 10;
 let list: string[] | null = null;
 const file = () => path.join(app.getPath("userData"), "recent.json");
 
-/** Strict check for paths coming from the renderer. They are only stored and echoed back, never executed. */
-export function validPath(p: unknown): p is string {
-  return typeof p === "string" && p.length > 0 && p.length <= 4096 && !p.includes("\0") && path.isAbsolute(p) && !p.startsWith("\\\\");
-}
+export { validPath };
 
 export function getRecent(): string[] {
   if (list) return list;

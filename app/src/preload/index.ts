@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { Capability } from "../../../protocol";
 
 // ---- IPC contract (main <-> renderer). Main must validate every payload it receives. ----
@@ -24,6 +24,8 @@ export interface MenuState {
 export interface Host {
   getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null; only?: string | null; flow: string | null; decompileTimeout: number | null; expect: unknown }>;
   pickFile(): Promise<string | null>;
+  /** Drag and drop: the dropped items' paths (File.path is gone; webUtils reads it here), checked by main: one regular file, else an error message. */
+  checkDrop(files: File[]): Promise<{ path: string } | { error: string }>;
   /** Native save dialog for an export, suggesting `name` (a bare file name); null = cancelled. */
   pickSavePath(name: string): Promise<string | null>;
   /** Fallback for navigator.clipboard.writeText: main validates (a string up to 8 MiB) and writes the system clipboard. */
@@ -46,6 +48,7 @@ export interface Host {
 
 const host: Host = {
   getConfig: () => ipcRenderer.invoke("get-config"),
+  checkDrop: (files) => ipcRenderer.invoke("drop-check", files.map((f) => webUtils.getPathForFile(f))),
   pickFile: () => ipcRenderer.invoke("pick-file"),
   pickSavePath: (name) => ipcRenderer.invoke("pick-save-path", name),
   writeClipboard: (text) => ipcRenderer.invoke("clipboard-write", text),

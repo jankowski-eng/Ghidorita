@@ -20,6 +20,7 @@ src/renderer/
     editing.ts         useEditing: edit commands on the listing cursor row / decompiler token, show references, what the context menu may offer
     dialogs.ts         requestOpen / confirmImport / cancelImport (the import dialog comes before an open when the provider offers options)
     DialogHost.tsx     renders the modal dialogs: opening progress, import, edit, form
+    drop.tsx           drag and drop: window listeners and the "Drop to open" overlay; a drop goes through `host.checkDrop` (preload: `webUtils.getPathForFile`, then main `drop-check` -> `main/drop.ts`: one regular file, absolute path) and `requestOpen`; refused while an open runs or a dialog is up (`dropAllowed.ts`)
     menu.ts            routeMenu (every menu/command-bar command), useMenuState (pushed to main), useWindowTitle, useBusy
     coverage.ts        load / clear coverage runs and repaint
     exports.ts         File > Export (symbol map, C header, Ghidra archive)
