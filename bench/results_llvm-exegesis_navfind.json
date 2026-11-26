@@ -1,0 +1,207 @@
+{
+ "binary": "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis",
+ "others_running_at_start": [
+  "72754 sh -c electron-vite build && electron .",
+  "72885 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
+  "72886 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72887 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72888 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72905 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72909 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/sidecar/.venv/bin/python /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/sidecar/main.py",
+  "73068 sh -c electron-vite build && electron .",
+  "73169 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
+  "73180 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
+  "73181 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/ghidrette-data-type-manager-c9a23c/app/node_modules/.bin/electron .",
+  "73182 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .",
+  "73185 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
+  "73186 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
+  "73187 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/ghidrette-data-type-manager-c9a23c/sidecar/.venv/bin/python /Users/fjankowski/Proj"
+ ],
+ "rss_after_open_mb": 372.2,
+ "total_bytes": 66696320,
+ "listing_baseline": {
+  "n": 300,
+  "median_ms": 7.23,
+  "p95_ms": 30.33,
+  "max_ms": 95.0
+ },
+ "symbols": {
+  "default_first_page_cold_ms": 347.4,
+  "total": 190443,
+  "default_second_page_ms": 4.9,
+  "default_page_again_ms": 3.5,
+  "default_deep_page_cold_ms": 1003.3,
+  "default_deep_page_again_ms": 5.6,
+  "filter_typing_cold": [
+   {
+    "query": "s",
+    "ms": 2419.1,
+    "total": 166111
+   },
+   {
+    "query": "st",
+    "ms": 1303.9,
+    "total": 56280
+   },
+   {
+    "query": "std",
+    "ms": 807.7,
+    "total": 3986
+   },
+   {
+    "query": "std::",
+    "ms": 614.7,
+    "total": 3548
+   },
+   {
+    "query": "std::vector",
+    "ms": 589.5,
+    "total": 208
+   }
+  ],
+  "filter_repeat_ms": 5.7,
+  "filter_page2_ms": 5.6,
+  "filter_rare_cold": {
+   "ms": 726.4,
+   "total": 1383
+  },
+  "kind_function_cold": {
+   "ms": 4272.5,
+   "total": 49248
+  },
+  "kind_external_cold": {
+   "ms": 4040.4,
+   "total": 38
+  },
+  "kind_label_cold": {
+   "ms": 3994.6,
+   "total": 113732
+  },
+  "sort_name_cold_ms": 1268.0,
+  "sort_name_page2_ms": 5.0,
+  "sort_kind_cold_ms": 4503.4,
+  "sort_kind_page2_ms": 4.9,
+  "sort_namespace_cold_ms": 2315.7,
+  "sort_namespace_page2_ms": 5.2,
+  "sort_source_cold_ms": 2438.2,
+  "sort_source_page2_ms": 4.7,
+  "sort_address_desc_cold_ms": 791.9,
+  "search_symbols_ms": 757.8,
+  "search_symbols_hits": 85
+ },
+ "strings": {
+  "first_page_cold_ms": 19945.2,
+  "total": 164276,
+  "second_page_ms": 1.3,
+  "deep_page_ms": 1.3,
+  "query_cold": {
+   "ms": 26.6,
+   "total": 1612
+  },
+  "query_repeat_ms": 0.9,
+  "minlength12_cold": {
+   "ms": 17235.9,
+   "total": 141410
+  },
+  "minlength12_page2_ms": 0.8
+ },
+ "memsearch": {
+  "exact_4_rare": {
+   "pattern": "de ad be ef",
+   "total_ms": 449,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 449
+  },
+  "exact_4_rare_again": {
+   "pattern": "de ad be ef",
+   "total_ms": 322,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 322
+  },
+  "exact_4_wildcard": {
+   "pattern": "48 8b ?? 24",
+   "total_ms": 1316,
+   "matches": 3,
+   "pages": 1,
+   "slowest_page_ms": 1316
+  },
+  "exact_4_arm64_common": {
+   "pattern": "fd 7b bf a9",
+   "total_ms": 465,
+   "matches": 1904,
+   "pages": 1,
+   "slowest_page_ms": 465
+  },
+  "exact_4_zero": {
+   "pattern": "00 00 00 00",
+   "total_ms": 306075,
+   "matches": 5730229,
+   "pages": 574,
+   "slowest_page_ms": 1227
+  },
+  "text_ascii": {
+   "pattern": "std::",
+   "total_ms": 298,
+   "matches": 7,
+   "pages": 1,
+   "slowest_page_ms": 298
+  },
+  "text_utf16": {
+   "pattern": "std",
+   "total_ms": 295,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 295
+  },
+  "text_ascii_nocase": {
+   "pattern": "ERROR",
+   "total_ms": 395,
+   "matches": 2290,
+   "pages": 3,
+   "slowest_page_ms": 327
+  }
+ },
+ "listing_during": {
+  "byte_search_rare_x1": {
+   "n": 12,
+   "median_ms": 8.82,
+   "p95_ms": 18.02,
+   "max_ms": 18.02,
+   "scan_ms": 305
+  },
+  "byte_search_rare_x3": {
+   "n": 31,
+   "median_ms": 11.25,
+   "p95_ms": 25.14,
+   "max_ms": 26.28,
+   "scan_ms": 900
+  },
+  "strings_first_scan_minlength7": {
+   "n": 427,
+   "median_ms": 11.3,
+   "p95_ms": 182.74,
+   "max_ms": 474.22,
+   "scan_ms": 19261
+  },
+  "symbol_sort_snapshots": {
+   "n": 1,
+   "median_ms": 10.36,
+   "p95_ms": 10.36,
+   "max_ms": 10.36,
+   "scan_ms": 19
+  }
+ },
+ "rss_end_mb": 1412.7,
+ "others_running_at_end": [
+  "78429 sh -c electron-vite build && electron .",
+  "78474 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
+  "78475 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78476 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78477 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78478 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/sidecar/.venv/bin/python /Users/fjankowski/Projekte/f",
+  "78492 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78562 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile"
+ ]
+}

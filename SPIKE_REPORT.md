@@ -113,3 +113,49 @@ Reading this: the fast profile keeps the function set and nearly all references;
 3. The higher JVM peak in the fast run: re-measure alone.
 
 **Not done:** no run of the app UI (`BENCH=1`) on this binary, only sidecar-level measurements; no repeat runs; the fast-profile program from the run was stored under the old (plain sha256) key before the key change, so the probe numbers above came from it.
+
+## Round 5: row 6, navigate and find
+Branch `claude/nav-find-row6`, rebased on main. Contract in `protocol.md`/`protocol.ts`, mock in `app/mock`, pytest in `sidecar/test_backend.py`, UI flow in `app/src/renderer/autotestNav.ts`.
+
+**Built**
+- **Scan workers (thread S, 2 by default).** `list_symbols`, `list_strings`, `search_symbols`, `search_memory` no longer run on thread R; they are cancellable by request id (`cancel_search`), cancelled on close/replace, and their snapshots (symbol views, string scans; LRU of 8) are dropped on every program change.
+- **Symbol table** (`list_symbols`, paged, sort by name/address/kind/namespace/source, name filter, kind filter) and **Strings** (`list_strings` + `query`) windows, virtualized, server-paged; click/Enter navigates listing and decompiler. `search_symbols` now matches inside Ghidra (`SymbolTable.getSymbolIterator` glob), so only hits cross into Python.
+- **Memory search** (`search_memory`): Ghidra's `memsearch` API (`UserInputByteMatcher` + `MemorySearcher`) over the loaded initialized set; hex with `??` wildcards, ASCII/UTF-16 text, optional case-insensitivity; one page per request with a `next` address; the panel streams pages, Cancel keeps results, Continue resumes.
+- **Xrefs**: every reference has a `kind` (call/jump/read/write/readwrite/data/flow/other); `xrefs_from` also returns stack/register/external references (`target`, `label`); `xrefs_to_variable` for a decompiler variable token; `X` on a listing row or a decompiler token (also Go menu, Monaco context menu) pins the panel; "from…" toggle.
+- Item 5 (instruction/operand text search): **skipped**, not started.
+
+**Measured** (`bench/bench_navfind.py` -> `bench/results_llvm-exegesis_navfind.json`; 66.7 MB llvm-exegesis, 190,443 symbols, 164,276 strings, persisted program; single run). **Not a clean run:** the quiet check found 15 other processes (other sessions' Electron apps, sidecars and ~10 native decompilers, load average ~10) at start and 8 at the end, and no quiet window appeared in ~15 minutes. Treat times as upper bounds and re-run when the machine is idle.
+
+| Item | Result |
+|---|---|
+| Symbol table, first page (default view) | 347 ms cold, 3.5-5 ms warm; 2nd page 4.9 ms |
+| Symbol table, deep page (last 100 rows, default view) | 1.0 s cold (walks the iterator), 5.6 ms after |
+| Filter while typing "s","st","std","std::","std::vector" (each cold) | 2.4 s, 1.3 s, 0.8 s, 0.6 s, 0.6 s; repeat 5.7 ms; page 2 5.6 ms |
+| Rare filter ("exegesis", 1,383 hits) | 0.73 s |
+| Kind filter (function / label / external), cold | 4.3 s / 4.0 s / 4.0 s |
+| Sort cold: name / namespace / source / kind | 1.3 s / 2.3 s / 2.4 s / 4.5 s; address desc 0.8 s; page 2 of each ~5 ms |
+| `search_symbols` "std::vector" | 0.76 s (was a Python scan) |
+| Strings first page (full scan of 164k strings, cold) | **13.8 s** (19.9 s with the first implementation; the 13.8 s was a separate run), minLength change = another full scan (17.2 s measured before the fix); query filter on the cached scan 27 ms; any later page 1.3 ms |
+| Byte search, 4 bytes, whole binary, no match (`de ad be ef`) | 449 ms cold, 322 ms again |
+| 4-byte pattern with wildcard (`48 8b ?? 24`, 3 hits) | 1.3 s |
+| `fd 7b bf a9` (1,904 hits, one per prologue) | 465 ms |
+| `00 00 00 00` (5.7 M matches, 574 pages of 10,000) | 306 s total, slowest page 1.2 s: the panel stops at 50,000 matches |
+| Text ASCII `std::` / UTF-16 `std` / ASCII `ERROR` nocase | 0.30 s / 0.30 s / 0.40 s (3 pages) |
+| Listing fetch (100 rows) baseline | median 7.2 ms, p95 30 ms, max 95 ms |
+| ... while a byte search runs (x1 / x3 back to back) | median 8.8 / 11.3 ms, p95 18 / 25 ms, max 26 ms |
+| ... while the first strings scan runs (19 s) | median 11.3 ms, **p95 183 ms, max 474 ms** |
+| Sidecar RSS | 372 MB after open, 1.41 GB after all of the above (snapshots hold Java Symbol objects) |
+
+Reading this: searches are not a problem for the listing (the scan is inside Java). The first strings scan is: it is a Python loop over 164k JPype objects, takes 14-20 s, and the Python thread contends with thread R for the GIL (p95 183 ms). Kind filters and kind sort are also Python loops over all 190k symbols (4 s).
+
+**Tested:** pytest 31 tests on `/bin/ls` (new: `test_list_symbols`, `test_scan_cancel_and_listing_not_blocked`, `test_xref_kinds_and_variables`, `test_strings_query`, `test_search_memory`); `npm test` 24 pass; `npm run typecheck`; autotest on the mock and on the real sidecar (`/bin/ls`) drive each panel through the DOM (sort, filter, kind chip, min length, click to navigate, byte/wildcard/text/UTF-16 search compared against the RPC, cancel click, listing X, decompiler X, from-mode). `test_pool_concurrent_and_cancel` fails when the machine is loaded (also on the pre-branch code: concurrent 0.6 s vs sequential 0.4 s with other sessions running); it is a timing assertion, not related to this work.
+
+**Not done / limits**
+- Strings first scan 14-20 s and its GIL contention; fix = lazy paging by address or a Java-side helper (the bench `RowFetcher` route). Kind filter/sort: same.
+- Deep offset in the default symbol view walks the iterator (1 s for the last page); no address index.
+- Instruction/operand-text search (item 5) not built.
+- Variable xrefs only for variables the program has (stack locals, parameters, renamed ones); decompiler temporaries (`iVar1`) and global variables give an empty list, no symbol lookup for globals.
+- Cancel through the UI is only checked as "click, no error": on `/bin/ls` and on the mock a search ends before the click lands. The cancel RPC is tested in pytest (queued request) but a running `search_memory` cancel is not.
+- Symbol table lists variable symbols too (kind `variable`); non-default address spaces and externals have no address (not navigable). Dock height is fixed; no column resizing.
+- Memory search cannot restrict to blocks/selection; `start` is the only range control. Search results are not refreshed after edits (the panel clears on program change).
+- A page read racing an edit can fail `Cancelled` ("program changed").
