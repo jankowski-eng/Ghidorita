@@ -81,7 +81,7 @@ export const results = {
   export_header: shape({ path: str, types: count, functions: count, skipped: count }),
   export_gzf: shape({ path: str, bytes: count }),
   list_symbols: shape({ total: count, items: array(shape({ name: str, address: nullable(address), kind: symbolKind, namespace: str, source })) }),
-  list_strings: shape({ total: count, items: array(shape({ address, value: str, length: count })) }),
+  list_strings: shape({ total: count, items: array(shape({ address, value: str, length: count, refs: count, refFrom: optional(array(shape({ from: address, function: optional(str) }))) })) }),
   search_memory: shape({ next: nullable(address), items: array(shape({ address, length: positive, bytes: str, function: optional(str) })) }),
   list_data_types: array(shape({ ...typeFields, source: optional(str) })),
   dt_sources: array(shape({ id: str, name: str, writable: bool })),
@@ -117,7 +117,7 @@ export const results = {
   list_programs: array(shape({ programId: nonempty, name: str, sourcePath: optional(str), sizeBytes: count, analyzed: bool, analysis: optional(oneOf("none", "partial", "done")), analysisProfile: optional(oneOf("full", "fast")), lastOpened: optional(str), options })),
   delete_program: object,
   import_candidates: shape({ candidates: array(shape({ loader: str, language: nullable(str), compilerSpec: nullable(str), preferred: bool, acceptsBaseAddress: bool, requiresLanguage: optional(bool) })),
-    sizeBytes: count, entropy: array(number), note: optional(str), profiles: optional(array(shape({ id: profile, label: str }))), defaultProfile: optional(profile),
+    sizeBytes: count, entropy: array(number), note: optional(str), layout: optional(nullable(shape({ entry: nullable(address), sections: array(shape({ name: str, size: count, entropy: number })) }))), profiles: optional(array(shape({ id: profile, label: str }))), defaultProfile: optional(profile),
   }),
   list_languages: array(shape({ id: str, description: str, compilerSpecs: array(shape({ id: str, name: str })) })),
 } satisfies Record<keyof Methods, Check>;
