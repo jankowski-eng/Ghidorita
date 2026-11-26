@@ -14,6 +14,7 @@ const wordPos = (text: string, w: string) => { // first whole-word hit -> Monaco
 };
 
 export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Record<string, any>): Promise<{ ok: boolean; persist?: unknown }> {
+  fl = await rpc.call("list_functions", {}); // earlier steps of the autotest renamed functions: use current names
   const R: Record<string, any> = (result.edit = {});
   const lb = () => document.querySelector<HTMLElement>(".lbox")!;
   const fnRow = (e: string) => document.getElementById("fn-" + e)?.textContent ?? "";
