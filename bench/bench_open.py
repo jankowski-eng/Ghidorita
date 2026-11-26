@@ -17,6 +17,9 @@ ap.add_argument("--cancel-at", type=float, action="append", default=[])
 ap.add_argument("--timeout", type=float, default=90, help="minutes for the full open")
 ap.add_argument("--no-full", action="store_true")
 a = ap.parse_args()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common
+QUIET = common.wait_quiet()  # exits 3 when the machine never gets quiet: no measurement under load
 os.makedirs(a.projects, exist_ok=True)
 env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", SIDECAR_PROJECTS_DIR=a.projects,
            GHIDRA_INSTALL_DIR=os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(ROOT + "/ghidra-install/ghidra_*"))[-1])
@@ -37,7 +40,7 @@ async def main():
     errlog = open(a.out.replace(".json", "") + ".stderr.log", "w")
     p = subprocess.Popen([sys.executable, ROOT + "/sidecar/main.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errlog, env=env)
     port = int(p.stdout.readline())
-    res = {"binary": a.binary, "size_mb": round(os.path.getsize(a.binary) / 1e6, 2), "jvm_start_s": round(time.monotonic() - t_start, 2),
+    res = {"quiet": QUIET, "binary": a.binary, "size_mb": round(os.path.getsize(a.binary) / 1e6, 2), "jvm_start_s": round(time.monotonic() - t_start, 2),
            "env": {k: v for k, v in os.environ.items() if k.startswith("SIDECAR_")}}
     samples, notes, stop = [], [], threading.Event()
     t0 = time.monotonic()

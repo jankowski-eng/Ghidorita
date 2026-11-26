@@ -11,6 +11,9 @@ binary, projects, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
 env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", SIDECAR_PROJECTS_DIR=projects,
            GHIDRA_INSTALL_DIR=os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(ROOT + "/ghidra-install/ghidra_*"))[-1])
 random.seed(1)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common
+QUIET = common.wait_quiet()  # exits 3 when the machine never gets quiet: no measurement under load
 
 
 def pct(xs, p):
@@ -34,7 +37,7 @@ def quiet():
 
 
 async def main():
-    res = {"binary": binary, "others_running_at_start": quiet()}
+    res = {"binary": binary, "quiet": QUIET, "others_running_at_start": quiet()}
     p = subprocess.Popen([sys.executable, ROOT + "/sidecar/main.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
     port = int(p.stdout.readline())
     nid = [0]

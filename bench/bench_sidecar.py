@@ -12,6 +12,9 @@ os.makedirs(projects, exist_ok=True)
 env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", SIDECAR_PROJECTS_DIR=projects,
            GHIDRA_INSTALL_DIR=os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(ROOT + "/ghidra-install/ghidra_*"))[-1])
 random.seed(1)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common
+QUIET = common.wait_quiet()  # exits 3 when the machine never gets quiet: no measurement under load
 
 
 def rss_mb(pid):  # process + native children (the decompile process)
@@ -35,7 +38,7 @@ async def session(first):
     t0 = time.monotonic()
     p = subprocess.Popen([sys.executable, ROOT + "/sidecar/main.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
     port = int(p.stdout.readline())
-    res = {"jvm_start_s": round(time.monotonic() - t0, 2)}
+    res = {"quiet": QUIET, "jvm_start_s": round(time.monotonic() - t0, 2)}
     nid = [0]
     async with websockets.connect("ws://127.0.0.1:%d" % port, max_size=None) as ws:
         futs = {}
