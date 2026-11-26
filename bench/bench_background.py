@@ -12,6 +12,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("binary"); ap.add_argument("projects"); ap.add_argument("out")
 ap.add_argument("--profile", choices=["fast", "full"], default="full")
 ap.add_argument("--timeout", type=float, default=90)
+ap.add_argument("--no-load", action="store_true", help="no listing/decompile traffic while the analysis runs: its pure wall time, comparable to analyzeHeadless")
 a = ap.parse_args()
 os.makedirs(a.projects, exist_ok=True)
 env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", SIDECAR_PROJECTS_DIR=a.projects,
@@ -37,7 +38,7 @@ async def main():
     errlog = open(a.out.replace(".json", "") + ".stderr.log", "w")
     p = subprocess.Popen([sys.executable, ROOT + "/sidecar/main.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errlog, env=env)
     port = int(p.stdout.readline())
-    res = {"binary": a.binary, "size_mb": round(os.path.getsize(a.binary) / 1e6, 2), "profile": a.profile, "env": {k: v for k, v in os.environ.items() if k.startswith("SIDECAR_")}}
+    res = {"no_load": a.no_load, "binary": a.binary, "size_mb": round(os.path.getsize(a.binary) / 1e6, 2), "profile": a.profile, "env": {k: v for k, v in os.environ.items() if k.startswith("SIDECAR_")}}
     samples, stop = [], threading.Event()
     T0 = [time.monotonic()]
 
@@ -119,7 +120,7 @@ async def main():
                 if time.monotonic() - t0 > a.timeout * 60:
                     return {"state": "TIMEOUT"}
                 await asyncio.sleep(5)
-        tasks = [asyncio.create_task(listing_loop()), asyncio.create_task(decompile_loop())]
+        tasks = [] if a.no_load else [asyncio.create_task(listing_loop()), asyncio.create_task(decompile_loop())]
         st = await watch()
         running[0] = False
         await asyncio.gather(*tasks, return_exceptions=True)
