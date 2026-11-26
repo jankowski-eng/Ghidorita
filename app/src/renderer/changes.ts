@@ -1,4 +1,5 @@
 import type { Address, FunctionInfo, Notifications } from "../../../protocol";
+import { offIn, parseAddr } from "./address";
 
 type Params = Notifications["program_changed"];
 
@@ -7,8 +8,10 @@ export function affectedTabs(ranges: Params["ranges"], tabs: { id: number; entry
   if (!ranges) return tabs.map((t) => t.id);
   const size = new Map(funcs.map((f) => [f.entry, f.size]));
   return tabs.filter((t) => {
-    const s = BigInt(t.entry), e = s + BigInt(Math.max(size.get(t.entry) ?? 1, 1)) - 1n;
-    return ranges.some((r) => BigInt(r.start) <= e && BigInt(r.end) >= s);
+    const p = parseAddr(t.entry);
+    if (!p) return false;
+    const e = p.off + BigInt(Math.max(size.get(t.entry) ?? 1, 1)) - 1n;
+    return ranges.some((r) => { const a = offIn(r.start, p.space), b = offIn(r.end, p.space); return a !== null && b !== null && a <= e && b >= p.off; });
   }).map((t) => t.id);
 }
 
@@ -17,17 +20,16 @@ export const nameAffecting = (kinds: Params["kinds"]) => kinds.some((k) => k ===
 
 /**
  * Can the function list (name, entry, size) have changed? A renamed function fires only a symbol event, so a symbol change counts when its range
- * covers a known entry (list sorted by entry, as the sidecar sends it) or has no range. Type, data, comment and code edits never rename a function.
+ * covers a known entry (any space) or has no range. Type, data, comment and code edits never rename a function.
  */
 export function functionsMayChange(p: Params, funcs: FunctionInfo[]): boolean {
   if (p.kinds.some((k) => k === "function" || k === "other")) return true;
   if (!p.kinds.includes("symbol")) return false;
   if (!p.ranges) return true;
   return p.ranges.some((r) => {
-    const s = BigInt(r.start), e = BigInt(r.end);
-    let lo = 0, hi = funcs.length; // first entry >= s
-    while (lo < hi) { const m = (lo + hi) >> 1; if (BigInt(funcs[m].entry) < s) lo = m + 1; else hi = m; }
-    return lo < funcs.length && BigInt(funcs[lo].entry) <= e;
+    const ps = parseAddr(r.start), e = parseAddr(r.end);
+    if (!ps || !e) return true;
+    return funcs.some((f) => { const o = offIn(f.entry, ps.space); return o !== null && o >= ps.off && o <= e.off; });
   });
 }
 

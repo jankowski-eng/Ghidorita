@@ -29,3 +29,9 @@ export function intersects(a: Parsed, length: number, ranges: { start: Address; 
     return !!s && !!t && s.space === a.space && s.off <= e && t.off >= a.off;
   });
 }
+
+/** The offset of `a` when it is in the space with prefix `space` ("" = default), else null. Cheaper than parseAddr for long lists. */
+export function offIn(a: Address, space: string): bigint | null {
+  if (space === "") return a.startsWith("0x") ? BigInt(a) : null;
+  return a.startsWith(space) ? BigInt("0x" + a.slice(space.length)) : null;
+}

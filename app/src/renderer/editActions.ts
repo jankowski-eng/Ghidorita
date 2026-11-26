@@ -47,11 +47,13 @@ export const isOwnName = (tok: Token | undefined, text: string, fn: { name: stri
 export type XrefTarget = { type: "address"; address: Address; label: string } | { type: "variable"; entry: Address; name: string; label: string };
 
 /**
- * X on a decompiler token. Variable/param -> its program variable (xrefs_to_variable; empty for decompiler-invented temporaries and globals);
+ * X on a decompiler token. A global (token has varAddress) -> references to its address; other variable/param -> its program variable (xrefs_to_variable),
+ * or, when the program has none (iVar1, register temporaries), its uses in the function (variable_uses);
  * a call target or the function's own name -> the function; a label -> its address. Anything else has no target.
  */
 export function xrefTargetOf(tok: Token | undefined, text: string, fn: { entry: Address; name: string } | null): XrefTarget | null {
   if (!tok) return null;
+  if ((tok.kind === "variable" || tok.kind === "param") && tok.varName && tok.varAddress) return { type: "address", address: tok.varAddress, label: tok.varName };
   if ((tok.kind === "variable" || tok.kind === "param") && tok.varName && fn) return { type: "variable", entry: fn.entry, name: tok.varName, label: tok.varName };
   if (tok.kind === "function") {
     if (tok.targetFunction) return { type: "address", address: tok.targetFunction, label: text };

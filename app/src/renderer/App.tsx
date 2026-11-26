@@ -63,6 +63,7 @@ export function App() {
   const setNotice = (m: string) => { noticeRef.current = m; setNoticeState(m); };
   const [fn, setFn] = useState<FuncAt | null>(null);
   const [xrefVersion, setXrefVersion] = useState(0);
+  const [useHl, setUseHl] = useState<{ name: string; address: Address } | null>(null); // a clicked decompiler-variable use: its token is highlighted
   const [xrefTarget, setXrefTarget] = useState<XrefTarget | null>(null); // pinned "show references" target; null = follow the cursor
   const [dock, setDock] = useState<DockId | null>(null);
   const [dataVersion, setDataVersion] = useState(0); // bumped on every program change: the dock windows refetch
@@ -325,7 +326,7 @@ export function App() {
       const tok = tokenAt(d.tokens, pos.lineNumber, pos.column);
       const text = tok ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
       const t = xrefTargetOf(tok, text, { entry: tab.entry, name: names.get(tab.entry) ?? "" });
-      if (t) setXrefTarget(t); else setFlash("No references for the token at the cursor.");
+      if (t) { setXrefTarget(t); setUseHl(null); } else setFlash("No references for the token at the cursor.");
     } else {
       const a = cursorRef.current || topAddrRef.current;
       if (a) { const at = ((window as any).__listing?.rowAt(a)?.address as Address | undefined) ?? a; setXrefTarget({ type: "address", address: at, label: at }); }
@@ -443,6 +444,7 @@ export function App() {
   const here = nav.current?.address ?? null;
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
+  const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
 
   return (
     <div className="app">
@@ -460,7 +462,7 @@ export function App() {
           functions: (
             <div className="funcs-col">
               <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
-              <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a) => go(a, "xrefs")} onFollow={() => setXrefTarget(null)} />
+              <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />
             </div>
           ),
           listing: <Listing map={map!} scrollReq={scrollReq} change={listingChange} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={(a) => setXrefTarget({ type: "address", address: a, label: a })} />,
@@ -473,7 +475,7 @@ export function App() {
                 <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
               <div className="editor" style={{ display: active ? undefined : "none" }}>
-                <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
+                <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>
             </div>
           ),

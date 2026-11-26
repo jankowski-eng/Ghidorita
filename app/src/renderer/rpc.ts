@@ -29,8 +29,8 @@ export class WebSocketBackend implements Backend {
   }
 
   callCancellable<M extends keyof Methods>(method: M, params: Methods[M]["params"]) {
-    // decompile: cancel_decompile; the scan requests (symbols, strings, searches): cancel_search
-    const cancelWith = method === "decompile" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory", "list_data_types"].includes(method) ? "cancel_search" : null;
+    // decompile, variable_uses: cancel_decompile; the scan requests (symbols, strings, searches): cancel_search
+    const cancelWith = method === "decompile" || method === "variable_uses" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory", "list_data_types"].includes(method) ? "cancel_search" : null;
     if (!cancelWith) throw new Error(`${method} is not cancellable`);
     const id = this.nextId++;
     return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, cancelWith, { id }).catch(() => {}); } };

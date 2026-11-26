@@ -11,11 +11,13 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRef, onEdit, canAt, onXrefs }: {
-  tabId: number | null; liveIds: number[]; text: string; tokens: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, onCallClick, editorRef, onEdit, canAt, onXrefs }: {
+  tabId: number | null; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
   onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
+  const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
+  const hlKey = useRef("");
   const monacoRef = useRef<Monaco | null>(null);
   const clickRef = useRef(onCallClick); clickRef.current = onCallClick;
   const editRef = useRef(onEdit); editRef.current = onEdit;
@@ -37,6 +39,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRe
     editor.addAction({ id: "gd.xrefs", label: "Show References To", keybindings: [monaco.KeyCode.KeyX], precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
     editor.onDidChangeCursorPosition(syncKeys);
     decorations.current = editor.createDecorationsCollection();
+    hlDecor.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
   };
   useEffect(() => () => { for (const m of monacoRef.current?.editor.getModels() ?? []) if (/tab-\d+$/.test(m.uri.path)) m.dispose(); }, []);
@@ -74,6 +77,13 @@ export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRe
       options: { inlineClassName: "call-token" },
     })));
   }, [tokens, text, tabId]);
+  useEffect(() => { // the token(s) of the use clicked in the references panel; scrolled into view once per new highlight
+    const rng = (t: Token) => ({ startLineNumber: t.line + 1, startColumn: t.colStart + 1, endLineNumber: t.line + 1, endColumn: t.colEnd + 1 });
+    hlDecor.current?.set(highlight.map((t) => ({ range: rng(t), options: { inlineClassName: "use-token" } })));
+    const key = tabId + ":" + highlight.map((t) => t.line + "," + t.colStart).join(";");
+    if (highlight.length && key !== hlKey.current) editorRef.current?.revealLineInCenterIfOutsideViewport(highlight[0].line + 1);
+    hlKey.current = highlight.length ? key : "";
+  }, [highlight, text, tabId]); // eslint-disable-line
   return (
     <Editor language="c" theme="vs-dark" path={`tab-${tabId ?? 0}`} value={text} onMount={onMount}
       options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }} />

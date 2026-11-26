@@ -21,6 +21,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .lrow .a { color: #9cdcfe; width: 90px; } .lrow .b { color: #888; width: 130px; }
 .lrow .m { color: #c586c0; width: 60px; } .lrow .l { color: #dcdcaa; } .lrow .c { color: #6a9955; }
 .status { padding: 3px 8px; background: #007acc; color: #fff; font: 12px ui-monospace, Menlo, monospace; }
+.use-token { background: rgba(255, 213, 79, 0.35); border-radius: 2px; }
 .call-token { text-decoration: underline; cursor: pointer; color: #4fc1ff !important; }
 .err { color: #f66; }
 .lbox { position: relative; height: 100%; overflow: hidden; font: 12px ui-monospace, Menlo, monospace; }
