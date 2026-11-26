@@ -193,13 +193,17 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
     for (const [label, v] of Object.entries(vals)) { last = await waitFor(() => input(label), 5000, "input " + label); typeInto(last, v); }
     press(last!, "Enter"); await closed(title);
   };
+  // program_changed refreshes the listing at its old top row ~100 ms after an edit; navigate only after that has settled
+  const goTo = async (addr: string) => { await sleep(800); await c.select(addr as any); };
   const get = (path: string) => rpc.call("get_data_type", { path });
-  const listingHas = (text: string) => [...document.querySelectorAll(".lrow")].some((x) => x.textContent?.includes(text));
+  const rowsText = () => [...document.querySelectorAll(".lrow")].map((x) => x.textContent ?? "");
+  const listingHas = (text: string) => rowsText().some((x) => x.includes(text));
+  const listingShows = (text: string, what: string, want = true) => waitFor(() => listingHas(text) === want, 10000, what).catch((e) => { throw new Error(`${e.message}; visible rows: ${rowsText().slice(0, 8).join(" | ")}`); });
   const base = await rpc.call("undo_state", {});
   const strings = (await rpc.call("list_strings", { limit: 2, minLength: 1 })).items;
   const a = strings[0].address, b = strings[1].address;
   const fl = await rpc.call("list_functions", {});
-  const entry = edit?.entry ?? fl[Math.min(2, fl.length - 1)].entry;
+  const entry = (fl.find((f) => f.entry !== edit?.entry && f.size > 16) ?? fl[0]).entry; // not the function the edit flow checks in phase 2
   const NAME = "AutotestStruct";
   let steps = 0; // undo steps this flow adds (one per transaction)
 
@@ -238,12 +242,12 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   await fillAll("Apply data type", { Address: a, "Data type": "/" + NAME }); steps++;
   await click("Close data types");
   await waitFor(() => !byLabel("region", "Data Type Manager"), 3000, "manager to close");
-  await c.select(a);
-  await waitFor(() => listingHas(NAME), 8000, "struct in the listing");
+  await goTo(a);
+  await listingShows(NAME, "struct in the listing");
   R.listing = true;
 
   // 5. the decompiler shows the type: set a parameter of the function to NAME * through Edit Function Signature
-  await c.select(entry);
+  await goTo(entry);
   await waitFor(() => c.editorText().length > 0, 15000, "decompiler text");
   c.editor().focus(); document.querySelector<HTMLElement>(".monaco-editor textarea")!.focus();
   c.command({ type: "edit", action: "signature" });
@@ -258,7 +262,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   // labels repeat ("Edit S: add" twice), so a step is noticed by the undo state *and* the struct's content changing
   const depth = async () => JSON.stringify([await rpc.call("undo_state", {}), (await get("/" + NAME).catch(() => null))?.components?.map((x) => [x.type, x.name, x.comment])]);
   await undo(); await waitFor(() => !c.editorText().includes(NAME), 15000, "undo signature");
-  await undo(); await c.select(a); await waitFor(() => !listingHas(NAME), 10000, "undo apply");
+  await undo(); await goTo(a); await listingShows(NAME, "undo apply", false);
   for (let i = 2; i < steps; i++) { const n = await depth(); await undo(); await until(async () => (await depth()) !== n, "undo step " + (i + 1)); }
   await until(async () => (await rpc.call("get_data_type", { path: "/" + NAME }).then(() => false, () => true)), "struct gone after undoing everything");
   const st = await rpc.call("undo_state", {});
@@ -269,23 +273,23 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   for (let i = 0; i < steps; i++) { const n = await depth(); await c.menu("redo"); await until(async () => (await depth()) !== n, "redo step " + (i + 1)); }
   const d2 = await get("/" + NAME);
   if (d2.size !== 16 || d2.components!.length !== 3 || d2.components![0].name !== "f_first") throw new Error("redo did not restore the struct: " + JSON.stringify(d2.components));
-  await c.select(a); await waitFor(() => listingHas(NAME), 10000, "redo apply");
-  await c.select(entry); await waitFor(() => c.editorText().includes(NAME), 15000, "redo signature in the decompiler");
+  await goTo(a); await listingShows(NAME, "redo apply");
+  await goTo(entry); await waitFor(() => c.editorText().includes(NAME), 15000, "redo signature in the decompiler");
   R.redoAll = true;
 
   // 8. create a struct from listing data: int + short, selected by cursor + length, applied; one undo removes both
   await rpc.call("define_data", { address: b, dataType: "int" });
   await rpc.call("define_data", { address: "0x" + (BigInt(b) + 4n).toString(16), dataType: "short" });
-  await c.select(b); await sleep(300);
+  await goTo(b); await sleep(300);
   lb().focus(); c.command({ type: "edit", action: "createStruct" });
   await fillAll("Create structure", { "Structure name": "AutotestFromData", "Length (bytes)": "6" });
   await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "struct from data");
   const f2 = await get("/AutotestFromData");
   R.fromData = f2.components!.filter((x) => !x.undefined).map((x) => `${x.offset}:${x.type}`);
   if (f2.size !== 6 || R.fromData.join() !== "0:int,4:short") throw new Error("unexpected struct from data " + JSON.stringify(R.fromData));
-  await waitFor(() => listingHas("AutotestFromData"), 10000, "struct from data in the listing");
+  await listingShows("AutotestFromData", "struct from data in the listing");
   await undo(); await until(async () => !(await rpc.call("get_data_type", { path: "/AutotestFromData" }).then(() => true, () => false)), "undo struct from data");
-  await waitFor(() => !listingHas("AutotestFromData"), 10000, "listing without the struct from data");
+  await listingShows("AutotestFromData", "listing without the struct from data", false);
   await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
   R.fromDataUndoRedo = true;
 
