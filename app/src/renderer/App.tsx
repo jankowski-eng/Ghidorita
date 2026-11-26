@@ -124,6 +124,8 @@ export function App() {
       if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
     } catch (e) {
+      // the UI already forgot the old program; a rejected open (NotFound/InvalidArgument/Busy) leaves it open in the sidecar. close_program is idempotent.
+      await rpc.call("close_program", {}).catch(() => {});
       if (e instanceof RpcError && e.code === -32002) setNotice("Open cancelled."); // not an error
       else { fail(e); setNotice("Could not open " + p); }
     } finally { openingRef.current = false; setOpening(null); setProgress(null); }

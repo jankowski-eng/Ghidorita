@@ -40,7 +40,7 @@ export function createMenu({ getWin, pick }: Deps) {
       { role: "editMenu" },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
-        { type: "separator" }, { role: "reload" }, { role: "toggleDevTools" },
+        { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [
         { label: "Back", accelerator: "CmdOrCtrl+[", enabled: state.canBack, click: () => send({ type: "nav-back" }) },
