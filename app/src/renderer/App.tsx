@@ -43,7 +43,9 @@ export function App() {
   const navRef = useRef(nav);
   const openingRef = useRef(false);
   const openedRef = useRef(false);
+  const cancellingRef = useRef(false);
   const goSeq = useRef(0);
+  const refetch = useRef(latest()).current;
   const topAddrRef = useRef<Address>("");
   const errors = useRef<string[]>([]);
   const autotestRef = useRef(false);
@@ -59,8 +61,10 @@ export function App() {
   const applyLoc = async (loc: Loc, viaHistory: boolean, seq: number): Promise<void> => {
     if (viaHistory || loc.source !== "listing") setScrollReq((s) => ({ address: loc.address, n: s.n + 1 }));
     let f: FuncAt | null = null;
-    try { f = await containingFunction(loc.address); } catch (e) { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }
+    let err: unknown = null;
+    try { f = await containingFunction(loc.address); } catch (e) { err = e; }
     if (seq !== goSeq.current) return;
+    if (err && !(err instanceof RpcError && err.code === -32001)) fail(err);
     setFn(f);
     if (f) await tabs.show(f.entry);
   };
@@ -83,9 +87,9 @@ export function App() {
 
   const open = async (p: string) => {
     if (openingRef.current) return; // the sidecar would answer Busy
-    openingRef.current = true; openedRef.current = false;
+    openingRef.current = true; openedRef.current = false; cancellingRef.current = false; setSearchOpen(false); setGotoOpen(false);
     setOpened(false); setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
-    tabs.reset(); setNav(emptyNav); setFn(null); clearFunctionCache(); ++goSeq.current;
+    tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); clearFunctionCache(); ++goSeq.current;
     try {
       await rpc.call("open_binary", { path: p });
       const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
@@ -99,8 +103,9 @@ export function App() {
   };
   const cancelOpen = () => {
     if (!openingRef.current) return;
+    cancellingRef.current = true;
     setOpening((o) => (o ? { ...o, cancelling: true } : o));
-    rpc.call("cancel_open", {}).catch(fail);
+    rpc.call("cancel_open", {}).then((r) => { if (!r.cancelled) cancellingRef.current = false; if (!r.cancelled) setOpening((o) => (o ? { ...o, cancelling: false } : o)); }, fail); // false: open not cancellable yet, let the user retry
   };
 
   // program_changed: one subscription, all reactions in changes.ts
@@ -108,7 +113,7 @@ export function App() {
     if (!openedRef.current) return;
     clearFunctionCache();
     onProgramChanged(p, {
-      refetchFunctions: async () => { const fl = await rpc.call("list_functions", {}); setFuncs(fl); return fl; },
+      refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) setFuncs(fl); return fl ?? []; },
       tabs: () => tabsRef.current().tabs,
       reloadTab: (id) => tabs.reload(id),
       refreshListing: () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1 })); },
@@ -133,7 +138,7 @@ export function App() {
       const cfg = await window.host.getConfig();
       await rpc.connect(cfg.port, cfg.token);
       rpc.onNotification = (m, p) => {
-        if (m === "progress") { if (openingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped
+        if (m === "progress") { if (openingRef.current && !cancellingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped
         else if (m === "program_changed") api.current.programChanged(p as Parameters<typeof onProgramChanged>[0]);
         else if (m === "error") fail((p as { message: string }).message);
       };
@@ -150,10 +155,10 @@ export function App() {
     })().catch(fail);
     const off = window.host.onMenu((c) => {
       if (c.type === "open-path") { if (!openingRef.current) { setPath(c.path); api.current.open(c.path); } }
-      else if (c.type === "search") setSearchOpen(true);
+      else if (c.type === "search") { if (openedRef.current) setSearchOpen(true); }
       else if (c.type === "nav-back") api.current.back();
       else if (c.type === "nav-forward") api.current.forward();
-      else if (c.type === "goto") setGotoOpen(true);
+      else if (c.type === "goto") { if (openedRef.current) setGotoOpen(true); }
       else if (c.type === "close-tab") api.current.closeTab();
       else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
     });
@@ -189,7 +194,7 @@ export function App() {
               <XrefPanel address={here} version={xrefVersion} onGo={(a) => go(a, "xrefs")} />
             </div>
           ),
-          listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={fail} onRowClick={(a) => go(a, "listing")} />,
+          listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} />,
           decompiler: (
             <div className="dec">
               <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />

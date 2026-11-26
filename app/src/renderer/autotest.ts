@@ -31,7 +31,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
         const reached = c.status().phase;
         c.cancelOpen(); await p;
         const st = c.status();
-        const again = await c.open(c.cancelFile);
+        const again = await Promise.race([c.open(c.cancelFile), new Promise<undefined>((r) => setTimeout(() => r(undefined), 300000))]); // needs a never-analyzed, non-trivial binary (see README)
         result.cancel = { phaseAtCancel: reached, openedAfterCancel: st.opened, notice: st.notice, reopenFunctions: again?.length ?? 0, openedAfterReopen: c.status().opened };
         result.cancelOk = reached === "analysis" && !st.opened && /cancel/i.test(st.notice) && !!again?.length && c.status().opened;
       }

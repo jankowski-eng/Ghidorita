@@ -10,15 +10,16 @@ export function XrefPanel({ address, version, onGo }: { address: Address | null;
   const run = useRef(latest()).current;
   useEffect(() => {
     if (!address) { run(Promise.resolve(null)); setRows([]); setMsg(""); return; }
+    setRows([]);
     run(rpc.call("xrefs_to", { address, limit: 200 })).then((r) => { if (r) { setRows(r); setMsg(r.length ? "" : "no references"); } },
       (e) => { setRows([]); setMsg(e instanceof Error ? e.message : String(e)); });
   }, [address, version]); // eslint-disable-line
   return (
     <div className="xrefs" role="region" aria-label="References to current address">
       <div className="xh">References to {address ?? "-"} ({rows.length})</div>
-      <div className="xl" role="list">
+      <div className="xl">
         {rows.map((x, i) => (
-          <button key={i} role="listitem" className="xr" onClick={() => onGo(x.from)} title={x.type}>
+          <button key={i} className="xr" onClick={() => onGo(x.from)} title={x.type}>
             <span className="a">{x.from}</span> <span className="t">{x.type}</span> {x.function && <span className="f">{x.function}</span>}
           </button>
         ))}

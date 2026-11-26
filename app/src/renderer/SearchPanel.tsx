@@ -16,7 +16,7 @@ export function SearchPanel({ onGo, onClose }: { onGo: (a: Address) => void; onC
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
     if (!dq.trim()) { run(Promise.resolve(null)); setHits([]); setMsg(""); return; }
-    run(searchSymbols(dq, 100)).then((r) => { if (r) { setHits(r); setCur(0); setMsg(r.length ? "" : "no matches"); } }, (e) => setMsg(e instanceof Error ? e.message : String(e)));
+    run(searchSymbols(dq, 100)).then((r) => { if (r) { setHits(r); setCur(0); setMsg(r.length ? "" : "no matches"); } }, (e) => { setHits([]); setMsg(e instanceof Error ? e.message : String(e)); });
   }, [dq]); // eslint-disable-line
   const go = (h?: SymbolHit) => { if (h) { onGo(h.address); onClose(); } };
   const onKey = (e: React.KeyboardEvent) => {
@@ -28,8 +28,8 @@ export function SearchPanel({ onGo, onClose }: { onGo: (a: Address) => void; onC
   useEffect(() => { document.getElementById(`sym-${cur}`)?.scrollIntoView({ block: "nearest" }); }, [cur]);
   return (
     <div className="search" role="dialog" aria-label="Search symbols" onKeyDown={onKey}>
-      <input ref={input} role="combobox" aria-expanded aria-controls="sym-list" aria-activedescendant={hits[cur] ? `sym-${cur}` : undefined}
-        aria-label="Symbol name" placeholder="Search symbols…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input ref={input} role="combobox" aria-expanded={hits.length > 0} aria-controls="sym-list" aria-activedescendant={hits[cur] ? `sym-${cur}` : undefined}
+        aria-label="Symbol name" placeholder="Search symbols…" value={q} onChange={(e) => { setQ(e.target.value); setHits([]); }} />
       <div id="sym-list" role="listbox" aria-label="Symbols">
         {hits.map((h, i) => (
           <div key={h.address + h.name} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}

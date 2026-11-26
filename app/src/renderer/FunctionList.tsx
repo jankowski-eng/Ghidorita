@@ -14,7 +14,7 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
   const run = useRef(latest()).current;
   useEffect(() => {
     if (!dq) { run(Promise.resolve(null)); setHits(null); setErr(""); return; }
-    run(searchSymbols(dq, 1000)).then((r) => { if (r) { setErr(""); setHits(r.filter((h) => h.kind === "function").map((h) => ({ name: h.name, entry: h.address, size: 0 }))); } },
+    run(searchSymbols(dq, 5000)).then((r) => { if (r) { setErr(r.length >= 5000 ? "more than 5000 symbols match; showing the first 5000 (refine the filter)" : ""); setHits(r.filter((h) => h.kind === "function").map((h) => ({ name: h.name, entry: h.address, size: 0 }))); } },
       (e) => setErr(e instanceof Error ? e.message : String(e)));
   }, [dq, funcs]); // eslint-disable-line
   const shown = hits ?? funcs;
