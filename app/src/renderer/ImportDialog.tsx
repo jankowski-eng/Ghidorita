@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AnalysisProfile, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
+import type { AnalysisProfile, FileLayout, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import { trapTab, useRestoreFocus } from "./hooks";
@@ -12,7 +12,7 @@ const errText = (e: unknown) => e instanceof RpcError ? (e.code === -32005 ? "Th
 /** Asks Ghidra which loaders/languages fit the file. Enter = open with the preselected (default) choice. */
 export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen: (o: ImportOptions | undefined) => void; onCancel: () => void }) {
   useRestoreFocus();
-  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note: string; entropy: number[]; sizeBytes: number } | { error: string } | null>(null);
+  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note: string; entropy: number[]; sizeBytes: number; layout: FileLayout | null } | { error: string } | null>(null);
   const [idx, setIdx] = useState(0);
   const [language, setLanguage] = useState<string | null>(null);
   const [spec, setSpec] = useState<string | null>(null);
@@ -24,13 +24,13 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
   useEffect(() => {
     let live = true;
     (async () => {
-      const { candidates, sizeBytes, entropy } = await rpc.call("import_candidates", { path });
+      const { candidates, sizeBytes, entropy, layout } = await rpc.call("import_candidates", { path });
       const langs = await rpc.call("list_languages", {}).catch(() => [] as LanguageInfo[]); // optional unless the user must choose
       const cands = candidates.length ? candidates : [RAW_CANDIDATE];
       if (!live) return;
       const pre = Math.max(0, cands.findIndex((c) => c.preferred));
       setProfile(defaultProfile(sizeBytes)); setIdx(pre); setLanguage(cands[pre].language); setSpec(cands[pre].compilerSpec);
-      setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary.", entropy, sizeBytes });
+      setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary.", entropy, sizeBytes, layout: layout ?? null });
     })().catch((e) => { if (live) setState({ error: errText(e) }); });
     return () => { live = false; };
   }, [path]);
@@ -68,8 +68,12 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
             <dt>Format</dt><dd>{cand.loader}{cand.preferred ? "" : " (not the preferred loader)"}</dd>
             <dt>Architecture</dt><dd>{language ? `${language}${spec ? ` / ${spec}` : ""}` : "not chosen yet"}</dd>
             <dt>Size</dt><dd>{mb(ready.sizeBytes)}</dd>
+            {ready.layout?.entry && <><dt>Entry point</dt><dd>{ready.layout.entry}</dd></>}
             <dt>Analysis</dt><dd>{PROFILE_LABEL[profile]}</dd>
           </dl>
+          {!!ready.layout?.sections.length && <table className="secs" aria-label="Sections"><tbody>
+            {ready.layout.sections.map((x, i) => <tr key={i}><td>{x.name}</td><td>{mb(x.size)}</td><td title={`${x.entropy} bits/byte`}><span className="ebar" style={{ width: `${Math.round((x.entropy / 8) * 100)}%`, background: x.entropy >= 7.5 ? "#e0a93b" : "#5a8f6a" }} /></td></tr>)}
+          </tbody></table>}
           {!language && <div className="err" role="status">This format needs a language: open Advanced options and choose one.</div>}
           <button type="button" aria-expanded={adv || !language} onClick={() => setAdv(!adv)}>{adv || !language ? "Hide advanced options" : "Advanced options…"}</button>
           <div hidden={!(adv || !language)} className="adv">

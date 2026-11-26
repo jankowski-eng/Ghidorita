@@ -122,7 +122,7 @@ export interface AddrRange {
 export interface Methods {
   open_binary: { params: { path: string } & ImportOptions; result: { programId: string; name: string; persisted: boolean } };
   cancel_open: { params: {}; result: { cancelled: boolean } };
-  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number; entropy: number[] } };
+  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number; entropy: number[]; layout: FileLayout | null } };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
   list_programs: { params: {}; result: ProgramEntry[] };
@@ -192,6 +192,8 @@ export interface ImportOptions {
   profile?: AnalysisProfile; // not an import option: omitted = SIDECAR_ANALYSIS_DISABLE or full; "fast" skips Call Convention ID, Decompiler Switch Analysis, Stack (own persistence key)
 }
 export type AnalysisProfile = "full" | "fast";
+/** Entry point and sections read from the file headers (ELF, PE, Mach-O; a universal Mach-O shows its first slice); entropy of each section is sampled. */
+export interface FileLayout { entry: Address | null; sections: { name: string; size: number; entropy: number }[] }
 export interface ImportCandidate {
   loader: string;
   language: string | null;      // null = the loader needs the user to pick one (Raw Binary); see list_languages

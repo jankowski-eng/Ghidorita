@@ -177,3 +177,4 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .bmap-tip { position: absolute; left: 46px; transform: translateY(-50%); z-index: 20; pointer-events: none; white-space: nowrap; background: #2b2b2d; color: #ddd; border: 1px solid #555; padding: 2px 6px; font: 11px monospace; }
 .dcov { box-shadow: inset 3px 0 0 #4ec36b; background: #1f2a23; } .dcov-a { box-shadow: inset 3px 0 0 #e0a93b; background: #2a2418; } .dcov-b { box-shadow: inset 3px 0 0 #5aa0e0; background: #1c2630; }
 .covfuncs { display: flex; gap: 24px; padding: 4px 8px; overflow: auto; max-height: 45%; } .covfuncs > div { flex: 1; min-width: 0; }
+.secs { width: 100%; max-height: 140px; display: block; overflow: auto; font-size: 12px; } .secs td { padding: 0 8px 0 0; white-space: nowrap; } .secs td:last-child { width: 100%; } .ebar { display: block; height: 6px; }
