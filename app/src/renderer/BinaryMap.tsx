@@ -44,7 +44,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
       <canvas ref={cv} />
       {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
     </div>
-    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed", "off-white marks functions you named; light blue is every function")}{toggle("coverage", "Coverage", "green = executed (in both runs when two are compared), orange-red = only one run (solid = A, hatched = B)", !coverage.shown)}</div>
+    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed", "off-white marks functions you named; grey is every function")}{toggle("coverage", "Coverage", "green = executed (in both runs when two are compared), orange-red = only one run (solid = A, hatched = B)", !coverage.shown)}</div>
     </div>
   );
 }

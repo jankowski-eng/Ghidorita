@@ -97,11 +97,36 @@ class Project:
         return os.path.join(self._projects_dir(), "programs.json")
 
     def _meta_load(self):
+        """Only a missing file is an empty catalog. An unreadable or malformed one is moved aside (never deleted) and the catalog
+        rebuilt from the project's program list, so the next meta_update cannot drop the other programs' entries."""
+        p = self._meta_path()
         try:
-            with open(self._meta_path()) as f:
-                return json.load(f)
-        except (OSError, ValueError):
+            with open(p) as f:
+                meta = json.load(f)
+            if isinstance(meta, dict):
+                return meta
+            raise ValueError("not a JSON object")
+        except FileNotFoundError:
             return {}
+        except (OSError, ValueError) as e:
+            bad = p + ".corrupt-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            os.replace(p, bad)  # raises if it cannot be moved: better a failed call than an overwritten catalog
+            log("programs.json unreadable (%r): moved to %s, rebuilding from the project" % (e, bad))
+            meta = {str(f.getName()): self._meta_rebuild(f) for f in self.ghidra_project().getProjectData().getRootFolder().getFiles()}
+            self._meta_save(meta)  # persist now: a later load must not see "missing" and read every program as analyzed
+            return meta
+
+    @staticmethod
+    def _meta_rebuild(f):
+        """What the program file itself tells us; the analysis state is unknown, so "none" (an open finishes or resumes it)."""
+        e = {"analysis": "none", "analyzed": False}
+        try:
+            src = f.getMetadata().get("Executable Location")
+            if src:
+                e.update(name=os.path.basename(str(src)), sourcePath=str(src))
+        except Exception as x:  # noqa: metadata is a bonus, the entry stands without it
+            log("rebuild metadata for", f.getName(), "failed:", repr(x))
+        return e
 
     def _meta_save(self, meta):
         p = self._meta_path()
@@ -192,10 +217,11 @@ class Project:
     @rpc(lane="project")
     def list_programs(self):
         with self._ProjGuard(self):
+            files = self.ghidra_project().getProjectData().getRootFolder().getFiles()  # project first: a rebuild in _meta_load needs it
             with self.meta_lock:
                 meta = self._meta_load()
             out = []
-            for f in self.ghidra_project().getProjectData().getRootFolder().getFiles():
+            for f in files:
                 key = str(f.getName())
                 m = meta.get(key, {})
                 an = m.get("analysis") or ("done" if m.get("analyzed", True) else "none")  # a program from before round 7 has only `analyzed`

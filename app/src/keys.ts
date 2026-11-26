@@ -37,9 +37,10 @@ export function showKey(key: string, mac: boolean): string {
 export type HintView = "listing" | "decompiler" | "graph" | "other";
 type Hint = [word: string, cmd: MenuCommand];
 const E = (action: Extract<MenuCommand, { type: "edit" }>["action"]): MenuCommand => ({ type: "edit", action });
+// most used first: a narrow window cuts the line from the end (ellipsis), so the rarer keys go first
 const HINTS: Record<"listing" | "decompiler", Hint[]> = {
-  listing: [["rename", E("rename")], ["comment", E("comment")], ["function", E("createFunction")], ["data", E("defineData")], ["clear", E("clear")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }]],
-  decompiler: [["rename", E("rename")], ["retype", E("retype")], ["comment", E("comment")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }]],
+  listing: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["comment", E("comment")], ["function", E("createFunction")], ["data", E("defineData")], ["clear", E("clear")]],
+  decompiler: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["retype", E("retype")], ["comment", E("comment")]],
 };
 const joined = (hs: Hint[], caps: ReadonlySet<Capability>, mac: boolean) =>
   hs.filter(([, c]) => allowsCommand(caps, c)).map(([w, c]) => `${showKey(keyOf(c)!, mac)} ${w}`).join(" · ");

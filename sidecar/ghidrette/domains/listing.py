@@ -22,9 +22,18 @@ class Listing:
         prog = self.ses.need()
         fns = [f for f in prog.getFunctionManager().getFunctions(True) if not f.isExternal()]
         fns.sort(key=functools.cmp_to_key(lambda x, y: int(x.getEntryPoint().compareTo(y.getEntryPoint()))))
-        fa = self.ses.fmtr(prog)
+        fa, st = self.ses.fmtr(prog), prog.getSymbolTable()
         return [{"name": str(f.getName()), "entry": fa(f.getEntryPoint()), "size": int(f.getBody().getNumAddresses()),
-                 "source": SOURCES.get(str(f.getSymbol().getSource()), "other")} for f in fns]
+                 "source": self._source(st, f)} for f in fns]
+
+    @staticmethod
+    def _source(st, f):
+        """Where the function's name came from. A name the demangler made (source ANALYSIS) from a symbol the file carries (kept beside it as an
+        IMPORTED label) is the file's name, not a guess: it counts as `imported`."""
+        src = SOURCES.get(str(f.getSymbol().getSource()), "other")
+        if src == "analysis" and any(str(x.getSource()) == "IMPORTED" for x in st.getSymbols(f.getEntryPoint())):
+            return "imported"
+        return src
 
     @rpc(lane="file")
     def load_coverage(self, path, _cancel=None):

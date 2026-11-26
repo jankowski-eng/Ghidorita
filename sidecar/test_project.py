@@ -102,3 +102,48 @@ def test_project_lock_clear_error(tmp_path):
         run(after())
     finally:
         p1.stop(); p2.stop()
+
+
+def test_corrupt_catalog_is_moved_aside_and_rebuilt(tmp_path):
+    d = tmp_path / "projects"
+    a, b = blob(tmp_path, "a.bin"), blob(tmp_path, "b.bin", pad=16)
+
+    def session(fn):
+        proc = Proc(d)
+        try:
+            async def go():
+                async with Client(proc.port) as c:
+                    return await fn(c)
+            return run(go())
+        finally:
+            proc.stop()
+
+    async def open_both(c):
+        ids = [(await c.ok("open_binary", path=p, loader="Raw Binary", language=X86))["programId"] for p in (a, b)]
+        return ids, await c.ok("list_programs")
+    (ia, ib), before = session(open_both)
+    assert {p["analysis"] for p in before} == {"done"}
+    good = (d / "programs.json").read_bytes()
+
+    async def listing(c):
+        return await c.ok("list_programs")
+    assert session(listing) == before  # a valid catalog is read as is, and not rewritten
+    assert (d / "programs.json").read_bytes() == good
+
+    (d / "programs.json").write_bytes(b'{"truncated')
+
+    async def reopen_a(c):
+        await c.ok("open_binary", path=a, loader="Raw Binary", language=X86)  # meta_touch: a read-modify-write of the catalog
+        return {p["programId"]: p for p in await c.ok("list_programs")}
+    after = session(reopen_a)
+    assert set(after) == {ia, ib}  # b was not dropped
+    assert after[ib]["analysis"] != "done" and after[ib]["analyzed"] is False  # unknown, never "done"
+    assert after[ib]["sourcePath"] == a.replace("a.bin", "b.bin") and after[ib]["name"] == "b.bin"  # from the program's own metadata
+    assert after[ia]["analysis"] == "done"  # the open finished the (unknown) analysis
+    (bad,) = d.glob("programs.json.corrupt-*")
+    assert bad.read_bytes() == b'{"truncated'
+
+    (d / "programs.json").unlink()
+    gone = {p["programId"]: p for p in session(listing)}  # a missing file is an empty catalog, as before: no rebuild, read as analyzed
+    assert set(gone) == {ia, ib} and all(p["analysis"] == "done" and p["name"] == p["programId"] for p in gone.values())
+    assert len(list(d.glob("programs.json.corrupt-*"))) == 1
