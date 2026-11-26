@@ -137,6 +137,7 @@ export interface ImportChoices {
   profiles?: { id: AnalysisProfile; label: string }[];
   defaultProfile?: AnalysisProfile;
   note?: string;
+  layout?: FileLayout | null; // optional: where the provider can read file headers
 }
 
 export interface Methods {
@@ -214,6 +215,8 @@ export interface ImportOptions {
   profile?: AnalysisProfile; // not an import option: omitted = SIDECAR_ANALYSIS_DISABLE or full; "fast" skips Call Convention ID, Decompiler Switch Analysis, Stack (own persistence key)
 }
 export type AnalysisProfile = string; // opaque provider profile id
+/** Entry point and sections read from the file headers (ELF, PE, Mach-O; a universal Mach-O shows its first slice); entropy of each section is sampled. */
+export interface FileLayout { entry: Address | null; sections: { name: string; size: number; entropy: number }[] }
 export interface ImportCandidate {
   loader: string;
   language: string | null;      // null = the loader needs the user to pick one (Raw Binary); see list_languages

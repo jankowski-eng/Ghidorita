@@ -1,0 +1,1079 @@
+{
+ "quiet": {
+  "load1_at_start": 1.54,
+  "waited_s": 80
+ },
+ "binary": "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis",
+ "size_mb": 66.7,
+ "jvm_start_s": 2.36,
+ "env": {
+  "SIDECAR_ANALYSIS_DISABLE": "Call Convention ID;Decompiler Switch Analysis;Stack"
+ },
+ "open_result": {
+  "programId": "a4c93d61f100862483112491ff6317392368a5755fb505be09f950897bbdf256-6cf76eb6211c",
+  "name": "llvm-exegesis",
+  "persisted": false
+ },
+ "full_open_wall_s": 560.2,
+ "phase_first_event_s": {
+  "import": 0.0,
+  "analysis": 11.2,
+  "saving": 559.7,
+  "ready": 560.2
+ },
+ "progress_events": 2367,
+ "analyzer_timeline": [
+  {
+   "analyzer": "",
+   "start": 11.2,
+   "end": 11.4
+  },
+  {
+   "analyzer": "Source Language Support",
+   "start": 11.4,
+   "end": 11.7
+  },
+  {
+   "analyzer": "Disassemble Entry Points",
+   "start": 11.7,
+   "end": 103.9
+  },
+  {
+   "analyzer": "Embedded Media",
+   "start": 103.9,
+   "end": 104.3
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 104.3,
+   "end": 109.7
+  },
+  {
+   "analyzer": "Non-Returning Functions - Discovered",
+   "start": 109.7,
+   "end": 115.5
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 115.5,
+   "end": 120.6
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 120.6,
+   "end": 121.0
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 121.0,
+   "end": 121.8
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 121.8,
+   "end": 122.6
+  },
+  {
+   "analyzer": "External Entry References",
+   "start": 122.6,
+   "end": 124.9
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 124.9,
+   "end": 125.1
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 125.1,
+   "end": 125.3
+  },
+  {
+   "analyzer": "Shared Return Calls",
+   "start": 125.3,
+   "end": 127.4
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 127.4,
+   "end": 133.2
+  },
+  {
+   "analyzer": "Function Start Search",
+   "start": 133.2,
+   "end": 155.3
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 155.3,
+   "end": 158.1
+  },
+  {
+   "analyzer": "Non-Returning Functions - Discovered",
+   "start": 158.1,
+   "end": 158.3
+  },
+  {
+   "analyzer": "Shared Return Calls",
+   "start": 158.3,
+   "end": 159.2
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 159.2,
+   "end": 162.4
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 162.4,
+   "end": 162.6
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 162.6,
+   "end": 234.1
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 234.1,
+   "end": 234.3
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 234.3,
+   "end": 234.8
+  },
+  {
+   "analyzer": "Disassemble Entry Points",
+   "start": 234.8,
+   "end": 256.8
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 256.8,
+   "end": 257.0
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 257.0,
+   "end": 259.3
+  },
+  {
+   "analyzer": "Non-Returning Functions - Discovered",
+   "start": 259.3,
+   "end": 259.5
+  },
+  {
+   "analyzer": "Shared Return Calls",
+   "start": 259.5,
+   "end": 260.3
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 260.3,
+   "end": 260.5
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 260.5,
+   "end": 260.7
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 260.7,
+   "end": 262.2
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 262.2,
+   "end": 262.7
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 262.7,
+   "end": 279.9
+  },
+  {
+   "analyzer": "Reference",
+   "start": 279.9,
+   "end": 286.0
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 286.0,
+   "end": 286.2
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 286.2,
+   "end": 286.4
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 286.4,
+   "end": 286.6
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 286.6,
+   "end": 286.8
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 286.8,
+   "end": 287.2
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 287.2,
+   "end": 287.4
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 287.4,
+   "end": 287.7
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 287.7,
+   "end": 288.1
+  },
+  {
+   "analyzer": "Data Reference",
+   "start": 288.1,
+   "end": 299.8
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 299.8,
+   "end": 300.1
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 300.1,
+   "end": 300.4
+  },
+  {
+   "analyzer": "Data Reference",
+   "start": 300.4,
+   "end": 303.5
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 303.5,
+   "end": 303.7
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 303.7,
+   "end": 304.0
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 304.0,
+   "end": 304.4
+  },
+  {
+   "analyzer": "Apply Data Archives",
+   "start": 304.4,
+   "end": 305.1
+  },
+  {
+   "analyzer": "Mach-O Function Starts",
+   "start": 305.1,
+   "end": 316.4
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 316.4,
+   "end": 316.6
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 316.6,
+   "end": 316.8
+  },
+  {
+   "analyzer": "Demangler GNU",
+   "start": 316.8,
+   "end": 338.8
+  },
+  {
+   "analyzer": "Call-Fixup Installer",
+   "start": 338.8,
+   "end": 339.0
+  },
+  {
+   "analyzer": "Function Start Search After Data",
+   "start": 339.0,
+   "end": 340.5
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 340.5,
+   "end": 340.7
+  },
+  {
+   "analyzer": "Reference",
+   "start": 340.7,
+   "end": 340.9
+  },
+  {
+   "analyzer": "Function Start Search After Code",
+   "start": 340.9,
+   "end": 350.3
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 350.3,
+   "end": 394.7
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 394.7,
+   "end": 395.0
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 395.0,
+   "end": 434.5
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 434.5,
+   "end": 434.8
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 434.8,
+   "end": 525.9
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 525.9,
+   "end": 526.1
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 526.1,
+   "end": 526.3
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 526.3,
+   "end": 527.0
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 527.0,
+   "end": 527.2
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 527.2,
+   "end": 527.4
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 527.4,
+   "end": 527.6
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 527.6,
+   "end": 527.8
+  },
+  {
+   "analyzer": "Function Start Search After Code",
+   "start": 527.8,
+   "end": 528.0
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 528.0,
+   "end": 528.6
+  },
+  {
+   "analyzer": "Function Start Search After Code",
+   "start": 528.6,
+   "end": 528.8
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 528.8,
+   "end": 529.0
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 529.0,
+   "end": 529.4
+  },
+  {
+   "analyzer": "Function Start Search After Code",
+   "start": 529.4,
+   "end": 529.6
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 529.6,
+   "end": 529.8
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 529.8,
+   "end": 530.2
+  },
+  {
+   "analyzer": "Shared Return Calls",
+   "start": 530.2,
+   "end": 530.4
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 530.4,
+   "end": 530.6
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 530.6,
+   "end": 530.8
+  },
+  {
+   "analyzer": "Basic Constant Reference Analyzer",
+   "start": 530.8,
+   "end": 531.0
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 531.0,
+   "end": 531.2
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 531.2,
+   "end": 531.4
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 531.4,
+   "end": 531.8
+  },
+  {
+   "analyzer": "Reference",
+   "start": 531.8,
+   "end": 532.0
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 532.0,
+   "end": 532.2
+  },
+  {
+   "analyzer": "Shared Return Calls",
+   "start": 532.2,
+   "end": 532.4
+  },
+  {
+   "analyzer": "Reference",
+   "start": 532.4,
+   "end": 532.6
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 532.6,
+   "end": 533.0
+  },
+  {
+   "analyzer": "Subroutine References",
+   "start": 533.0,
+   "end": 533.4
+  },
+  {
+   "analyzer": "Function Start Search After Code",
+   "start": 533.4,
+   "end": 533.6
+  },
+  {
+   "analyzer": "Create Address Tables",
+   "start": 533.6,
+   "end": 533.9
+  },
+  {
+   "analyzer": "ASCII Strings",
+   "start": 533.9,
+   "end": 554.9
+  },
+  {
+   "analyzer": "Variadic Function Signature Override",
+   "start": 554.9,
+   "end": 559.7
+  }
+ ],
+ "functions": 48833,
+ "total_bytes": 66696320,
+ "ranges": 2,
+ "rss_peak_jvm_mb": 4038.6,
+ "rss_peak_native_mb": 46.0,
+ "rss_samples_every_5s": [
+  [
+   0.0,
+   266.6,
+   0
+  ],
+  [
+   5.1,
+   859.0,
+   0
+  ],
+  [
+   10.1,
+   1634.1,
+   0
+  ],
+  [
+   15.1,
+   1444.0,
+   0
+  ],
+  [
+   20.2,
+   1001.6,
+   0
+  ],
+  [
+   25.2,
+   1002.6,
+   0
+  ],
+  [
+   30.2,
+   1003.6,
+   0
+  ],
+  [
+   35.3,
+   1520.7,
+   0
+  ],
+  [
+   40.3,
+   1173.5,
+   0
+  ],
+  [
+   45.4,
+   1448.9,
+   0
+  ],
+  [
+   50.4,
+   827.5,
+   0
+  ],
+  [
+   55.4,
+   1518.3,
+   0
+  ],
+  [
+   60.5,
+   1583.9,
+   0
+  ],
+  [
+   65.5,
+   1425.8,
+   0
+  ],
+  [
+   70.6,
+   1466.7,
+   0
+  ],
+  [
+   75.6,
+   1194.2,
+   0
+  ],
+  [
+   80.6,
+   836.2,
+   0
+  ],
+  [
+   85.7,
+   836.2,
+   0
+  ],
+  [
+   90.7,
+   836.3,
+   0
+  ],
+  [
+   95.7,
+   836.4,
+   0
+  ],
+  [
+   100.8,
+   836.5,
+   0
+  ],
+  [
+   105.8,
+   1063.3,
+   0
+  ],
+  [
+   110.9,
+   1033.6,
+   0
+  ],
+  [
+   115.9,
+   823.7,
+   0
+  ],
+  [
+   120.9,
+   872.9,
+   0
+  ],
+  [
+   126.0,
+   1967.4,
+   0
+  ],
+  [
+   131.0,
+   1843.8,
+   0
+  ],
+  [
+   136.0,
+   1547.0,
+   0
+  ],
+  [
+   141.1,
+   853.5,
+   0
+  ],
+  [
+   146.1,
+   1209.0,
+   0
+  ],
+  [
+   151.2,
+   1339.5,
+   0
+  ],
+  [
+   156.2,
+   966.5,
+   0
+  ],
+  [
+   161.2,
+   1370.0,
+   0
+  ],
+  [
+   166.3,
+   1418.2,
+   0
+  ],
+  [
+   171.3,
+   1366.2,
+   0
+  ],
+  [
+   176.3,
+   2261.1,
+   0
+  ],
+  [
+   181.4,
+   1133.1,
+   0
+  ],
+  [
+   186.4,
+   1598.6,
+   0
+  ],
+  [
+   191.5,
+   925.2,
+   0
+  ],
+  [
+   196.5,
+   1377.5,
+   0
+  ],
+  [
+   201.5,
+   1291.5,
+   0
+  ],
+  [
+   206.6,
+   968.7,
+   0
+  ],
+  [
+   211.6,
+   1576.0,
+   0
+  ],
+  [
+   216.6,
+   1152.9,
+   0
+  ],
+  [
+   221.7,
+   1005.0,
+   0
+  ],
+  [
+   226.7,
+   984.5,
+   0
+  ],
+  [
+   231.8,
+   1531.3,
+   0
+  ],
+  [
+   236.8,
+   913.6,
+   0
+  ],
+  [
+   241.8,
+   913.8,
+   0
+  ],
+  [
+   246.9,
+   1660.0,
+   0
+  ],
+  [
+   251.9,
+   994.2,
+   0
+  ],
+  [
+   257.0,
+   994.5,
+   0
+  ],
+  [
+   262.0,
+   962.1,
+   0
+  ],
+  [
+   267.0,
+   1327.4,
+   0
+  ],
+  [
+   272.1,
+   949.4,
+   0
+  ],
+  [
+   277.1,
+   1040.6,
+   0
+  ],
+  [
+   282.1,
+   1097.2,
+   0
+  ],
+  [
+   287.2,
+   1041.0,
+   0
+  ],
+  [
+   292.2,
+   1241.9,
+   0
+  ],
+  [
+   297.3,
+   1310.6,
+   0
+  ],
+  [
+   302.3,
+   1627.5,
+   0
+  ],
+  [
+   307.3,
+   1708.2,
+   0
+  ],
+  [
+   312.4,
+   1254.2,
+   0
+  ],
+  [
+   317.4,
+   1239.9,
+   1.6
+  ],
+  [
+   322.5,
+   1107.1,
+   1.7
+  ],
+  [
+   327.5,
+   1108.0,
+   1.7
+  ],
+  [
+   332.5,
+   1108.4,
+   1.7
+  ],
+  [
+   337.6,
+   1109.6,
+   1.7
+  ],
+  [
+   342.6,
+   1479.9,
+   1.7
+  ],
+  [
+   347.6,
+   1424.3,
+   1.7
+  ],
+  [
+   352.7,
+   2284.2,
+   1.7
+  ],
+  [
+   357.7,
+   2491.7,
+   1.7
+  ],
+  [
+   362.8,
+   2699.1,
+   1.7
+  ],
+  [
+   367.8,
+   2908.0,
+   1.7
+  ],
+  [
+   372.8,
+   3116.6,
+   1.7
+  ],
+  [
+   377.9,
+   3325.4,
+   1.7
+  ],
+  [
+   382.9,
+   3534.4,
+   1.7
+  ],
+  [
+   388.0,
+   3744.2,
+   1.7
+  ],
+  [
+   393.0,
+   4038.6,
+   1.7
+  ],
+  [
+   398.0,
+   1900.6,
+   1.7
+  ],
+  [
+   403.1,
+   1952.9,
+   1.7
+  ],
+  [
+   408.1,
+   2005.1,
+   1.7
+  ],
+  [
+   413.1,
+   2057.1,
+   1.7
+  ],
+  [
+   418.2,
+   2108.9,
+   1.7
+  ],
+  [
+   423.2,
+   2161.1,
+   1.7
+  ],
+  [
+   428.3,
+   2213.1,
+   1.7
+  ],
+  [
+   433.3,
+   2265.1,
+   1.7
+  ],
+  [
+   438.3,
+   2316.4,
+   1.7
+  ],
+  [
+   443.4,
+   2368.5,
+   1.7
+  ],
+  [
+   448.4,
+   2420.8,
+   1.7
+  ],
+  [
+   453.4,
+   2473.3,
+   1.7
+  ],
+  [
+   458.5,
+   2525.7,
+   1.7
+  ],
+  [
+   463.5,
+   2578.1,
+   1.7
+  ],
+  [
+   468.6,
+   2630.6,
+   1.7
+  ],
+  [
+   473.6,
+   2682.7,
+   1.7
+  ],
+  [
+   478.6,
+   2734.8,
+   1.7
+  ],
+  [
+   483.7,
+   2786.5,
+   1.7
+  ],
+  [
+   488.7,
+   2838.7,
+   1.7
+  ],
+  [
+   493.8,
+   2890.8,
+   1.7
+  ],
+  [
+   498.8,
+   2942.6,
+   1.7
+  ],
+  [
+   503.8,
+   2994.7,
+   1.7
+  ],
+  [
+   508.9,
+   3046.3,
+   1.7
+  ],
+  [
+   513.9,
+   3098.2,
+   1.7
+  ],
+  [
+   518.9,
+   3150.2,
+   1.7
+  ],
+  [
+   524.0,
+   3202.3,
+   1.7
+  ],
+  [
+   529.0,
+   3231.3,
+   1.7
+  ],
+  [
+   534.1,
+   3248.4,
+   1.7
+  ],
+  [
+   539.1,
+   3253.2,
+   1.7
+  ],
+  [
+   544.1,
+   3432.0,
+   1.7
+  ],
+  [
+   549.2,
+   3904.3,
+   1.7
+  ],
+  [
+   554.2,
+   3574.3,
+   1.7
+  ],
+  [
+   559.3,
+   3583.4,
+   46.0
+  ]
+ ]
+}

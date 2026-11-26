@@ -66,11 +66,20 @@ export class CoverageRuns {
   clear() { this.runs = []; this.a = this.b = null; }
   get shown(): boolean { return this.a !== null || this.b !== null; }
   /** The listing's row class for a code unit: "" (nothing), " cov" (covered; with two runs: by both), " cov-a" (only A), " cov-b" (only B). */
-  mark(address: Address, length: number): string {
+  mark(address: Address, length: number): string { return this.markAny([address], length); }
+  /** Same for several addresses at once (a decompiler line): covered in a run when any of them is. */
+  markAny(addresses: Address[], length = 1): string {
     const ca = this.get(this.a), cb = this.get(this.b);
-    const ina = !!ca?.cov.has(address, length), inb = !!cb?.cov.has(address, length);
+    const ina = !!ca && addresses.some((x) => ca.cov.has(x, length)), inb = !!cb && addresses.some((x) => cb.cov.has(x, length));
     if (ca && cb) return ina && inb ? " cov" : ina ? " cov-a" : inb ? " cov-b" : "";
     return ina || inb ? " cov" : "";
+  }
+  /** Functions (any overlap with the body counts) reached only in A and only in B; null unless two runs are shown. */
+  funcDiff<F extends { entry: Address; size: number }>(funcs: F[]): { onlyA: F[]; onlyB: F[] } | null {
+    const ca = this.get(this.a), cb = this.get(this.b);
+    if (!ca || !cb) return null;
+    const hit = (c: Coverage, f: F) => c.has(f.entry, f.size);
+    return { onlyA: funcs.filter((f) => hit(ca.cov, f) && !hit(cb.cov, f)), onlyB: funcs.filter((f) => hit(cb.cov, f) && !hit(ca.cov, f)) };
   }
   /** Bytes only in A, only in B and in both; null unless two runs are shown. */
   diff(): { onlyA: bigint; onlyB: bigint; both: bigint } | null {

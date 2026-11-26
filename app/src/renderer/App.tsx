@@ -570,7 +570,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
                 <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
               <div className="editor" style={{ display: active ? undefined : "none" }}>
-                <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
+                <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>
             </div>
           ),
@@ -584,7 +584,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
         {caps.has("projects") && <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} />}
       </div>}
       {notice && <div className="flash" role="status">{notice}</div>}
-      {opened && dock && <Dock searches={ops!.searches} capabilities={caps} active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
+      {opened && dock && <Dock searches={ops!.searches} capabilities={caps} active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, funcs, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash}
         back={[...nav.back].reverse().map((l) => l.address)} forward={[...nav.forward].reverse().map((l) => l.address)} onBack={back} onForward={forward} />
       {typesOpen && opened && <DataTypes types={ops!.types} edits={caps.has("typeEditing") ? ops!.typeEdits : undefined} defineData={caps.has("typeEditing") ? ops!.edits.defineData : undefined} version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}

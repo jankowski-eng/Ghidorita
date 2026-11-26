@@ -5,18 +5,25 @@ import { useDebounced } from "./hooks";
 import { scanner } from "./scan";
 import { usePaged, VirtualTable, type Col } from "./VirtualTable";
 
-/** Strings -> code: the first referrers as buttons (a click goes to the referencing instruction, not to the string), "+n" for the rest. */
+/** The referrers grouped by function in first-seen order: the first reference address and how many of the listed ones are in that function. */
+export const groupRefs = (from: { from: Address; function?: string }[]) => {
+  const g = new Map<string, { name: string; from: Address; n: number }>();
+  for (const f of from) { const k = f.function ?? f.from, e = g.get(k); if (e) e.n++; else g.set(k, { name: k, from: f.from, n: 1 }); }
+  return [...g.values()];
+};
+
+/** Strings -> code: the referencing functions as buttons ("entry ×3"; a click goes to the first reference there, not to the string), "+n" for references beyond the listed ones. */
 const usedBy = (go: (a: Address) => void) => (r: StringItem) => {
   if (!r.refs) return <span className="dim">unreferenced</span>;
   const from = r.refFrom ?? [];
-  return <>{from.map((f) => <button key={f.from} className="lnk" title={`referenced from ${f.from}`} onClick={(e) => { e.stopPropagation(); go(f.from); }}>{f.function ?? f.from}</button>)}{r.refs > from.length && <span className="dim"> +{r.refs - from.length}</span>}</>;
+  return <>{groupRefs(from).map((g) => <button key={g.name} className="lnk" title={`referenced from ${g.from}`} onClick={(e) => { e.stopPropagation(); go(g.from); }}>{g.n > 1 ? `${g.name} ×${g.n}` : g.name}</button>)}{r.refs > from.length && <span className="dim"> +{r.refs - from.length}</span>}</>;
 };
 
 /** Defined strings: server-paged (list_strings), text filter and minimum length; click or Enter navigates. */
 export function StringsPanel({ listStrings, version, onGo, onError }: { listStrings: Searches["listStrings"]; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const [q, setQ] = useState("");
   const [min, setMin] = useState("4");
-  const [refOnly, setRefOnly] = useState(false);
+  const [refOnly, setRefOnly] = useState(true);
   const dq = useDebounced(q.trim(), 250), dmin = useDebounced(Math.max(1, Math.floor(Number(min)) || 1), 250);
   const sc = useRef(scanner()).current;
   const t = usePaged<StringItem>((offset, limit) => sc.run(listStrings({ offset, limit, minLength: dmin, query: dq, referencedOnly: refOnly })), JSON.stringify([dq, dmin, refOnly, version]), onError, sc.cancelAll);

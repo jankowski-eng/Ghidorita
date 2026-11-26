@@ -47,3 +47,17 @@ test("sharedBytes sweeps merged ranges", () => {
   assert.equal(sharedBytes(cov(["0x0", "0x9"], ["0x20", "0x2f"]), cov(["0x5", "0x24"])), 5n + 5n);
   assert.equal(sharedBytes(cov(), cov(["0x0", "0x1"])), 0n);
 });
+
+test("funcDiff: functions reached only in A or only in B, any overlap counts; markAny: any address of a line", () => {
+  const r = new CoverageRuns();
+  const fs = [{ entry: "0x10", size: 8 }, { entry: "0x20", size: 8 }, { entry: "0x30", size: 8 }, { entry: "0x40", size: 8 }];
+  r.add("a", cov(["0x14", "0x14"], ["0x20", "0x27"])); // a touches f1 (partly) and f2
+  assert.equal(r.funcDiff(fs), null);
+  const b = r.add("b", cov(["0x20", "0x20"], ["0x37", "0x37"])); // b touches f2 and f3
+  r.select("b", b.id); r.select("a", 1);
+  const d = r.funcDiff(fs);
+  assert.deepEqual(d.onlyA.map((f) => f.entry), ["0x10"]);
+  assert.deepEqual(d.onlyB.map((f) => f.entry), ["0x30"]);
+  assert.equal(r.markAny(["0x99", "0x14"]), " cov-a");
+  assert.equal(r.markAny(["0x99"]), "");
+});

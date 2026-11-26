@@ -6,6 +6,7 @@ import datetime, hashlib, json, os, re, threading
 from ..core.args import text_arg
 from ..core.errors import BUSY, NOT_FOUND, PROJECT_LOCKED, RpcError, log
 from ..core.rpc import rpc
+from .layout import file_layout, shannon
 
 # analysis profiles (open_binary `profile`): "fast" switches these off for the first-open analysis (measured in SPIKE_REPORT round 4)
 FAST_PROFILE = ["Call Convention ID", "Decompiler Switch Analysis", "Stack"]
@@ -16,17 +17,12 @@ KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 def entropy_profile(path, size, buckets=48, sample=16384):
     """Shannon entropy (bits/byte, 0-8) of up to `buckets` evenly spaced slices of the file, `sample` bytes read from the start of each:
     constant cost whatever the file size. shortcut: sampled, so a short packed stretch can hide inside a slice; upgrade to a full pass if triage must be exact."""
-    import math
-    from collections import Counter
     n, out = max(1, min(buckets, -(-size // 4096))), []
     with open(path, "rb") as f:
         for i in range(n):
             f.seek(size * i // n)
             b = f.read(min(sample, max(1, size // n)))  # never past this slice
-            if not b:
-                out.append(0.0)
-                continue
-            out.append(abs(round(-sum(c / len(b) * math.log2(c / len(b)) for c in Counter(b).values()), 2)))  # abs: a constant slice is -0.0
+            out.append(shannon(b))
     return out
 
 
@@ -160,7 +156,7 @@ class Project:
                 chosen = LoadSpecChooser.CHOOSE_THE_FIRST_PREFERRED.choose(lm)
                 size = os.path.getsize(path)
                 ent = entropy_profile(path, size)
-                choices = {"sizeBytes": size, "entropy": ent,
+                choices = {"sizeBytes": size, "entropy": ent, "layout": file_layout(path),
                            "profiles": [{"id": "full", "label": "Full"},
                                         {"id": "fast", "label": "Fast (skips switch analysis, call-convention ID, stack)"}],
                            "defaultProfile": "fast" if size > 20 * 1048576 else "full"}

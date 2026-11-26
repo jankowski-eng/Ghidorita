@@ -2,7 +2,7 @@ import type { Capability } from "../../../protocol";
 import type { Searches } from "./backend";
 import { dockCapability } from "../capabilities";
 import { useState } from "react";
-import type { Address } from "../../../protocol";
+import type { Address, FunctionInfo } from "../../../protocol";
 import { StringsPanel } from "./StringsPanel";
 import { SymbolsPanel } from "./SymbolsPanel";
 import { MemSearchPanel } from "./MemSearchPanel";
@@ -15,7 +15,7 @@ const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defi
 /** Bottom dock with the navigate-and-find windows. A panel keeps its filter/results while another tab is shown (hidden, not unmounted). */
 export function Dock({ searches, capabilities, active, onActivate, onClose, version, onGo, onError, cov }: {
   searches: Searches; capabilities: ReadonlySet<Capability>; active: DockId; onActivate: (d: DockId) => void; onClose: () => void; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void;
-  cov: { version: number; onLoad: () => void; onChange: () => void };
+  cov: { version: number; funcs: FunctionInfo[]; onLoad: () => void; onChange: () => void };
 }) {
   const [seen, setSeen] = useState<DockId[]>([active]);
   if (!seen.includes(active)) setSeen([...seen, active]);
@@ -35,7 +35,7 @@ export function Dock({ searches, capabilities, active, onActivate, onClose, vers
         {seen.includes("symbols") && <div hidden={active !== "symbols"}><SymbolsPanel listSymbols={searches.listSymbols} {...P} /></div>}
         {seen.includes("strings") && <div hidden={active !== "strings"}><StringsPanel listStrings={searches.listStrings} {...P} /></div>}
         {seen.includes("changes") && <div hidden={active !== "changes"}><ChangesPanel onGo={onGo} /></div>}
-        {seen.includes("coverage") && <div hidden={active !== "coverage"}><CoveragePanel {...cov} /></div>}
+        {seen.includes("coverage") && <div hidden={active !== "coverage"}><CoveragePanel {...cov} onGo={onGo} /></div>}
         {seen.includes("memsearch") && <div hidden={active !== "memsearch"}><MemSearchPanel searchMemory={searches.searchMemory} {...P} /></div>}
       </div>
     </section>

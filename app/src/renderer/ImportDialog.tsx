@@ -1,6 +1,6 @@
 import { isFailure, type ImportSelection } from "./backend";
 import { useEffect, useMemo, useState } from "react";
-import type { AnalysisProfile, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
+import type { AnalysisProfile, FileLayout, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
 import { trapTab, useRestoreFocus } from "./hooks";
 import { buildOptions, choiceError, entropyHint, parseBase } from "./openOptions";
 
@@ -11,7 +11,7 @@ const errText = (e: unknown) => isFailure(e, "busy") ? "The backend is busy. Try
 /** Shows the provider’s import choices. Enter = open with the preselected (default) choice. */
 export function ImportDialog({ imports, path, onOpen, onCancel }: { imports: ImportSelection; path: string; onOpen: (o: ImportOptions | undefined) => void; onCancel: () => void }) {
   useRestoreFocus();
-  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note?: string; entropy: number[]; sizeBytes: number; profiles?: { id: AnalysisProfile; label: string }[] } | { error: string } | null>(null);
+  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note?: string; entropy: number[]; sizeBytes: number; profiles?: { id: AnalysisProfile; label: string }[]; layout: FileLayout | null } | { error: string } | null>(null);
   const [idx, setIdx] = useState(0);
   const [language, setLanguage] = useState<string | null>(null);
   const [spec, setSpec] = useState<string | null>(null);
@@ -23,12 +23,12 @@ export function ImportDialog({ imports, path, onOpen, onCancel }: { imports: Imp
   useEffect(() => {
     let live = true;
     (async () => {
-      const { candidates: cands, sizeBytes, entropy, profiles, defaultProfile, note } = await imports.choices({ path });
+      const { candidates: cands, sizeBytes, entropy, profiles, defaultProfile, note, layout } = await imports.choices({ path });
       const langs = await imports.languages().catch(() => [] as LanguageInfo[]); // optional unless the user must choose
       if (!live) return;
       const pre = Math.max(0, cands.findIndex((c) => c.preferred));
       setProfile(defaultProfile ?? profiles?.[0]?.id); setIdx(pre); setLanguage(cands[pre]?.language ?? null); setSpec(cands[pre]?.compilerSpec ?? null);
-      setState({ cands, langs, note, entropy, sizeBytes, profiles });
+      setState({ cands, langs, note, entropy, sizeBytes, profiles, layout: layout ?? null });
     })().catch((e) => { if (live) setState({ error: errText(e) }); });
     return () => { live = false; };
   }, [imports, path]);
@@ -66,8 +66,12 @@ export function ImportDialog({ imports, path, onOpen, onCancel }: { imports: Imp
             <dt>Format</dt><dd>{cand.loader}{cand.preferred ? "" : " (not the preferred loader)"}</dd>
             <dt>Architecture</dt><dd>{language ? `${language}${spec ? ` / ${spec}` : ""}` : "not chosen yet"}</dd>
             <dt>Size</dt><dd>{mb(ready.sizeBytes)}</dd>
+            {ready.layout?.entry && <><dt>Entry point</dt><dd>{ready.layout.entry}</dd></>}
             {profile && <><dt>Analysis</dt><dd>{state && "profiles" in state ? state.profiles?.find((p) => p.id === profile)?.label ?? profile : profile}</dd></>}
           </dl>
+          {!!ready.layout?.sections.length && <table className="secs" aria-label="Sections"><tbody>
+            {ready.layout.sections.map((x, i) => <tr key={i}><td>{x.name}</td><td>{mb(x.size)}</td><td title={`${x.entropy} bits/byte`}><span className="ebar" style={{ width: `${Math.round((x.entropy / 8) * 100)}%`, background: x.entropy >= 7.5 ? "#e0a93b" : "#5a8f6a" }} /></td></tr>)}
+          </tbody></table>}
           {!language && <div className="err" role="status">This format needs a language: open Advanced options and choose one.</div>}
           <button type="button" aria-expanded={adv || !language} onClick={() => setAdv(!adv)}>{adv || !language ? "Hide advanced options" : "Advanced options…"}</button>
           <div hidden={!(adv || !language)} className="adv">

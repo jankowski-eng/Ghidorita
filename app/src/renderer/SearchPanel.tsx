@@ -9,7 +9,7 @@ import type { MenuCommand } from "../preload";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
 /** One row of the bar: a typed address, a symbol or a defined string. */
-type Hit = { kind: SymbolKind | "string" | "address"; name: string; address: Address };
+type Hit = { kind: SymbolKind | "string" | "address"; name: string; address: Address; used?: string }; // used: a string's first referencing function
 const short = (v: string) => (v.length > 80 ? v.slice(0, 80) + "…" : v).replace(/\s+/g, " ");
 
 /** Command bar (Cmd+K): symbols, defined strings and typed addresses (each when the provider offers it); ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
@@ -37,7 +37,7 @@ export function SearchPanel({ capabilities, searchSymbols, listStrings, onGo, on
     if (symJob) runSyms(symJob.result).then((r) => { if (r) { setSyms(r.map((h) => ({ kind: h.kind, name: h.name, address: h.address }))); setCur(0); setMsg(""); } }, (e) => { setSyms([]); fail(e); });
     // strings need a few characters to be useful; a scan that fails (no program yet) just shows no strings
     const strJob = t.length >= 3 ? listStrings?.({ query: t, limit: 20, minLength: 3 }) : undefined;
-    if (strJob) runStrs(strJob.result).then((r) => { if (r) setStrs(r.items.map((s) => ({ kind: "string" as const, name: short(s.value), address: s.address }))); }, () => setStrs([]));
+    if (strJob) runStrs(strJob.result).then((r) => { if (r) setStrs(r.items.map((s) => ({ kind: "string" as const, name: short(s.value), address: s.address, used: s.refFrom?.[0]?.function }))); }, () => setStrs([]));
     else { runStrs(Promise.resolve(null)); setStrs([]); }
     return () => { void runSyms(Promise.resolve(null)); void runStrs(Promise.resolve(null)); symJob?.cancel(); strJob?.cancel(); };
   }, [dq, searchSymbols, listStrings]); // eslint-disable-line
@@ -66,7 +66,7 @@ export function SearchPanel({ capabilities, searchSymbols, listStrings, onGo, on
         {hits.map((h, i) => (
           <div key={h.kind + h.address + h.name} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}
             onMouseDown={(e) => e.preventDefault()} onClick={() => go(h)}>
-            <span className="k">{h.kind}</span><span className="n">{h.name}</span><span className="a">{h.address}</span>
+            <span className="k">{h.kind}</span><span className="n">{h.name}{h.used && <span className="dim"> · in {h.used}</span>}</span><span className="a">{h.address}</span>
           </div>
         ))}
       </div>

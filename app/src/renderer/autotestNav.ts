@@ -65,9 +65,11 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   // ---- Strings ----
   open("strings");
   g = await grid("Strings");
-  rows = await loaded(g, "strings");
   const sTotal = (await c.program().searches.listStrings({ limit: 1 }).result).total;
+  need(field("Referenced only").checked, "referenced only is on by default");
+  field("Referenced only").click(); // the rest of the flow starts from all strings
   await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 20000, "string count " + sTotal);
+  rows = await loaded(g, "strings");
   const s0 = rows[0], sAddr = cell(s0, "address"), sVal = cell(s0, "value");
   s0.click();
   await navigated(sAddr, "string click");
