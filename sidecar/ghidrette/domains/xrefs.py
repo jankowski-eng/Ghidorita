@@ -1,5 +1,5 @@
 """Cross references (thread R): to an address, to a stack/register variable, from a code unit."""
-from ..core.args import hx, lim, text_arg
+from ..core.args import akey, lim, ref_kind, text_arg
 from ..core.errors import NOT_FOUND, RpcError
 from ..core.rpc import rpc
 
@@ -8,26 +8,10 @@ class Xrefs:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
 
-    @staticmethod
-    def _ref_kind(rt):
-        if rt.isCall():
-            return "call"
-        if rt.isJump():
-            return "jump"
-        if rt.isRead() and rt.isWrite():
-            return "readwrite"
-        if rt.isRead():
-            return "read"
-        if rt.isWrite():
-            return "write"
-        if rt.isData():
-            return "data"
-        return "flow" if rt.isFlow() else "other"
-
     def _xref_to_item(self, fm, r):
         fa = r.getFromAddress()
         rt = r.getReferenceType()
-        o = {"from": hx(fa.getOffset()), "type": str(rt.getName()), "kind": self._ref_kind(rt)}
+        o = {"from": self.ses.fmt(fa), "type": str(rt.getName()), "kind": ref_kind(rt)}
         f = fm.getFunctionContaining(fa)
         if f is not None:
             o["function"] = str(f.getName())
@@ -43,7 +27,7 @@ class Xrefs:
             if len(out) >= limit:
                 break
             out.append(self._xref_to_item(fm, r))
-        out.sort(key=lambda o: int(o["from"], 16))
+        out.sort(key=lambda o: akey(o["from"]))
         return out
 
     @rpc(lane="R")
@@ -64,7 +48,7 @@ class Xrefs:
                     if len(out) < limit:
                         out.append(self._xref_to_item(fm, r))
                 break
-        out.sort(key=lambda o: int(o["from"], 16))
+        out.sort(key=lambda o: akey(o["from"]))
         return out
 
     @rpc(lane="R")
@@ -76,7 +60,7 @@ class Xrefs:
         out = []
         for r in prog.getReferenceManager().getReferencesFrom(a):
             rt = r.getReferenceType()
-            o = {"type": str(rt.getName()), "kind": self._ref_kind(rt)}
+            o = {"type": str(rt.getName()), "kind": ref_kind(rt)}
             if r.isStackReference():
                 off = int(r.getStackOffset())
                 o.update(to=None, target="stack", label="Stack[%s0x%x]" % ("-" if off < 0 else "", abs(off)))
@@ -85,6 +69,6 @@ class Xrefs:
             elif r.isRegisterReference():
                 o.update(to=None, target="register", label=str(prog.getRegister(r.getToAddress()) or r.getToAddress()))
             else:
-                o.update(to=hx(r.getToAddress().getOffset()), target="memory")
+                o.update(to=self.ses.fmt(r.getToAddress()), target="memory")
             out.append(o)
         return out

@@ -45,21 +45,21 @@ class Events:
 
     def _make_listener(self, prog):
         from jpype import JClass, JImplements, JObject, JOverride
-        ev_, space = self, prog.getAddressFactory().getDefaultAddressSpace()
+        ev_ = self
 
         @JImplements("ghidra.framework.model.DomainObjectListener")
         class L:
             @JOverride
             def domainObjectChanged(self, ev):
                 try:
-                    ev_._on_events(ev, space)
+                    ev_._on_events(ev)
                 except Exception as e:  # noqa
                     log("listener error", repr(e))
                     ev_.record(set(ALL_KINDS), None)
         # Ghidra keeps listeners in a weak set: hold a strong reference to the *Java* proxy, or a GC silently drops it
         return JObject(L(), JClass("ghidra.framework.model.DomainObjectListener"))
 
-    def _on_events(self, ev, space):
+    def _on_events(self, ev):
         from ghidra.program.util import ProgramChangeRecord
         kinds, ranges, broad = set(), [], False
         for r in ev:
@@ -71,10 +71,10 @@ class Events:
                 continue
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
-            if s is None or s.isExternalAddress() or s.getAddressSpace() != space:
-                broad = True  # type events, other spaces, ...: no usable range
+            if s is None or not s.isMemoryAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
+                broad = True  # type events, stack/register/external addresses, ...: no usable range
             else:
-                ranges.append((s.getOffset(), (e or s).getOffset()))
+                ranges.append(self.ctx.session.rng(s, e or s))
         if not kinds:
             return
         self.record(kinds, None if broad else ranges)
@@ -110,13 +110,17 @@ class Events:
             kinds, broad, ranges = sorted(p["kinds"], key=ALL_KINDS.index), p["broad"], sorted(p["ranges"])
             p.update(ranges=[], kinds=set(), broad=False, armed=False)
         merged = []
-        for s, e in ranges:
-            if merged and s <= merged[-1][1] + 1:
-                merged[-1][1] = max(merged[-1][1], e)
+        for sp, s, e in ranges:
+            if merged and merged[-1][0] == sp and s <= merged[-1][2] + 1:
+                merged[-1][2] = max(merged[-1][2], e)
             else:
-                merged.append([s, e])
+                merged.append([sp, s, e])
         if broad or len(merged) > 1000:
             out = None
         else:
-            out = [{"start": hx(s), "end": hx(e)} for s, e in merged]
+            ses = self.ctx.session
+            f, prog = ses.fmtr(), ses.program
+            def at(sp, off):
+                return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
+            out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
         self.ctx.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": self.ctx.session.undo_snap})

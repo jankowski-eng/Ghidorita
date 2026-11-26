@@ -5,7 +5,7 @@ decompile_for_edit is the one function other domains may call (highvars): a deco
 import contextlib, threading
 from collections import OrderedDict
 
-from ..core.args import hx, lim
+from ..core.args import MASK64, lim
 from ..core.errors import CANCELLED, INTERNAL, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
 from ..core.rpc import rpc
 
@@ -54,10 +54,13 @@ class Decompile:
     def _invalidate(self, kinds, ranges, broad):
         # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
         # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
-        if broad or not kinds <= RANGE_ONLY_KINDS:
+        # the cache is keyed by default-space offsets (shortcut: a function inside an overlay clears everything, upgrade by keying on the Address)
+        prog = self.ses.program
+        dname = str(prog.getAddressFactory().getDefaultAddressSpace().getName()) if prog is not None else ""
+        if broad or not kinds <= RANGE_ONLY_KINDS or any(sp != dname for sp, _, _ in ranges):
             self.cache_clear()
         else:
-            self.cache_invalidate(ranges)
+            self.cache_invalidate([(a, b) for _, a, b in ranges])
 
     # ---- decompile cache (shared by the pool and by the event listener) ----
     def cache_clear(self):
@@ -120,7 +123,7 @@ class Decompile:
             body = func.getBody()
             with self.cache_lock:
                 if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store
-                    self.cache[key] = (body.getMinAddress().getOffset(), body.getMaxAddress().getOffset(), out)
+                    self.cache[key] = (body.getMinAddress().getOffset() & MASK64, body.getMaxAddress().getOffset() & MASK64, out)
                     if len(self.cache) > 256:
                         self.cache.popitem(last=False)
             return {**out, "cached": False}
@@ -133,7 +136,7 @@ class Decompile:
         from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
-        fm = prog.getFunctionManager()
+        fm, fa = prog.getFunctionManager(), self.ses.fmtr(prog)
         lines_out, tokens = [], []
         for ln, line in enumerate(DecompilerUtils.toLines(res.getCCodeMarkup())):
             indent = str(line.getIndentString())
@@ -153,7 +156,7 @@ class Decompile:
                 tok = {"line": ln, "colStart": start, "colEnd": col, "kind": kind}
                 ma = t.getMinAddress()
                 if ma is not None:
-                    tok["address"] = hx(ma.getOffset())
+                    tok["address"] = fa(ma)
                 if kind in ("variable", "param"):
                     tok["varName"] = s
                 if isinstance(t, ClangFuncNameToken):
@@ -162,7 +165,7 @@ class Decompile:
                     if op is not None and op.getOpcode() == PcodeOp.CALL:
                         f = fm.getFunctionAt(op.getInput(0).getAddress())
                         if f is not None:
-                            tok["targetFunction"] = hx(f.getEntryPoint().getOffset())
+                            tok["targetFunction"] = fa(f.getEntryPoint())
                 tokens.append(tok)
             lines_out.append(text)
         return {"text": "\n".join(lines_out), "tokens": tokens}

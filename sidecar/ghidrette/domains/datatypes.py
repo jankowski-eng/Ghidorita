@@ -353,5 +353,5 @@ class DataTypes:
                 self.ses.cmd(CreateDataCmd(a, True, False, dt))(p)
         self.ses.edit("Create structure %s" % name, go)
         if apply:
-            self.ctx.events.record({"data"}, [(a.getOffset(), a.getOffset() + length - 1)])
+            self.ctx.events.record({"data"}, [self.ses.rng(a, a.add(length - 1))])
         return {"path": str(dtm.getDataType(cp, name).getPathName())}

@@ -1,5 +1,5 @@
 """Listing edits (thread R): labels, comments, functions, data, clearing code. One transaction each, its name is the undo label."""
-from ..core.args import hx, name_arg, text_arg
+from ..core.args import name_arg, text_arg
 from ..core.errors import INTERNAL, INVALID, NOT_FOUND, RpcError
 from ..core.rpc import rpc
 
@@ -63,11 +63,11 @@ class Edits:
         if fm.getFunctionContaining(a) is not None:
             raise RpcError(INVALID, "address is already inside a function")
         cmd = (CreateFunctionCmd(name, a, None, SourceType.USER_DEFINED) if name else CreateFunctionCmd(a))
-        self.ses.edit("Create function at %s" % hx(a.getOffset()), self.ses.cmd(cmd))
+        self.ses.edit("Create function at %s" % address, self.ses.cmd(cmd))
         f = fm.getFunctionAt(a)
         if f is None:
             raise RpcError(INTERNAL, "function was not created")
-        return {"entry": hx(a.getOffset()), "name": str(f.getName())}
+        return {"entry": self.ses.fmt(a), "name": str(f.getName())}
 
     @rpc(lane="R")
     def define_data(self, address, dataType):
@@ -95,7 +95,7 @@ class Edits:
                 raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
             self.ses.cmd(CreateDataCmd(a, True, False, dt))(p)
-            out["range"] = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
+            out["range"] = self.ses.rng(a, a.add(dt.getLength() - 1))
         self.ses.edit("Define data", go)
         self.ctx.events.record({"data"}, [out["range"]])
         return {}
@@ -124,7 +124,7 @@ class Edits:
         if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
             raise RpcError(INVALID, "no instructions or defined data in range")
         self.ses.edit("Clear code", lambda p: self.ses.cmd(ClearCmd(view))(p))
-        self.ctx.events.record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
+        self.ctx.events.record({"code", "data"}, [self.ses.rng(lo, hi)])
         return {}
 
     @rpc(lane="R")

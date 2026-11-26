@@ -3,7 +3,7 @@ They never run on R, so a long scan cannot delay listing fetches. Results are ca
 import threading
 from collections import OrderedDict
 
-from ..core.args import hx, lim, text_arg
+from ..core.args import MASK64, lim, text_arg
 from ..core.errors import CANCELLED, INVALID, RpcError
 from ..core.rpc import rpc
 
@@ -69,7 +69,7 @@ class Search:
         with self.ctx.lanes.scanning(scan) as prog:
             text_arg(query, "query")
             limit = lim(limit, 100, 5000)
-            st, out, seen, space = prog.getSymbolTable(), [], set(), prog.getAddressFactory().getDefaultAddressSpace()
+            st, out, seen, fa = prog.getSymbolTable(), [], set(), self.ses.fmtr(prog)
             q = query.strip()
             if not q:
                 return []
@@ -78,9 +78,9 @@ class Search:
                 if prog.getMemory().contains(a):
                     syms = list(st.getSymbols(a))
                     for s in syms:
-                        out.append({"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)})
+                        out.append({"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)})
                     if not syms:
-                        out.append({"name": hx(a.getOffset()), "address": hx(a.getOffset()), "kind": "other"})
+                        out.append({"name": fa(a), "address": fa(a), "kind": "other"})
                     seen.update(o["name"] + o["address"] for o in out)
             except RpcError:
                 pass
@@ -92,9 +92,9 @@ class Search:
                 if n & 255 == 0:
                     scan.check()
                 a = s.getAddress()
-                if a.isExternalAddress() or a.getAddressSpace() != space:
+                if not a.isMemoryAddress():
                     continue
-                o = {"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)}
+                o = {"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)}
                 if o["name"] + o["address"] not in seen:
                     out.append(o)
             return out[:limit]
@@ -107,8 +107,7 @@ class Search:
 
     def _sym_item(self, prog, s):
         a, ns = s.getAddress(), s.getParentNamespace()
-        mem = a.isMemoryAddress() and a.getAddressSpace() == prog.getAddressFactory().getDefaultAddressSpace()  # shortcut: default space only
-        return {"name": str(s.getName()), "address": hx(a.getOffset()) if mem else None, "kind": self._sym_kind(prog, s),
+        return {"name": str(s.getName()), "address": self.ses.fmt(a, prog) if a.isMemoryAddress() else None, "kind": self._sym_kind(prog, s),
                 "namespace": "" if ns.isGlobal() else str(ns.getName(True)), "source": self.SOURCES.get(str(s.getSource()), "other")}
 
     def _sym_key(self, prog, s, sort):
@@ -117,7 +116,7 @@ class Search:
             return name
         if sort == "address":
             a = s.getAddress()
-            return a.getOffset() if a.isMemoryAddress() else -1
+            return (a.getOffset() & MASK64) if a.isMemoryAddress() else -1
         if sort == "kind":
             return (self._sym_kind(prog, s), name)
         if sort == "namespace":
@@ -190,7 +189,7 @@ class Search:
     def _scan_strings(self, prog, minLength, scan):
         from ghidra.program.util import DefinedStringIterator
         from ghidra.program.model.data import StringDataInstance
-        items = []
+        items, fa = [], self.ses.fmtr(prog)
         for d in DefinedStringIterator.forProgram(prog):
             if len(items) & 255 == 0:
                 scan.check()
@@ -200,7 +199,7 @@ class Search:
             if v is not None:
                 v = str(v)
                 if len(v) >= minLength:
-                    items.append({"address": hx(d.getMinAddress().getOffset()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
+                    items.append({"address": fa(d.getMinAddress()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
         return items
 
     @rpc(lane="scan")
@@ -261,16 +260,16 @@ class Search:
             acc = ListAccumulator()
             done = MemorySearcher(ProgramByteSource(prog), matcher, sset, limit).findAll(acc, mon)
             scan.check()
-            fm, items, last = prog.getFunctionManager(), [], None
+            fm, items, last, fa = prog.getFunctionManager(), [], None, self.ses.fmtr(prog)
             for m in acc.get():
                 ad, b = m.getAddress(), m.getBytes()
-                o = {"address": hx(ad.getOffset()), "length": int(m.getLength()), "bytes": " ".join("%02x" % (x & 255) for x in b[:16])}
+                o = {"address": fa(ad), "length": int(m.getLength()), "bytes": " ".join("%02x" % (x & 255) for x in b[:16])}
                 f = fm.getFunctionContaining(ad)
                 if f is not None:
                     o["function"] = str(f.getName())
                 items.append(o)
                 last = ad
-            return {"items": items, "next": None if done or last is None else hx(last.getOffset() + 1)}
+            return {"items": items, "next": None if done or last is None else fa(last.next() or last)}
 
     @rpc(lane="loop")
     def cancel_search(self, id):

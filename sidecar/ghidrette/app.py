@@ -23,7 +23,8 @@ class App:
         ctx.project = Project(ctx)  # part of the context: Program opens programs through it
         program = Program(ctx)
         self.registry = Registry()
-        for dom in (ctx.project, program, *(d(ctx) for d in DOMAINS)):
+        self.domains = (ctx.project, program, *(d(ctx) for d in DOMAINS))  # kept for tests that call the methods in-process
+        for dom in self.domains:
             self.registry.register(dom)
         ctx.shutdown_hooks += [program.close, ctx.project.close]  # autosave the program on R, then release the project lock files
         self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)

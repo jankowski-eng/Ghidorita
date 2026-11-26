@@ -1,6 +1,7 @@
 """The open program and what every domain needs to touch it: need(), addr(), edit() (one transaction), the undo snapshot."""
-import threading
+import re, threading
 
+from .args import MASK64
 from .errors import INVALID, NO_PROGRAM, NOT_FOUND, RpcError, java_error
 
 
@@ -32,13 +33,38 @@ class Session:
         return self.program
 
     def addr(self, s, prog=None):
+        """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1."""
         prog = prog or self.need()
         try:
-            off = int(s, 16)
-            # shortcut: single default address space only, upgrade when segmented/overlay binaries matter
-            return prog.getAddressFactory().getDefaultAddressSpace().getAddress(off)
+            f = prog.getAddressFactory()
+            name, _, h = s.rpartition(":") if ":" in s else ("", "", s)
+            sp = f.getAddressSpace(name[:-1] if name.endswith(":") else name) if name else f.getDefaultAddressSpace()
+            if sp is None or not re.fullmatch(r"(0[xX])?[0-9a-fA-F]{1,16}", h):
+                raise ValueError(s)
+            off = int(h, 16)
+            return sp.getAddress(off - (1 << 64) if off >= 1 << 63 else off)
         except Exception:
             raise RpcError(INVALID, "bad address %r" % (s,))
+
+    def fmtr(self, prog=None):
+        """-> function Address -> protocol string (the default space as "0x..", others space-qualified); one lookup of the default space."""
+        dsid = (prog or self.need()).getAddressFactory().getDefaultAddressSpace().getSpaceID()
+
+        def f(a):
+            sp = a.getAddressSpace()
+            off = a.getOffset() & MASK64
+            if sp.getSpaceID() == dsid:
+                return "0x%x" % off
+            return "%s%s%x" % (sp.getName(), "::" if sp.isOverlaySpace() else ":", off)
+        return f
+
+    def fmt(self, a, prog=None):
+        return self.fmtr(prog)(a)
+
+    @staticmethod
+    def rng(lo, hi):
+        """Pending change range: (space name, first offset, last offset), unsigned."""
+        return (str(lo.getAddressSpace().getName()), lo.getOffset() & MASK64, hi.getOffset() & MASK64)
 
     def refresh_undo(self, prog=None):
         self.undo_snap = undo_state(prog or self.need())

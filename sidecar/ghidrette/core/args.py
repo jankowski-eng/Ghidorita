@@ -2,8 +2,32 @@
 from .errors import INVALID, RpcError
 
 
+MASK64 = (1 << 64) - 1
+
+
 def hx(off):
-    return "0x%x" % off
+    return "0x%x" % (off & MASK64)  # Ghidra offsets are signed longs: addresses above 2^63 read negative
+
+
+def akey(s):
+    """Sort key of a protocol address string: its offset (qualified addresses carry the space before the last ':')."""
+    return int(s.rpartition(":")[2], 16)
+
+
+def ref_kind(rt):
+    if rt.isCall():
+        return "call"
+    if rt.isJump():
+        return "jump"
+    if rt.isRead() and rt.isWrite():
+        return "readwrite"
+    if rt.isRead():
+        return "read"
+    if rt.isWrite():
+        return "write"
+    if rt.isData():
+        return "data"
+    return "flow" if rt.isFlow() else "other"
 
 
 def lim(v, default, hi=None):
