@@ -30,7 +30,7 @@ export class WebSocketBackend implements Backend {
 
   callCancellable<M extends keyof Methods>(method: M, params: Methods[M]["params"]) {
     // decompile: cancel_decompile; the scan requests (symbols, strings, searches): cancel_search
-    const cancelWith = method === "decompile" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory"].includes(method) ? "cancel_search" : null;
+    const cancelWith = method === "decompile" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory", "list_data_types"].includes(method) ? "cancel_search" : null;
     if (!cancelWith) throw new Error(`${method} is not cancellable`);
     const id = this.nextId++;
     return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, cancelWith, { id }).catch(() => {}); } };
@@ -38,6 +38,7 @@ export class WebSocketBackend implements Backend {
 
   private send<M extends keyof Methods>(id: number, method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
     return new Promise((resolve, reject) => {
+      if (this.ws.readyState !== WebSocket.OPEN) return reject(new Error("socket closed")); // send() on a closed socket drops silently: the call would never settle
       this.pending.set(id, { resolve, reject });
       try { this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params })); } catch (e) { this.pending.delete(id); reject(e); } // closed socket
     });

@@ -21,6 +21,7 @@ const KILL_GRACE_MS = 60_000;
 function stopSidecar(): Promise<void> {
   const p = sidecar;
   if (!p || !alive()) return Promise.resolve();
+  quitting = true; // an exit we asked for is not a crash (no "backend stopped" dialog on SIGINT / uncaught error)
   return new Promise((resolve) => {
     const t = setTimeout(() => { console.error(`sidecar still running after ${KILL_GRACE_MS} ms, SIGKILL (an in-progress save may be lost)`); try { p.kill("SIGKILL"); } catch {} }, KILL_GRACE_MS);
     p.once("exit", () => { clearTimeout(t); resolve(); });

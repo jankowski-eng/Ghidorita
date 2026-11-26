@@ -1,0 +1,5 @@
+# websockets >= 14: main.py uses the new asyncio server API (process_request(connection, request)); older versions fail the handshake
+websockets>=14,<17
+jpype1
+packaging
+typing_extensions

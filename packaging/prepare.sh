@@ -27,7 +27,7 @@ uv python install 3.12 --install-dir $B/uvpy >/dev/null
 cp -R "$(find $B/uvpy -maxdepth 1 -type d -name 'cpython-3.12.*')" $B/python; rm -rf $B/uvpy
 PY=$B/python/bin/python3
 WHL=$(echo $GH/Ghidra/Features/PyGhidra/pypkg/dist/pyghidra-*.whl)
-uv pip install --python $PY --break-system-packages -q websockets jpype1 packaging typing_extensions "$WHL"
+uv pip install --python $PY --break-system-packages -q -r sidecar/requirements.txt "$WHL"
 rm -rf $B/python/lib/python3.12/test $B/python/lib/python3.12/idlelib $B/python/lib/python3.12/tkinter $B/python/lib/python3.12/ensurepip $B/python/share
 find $B/python -name __pycache__ -prune -exec rm -rf {} +
 

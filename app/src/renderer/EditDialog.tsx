@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CommentKind, DataTypeHit } from "../../../protocol";
-import { rpc } from "./client";
+import { scanner } from "./scan";
 import { latest } from "./latest";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
@@ -28,11 +28,13 @@ export function EditDialog({ spec, onSubmit, onClose }: {
   const [sel, setSel] = useState(-1);
   const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const run = useRef(latest()).current;
+  const sc = useRef(scanner()).current;
   const dq = useDebounced(value, 150);
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
   useEffect(() => {
+    sc.cancelAll(); // the previous scan is stale
     if (spec.field !== "datatype" || !dq.trim()) { run(Promise.resolve(null)); setHits([]); return; }
-    run(rpc.call("list_data_types", { query: dq.trim(), limit: 20 })).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
+    run(sc.call("list_data_types", { query: dq.trim(), limit: 20 })).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
   }, [dq]); // eslint-disable-line
   const submit = async () => {
     if (busy) return;

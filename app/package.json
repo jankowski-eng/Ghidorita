@@ -20,15 +20,15 @@
     "electron-builder": "^26.18.0",
     "electron-vite": "^3.1.0",
     "typescript": "^7.0.2",
-    "vite": "^6.4.6"
+    "vite": "^6.4.6",
+    "ws": "^8.23.0"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-virtual": "^3.14.28",
     "monaco-editor": "^0.58.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "ws": "^8.23.0"
+    "react-dom": "^19.3.1"
   },
   "build": {
     "appId": "li.jankowski.ghidrette",

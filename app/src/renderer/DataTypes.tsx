@@ -4,6 +4,7 @@ import type { DataTypeDetail, DataTypeHit, DtSource } from "../../../protocol";
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import { latest } from "./latest";
+import { scanner } from "./scan";
 import { useDebounced } from "./hooks";
 import { Confirm } from "./Confirm";
 import { FormDialog, type FormField } from "./FormDialog";
@@ -37,6 +38,7 @@ export function DataTypes({ version, cursorAddress, onClose }: { version: number
   const [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState(0);
   const runHits = useRef(latest()).current;
+  const sc = useRef(scanner()).current;
   const runDetail = useRef(latest()).current;
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -54,8 +56,9 @@ export function DataTypes({ version, cursorAddress, onClose }: { version: number
     for (const k of keys) { const i = k.indexOf("|"); void loadLevel(k.slice(0, i), k.slice(i + 1)); }
   }, [version]); // eslint-disable-line
   useEffect(() => { // filter: flat search over program + built-in types (list_data_types); empty = tree
+    sc.cancelAll(); // the previous scan is stale
     if (!dq) { runHits(Promise.resolve(null)); setHits(null); return; }
-    runHits(rpc.call("list_data_types", { query: dq, limit: 300 })).then((r) => { if (r) { setHits(r); setCursor(0); } }, (e) => setErr(msg(e)));
+    runHits(sc.call("list_data_types", { query: dq, limit: 300 })).then((r) => { if (r) { setHits(r); setCursor(0); } }, (e) => setErr(msg(e)));
   }, [dq, version]); // eslint-disable-line
   const loadDetail = (s: Sel | null) => {
     if (!s || s.category) { runDetail(Promise.resolve(null)); setDetail(null); return; }

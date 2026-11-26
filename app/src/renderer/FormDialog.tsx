@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DataTypeHit } from "../../../protocol";
-import { rpc } from "./client";
+import { scanner } from "./scan";
 import { latest } from "./latest";
 import { useDebounced, useRestoreFocus, trapTab } from "./hooks";
 
@@ -11,11 +11,13 @@ function TypeInput({ label, value, onChange, disabled, autoFocus }: { label: str
   const [hits, setHits] = useState<DataTypeHit[]>([]);
   const [sel, setSel] = useState(-1);
   const run = useRef(latest()).current;
+  const sc = useRef(scanner()).current;
   const dq = useDebounced(value, 150);
   useEffect(() => {
     const q = dq.trim().replace(/\s*\*+$|\[\d*\]$/g, ""); // "S *" / "char[8]" suggest by the element name
+    sc.cancelAll(); // the previous scan is stale
     if (!q) { run(Promise.resolve(null)); setHits([]); return; }
-    run(rpc.call("list_data_types", { query: q, limit: 12 })).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
+    run(sc.call("list_data_types", { query: q, limit: 12 })).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
   }, [dq]); // eslint-disable-line
   const pick = (h: DataTypeHit) => { onChange(h.name + (/(\s*\*+|\[\d+\])$/.exec(value.trim())?.[0] ?? "")); setHits([]); setSel(-1); };
   return (

@@ -20,7 +20,7 @@ mkdir -p ghidra-install && unzip -q /Users/fjankowski/Projekte/floss/ghidra/buil
 
 # 3. Python sidecar venv (pyghidra comes from the Ghidra build)
 cd sidecar && python3 -m venv .venv
-.venv/bin/pip install websockets pytest jpype1 packaging typing_extensions \
+.venv/bin/pip install -r requirements.txt pytest \
   ../ghidra-install/ghidra_*/Ghidra/Features/PyGhidra/pypkg/dist/pyghidra-*.whl
 
 # 4. App

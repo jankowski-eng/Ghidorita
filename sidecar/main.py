@@ -1184,7 +1184,7 @@ class Sidecar:
             items = self.snap(("str", minLength), lambda: self._scan_strings(prog, minLength, scan))
             q = query.strip().lower()
             if q:
-                items = self.snap(("str", minLength, q), lambda: [i for i in items if q in i["value"].lower()])
+                items = [i for i in items if q in i["value"].lower()]  # not cached: one snapshot per typed prefix would evict the symbol snapshots from the LRU
             return {"total": len(items), "items": items[offset:offset + limit]}
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
@@ -1762,6 +1762,8 @@ class Sidecar:
         if not prog.getMemory().contains(a):
             raise RpcError(INVALID, "address %s is not in memory" % address)
 
+        out = {}
+
         def go(p):
             dtm = p.getDataTypeManager()
             dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
@@ -1774,9 +1776,9 @@ class Sidecar:
                 raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
             self._cmd(CreateDataCmd(a, True, False, dt))(p)
-            self._data_ranges = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
+            out["range"] = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
         self.edit("Define data", go)
-        self._record({"data"}, [self._data_ranges])
+        self._record({"data"}, [out["range"]])
         return {}
 
     def clear_code(self, address, length=None):
