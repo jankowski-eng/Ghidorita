@@ -27,7 +27,7 @@ export function AppToolbar() {
 export function TopBars({ go, run }: { go: (a: Address, source: Source) => unknown; run: (c: MenuCommand) => void }) {
   const s = useSession();
   const opened = useProgram((p) => !!p.program), program = useProgram((p) => p.program), funcs = useProgram((p) => p.funcs);
-  const searchOpen = useViews((v) => v.searchOpen), gotoOpen = useViews((v) => v.gotoOpen);
+  const layouts = useViews((v) => v.layoutNames), searchOpen = useViews((v) => v.searchOpen), gotoOpen = useViews((v) => v.gotoOpen);
   const close = (key: "searchOpen" | "gotoOpen") => s.views.dispatch({ type: "set", patch: { [key]: false } });
   const symbolSearch = s.caps.has("symbolSearch") ? program?.api.searches.searchSymbols : undefined;
   const searchLocation = (q: string): Promise<SymbolHit[]> => symbolSearch
@@ -35,7 +35,7 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
     : Promise.resolve(funcs.filter((f) => f.name.toLowerCase().startsWith(q.toLowerCase())).map((f) => ({ name: f.name, address: f.entry, kind: "function" })));
   return (
     <>
-      {searchOpen && opened && <SearchPanel capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
+      {searchOpen && opened && <SearchPanel layouts={layouts} capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
       {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => close("gotoOpen")} />}
     </>
   );

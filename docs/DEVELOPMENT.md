@@ -90,6 +90,8 @@ Patching (capability `patch`): Edit > Patch Instruction… (also the listing's c
 
 P-code (capability `pcode`, needs `decompile`): View > P-code or "Toggle P-code" in the command bar replaces the decompiler pane (like the graphs; at most one of C, control-flow graph, call graph, p-code). High (the decompiler's ops, grouped by basic block) or Raw (`Instruction.getPcode()` per instruction). It marks the lines of the shared cursor's instruction and a click on a line moves the cursor (listing and Bytes follow). Ghidra has no default key for it, so none is bound. `pcode` is one decompile on the decompiler lane with its own cache entry (as `function_graph`), so toggling it costs a decompile when the C of that function is not already in the same state. `sidecar/test_pcode.py`, `AUTOTEST_FLOW=shot-pcode`.
 
+Named layouts (no protocol): View > Layouts, or "Layout: <name>" / "Layout: Save Current As…" / "Layout: Delete <name>" / "Move <pane> Left|Right" in the command bar. A layout is the shown panes and their order, the widths of the functions and listing panes, what replaces the decompiler (C, graph, call graph, p-code) and the open dock tab; stored per user in localStorage (`ghidorita.layouts.v1`, read and written in try/catch, the built-in arrangement when it is missing or corrupt), never per program. The built-in `Default` cannot be deleted (saving over it changes what it restores); the sizes saved by earlier versions (`ghidra.layout.v1`) were migrated into it. Pane widths dragged between saves are kept as the live sizes. Unit tests: `app/test/layouts.test.mjs`; the quick autotest saves, restores and deletes one through the UI.
+
 ## Packaging (macOS, Apple Silicon)
 
 ```bash

@@ -10,6 +10,7 @@ import { Decompiler } from "./Decompiler";
 import { FunctionList } from "./FunctionList";
 import { Listing } from "./Listing";
 import { Panes } from "./Layout";
+import { saveSizes } from "./layouts";
 import { TabStrip } from "./TabStrip";
 import { XrefPanel } from "./XrefPanel";
 import { allowsEdit, centreViews } from "../capabilities";
@@ -29,7 +30,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const initialRows = useProgram((p) => p.initialRows), reading = useProgram((p) => p.reading), browseError = useProgram((p) => p.browseError);
   const dbg = useProgram(shownDebug), liveDbg = useProgram((p) => p.debug), canDebug = caps.has("debugger");
   const busy = useProgram((p) => !!p.opening || p.closing || p.unavailable);
-  const { xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, pcodeOn, cursorAt, dataVersion } = useViews((v) => v);
+  const { paneOrder, paneSizes, xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, pcodeOn, cursorAt, dataVersion } = useViews((v) => v);
   const ops = program.api;
   const set = (patch: Partial<Views>) => views.dispatch({ type: "set", patch });
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
@@ -65,7 +66,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
     </div>
   );
   return (
-    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && (centre.decompiler || centre.callGraph) }}>{{
+    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && (centre.decompiler || centre.callGraph) }} order={paneOrder} sizes={paneSizes} onSizes={(z, save) => { set({ paneSizes: z }); if (save) saveSizes(z); }}>{{
       functions: (
         <div className="funcs-col">
           <div className="funcs-row">

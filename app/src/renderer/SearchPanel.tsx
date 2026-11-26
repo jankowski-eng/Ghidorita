@@ -5,7 +5,7 @@ import { allowsCommand } from "../capabilities";
 import { addressOf } from "./parseGoto";
 import { latest } from "./latest";
 import { isLeadString, rank, type Cand } from "./rank";
-import { matchActions, type CommandAction } from "./commandActions";
+import { layoutActions, matchActions, type CommandAction } from "./commandActions";
 import { keyOf, showKey } from "../keys";
 import { isMac } from "./platform";
 import type { MenuCommand } from "../preload";
@@ -16,7 +16,7 @@ type Hit = Omit<Cand, "kind"> & { kind: Cand["kind"] | "address"; why?: string; 
 const short = (v: string) => (v.length > 80 ? v.slice(0, 80) + "…" : v).replace(/\s+/g, " ");
 
 /** Command bar (Cmd+K): symbols, defined strings and typed addresses (each when the provider offers it); ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
-export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrings, onGo, onRun, onClose }: { capabilities: ReadonlySet<Capability>; searchSymbols?: Searches["searchSymbols"]; topSymbols?: Searches["topSymbols"]; listStrings?: Searches["listStrings"]; onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
+export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrings, layouts, onGo, onRun, onClose }: { layouts: string[]; capabilities: ReadonlySet<Capability>; searchSymbols?: Searches["searchSymbols"]; topSymbols?: Searches["topSymbols"]; listStrings?: Searches["listStrings"]; onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
   useRestoreFocus();
   const [q, setQ] = useState("");
   const [syms, setSyms] = useState<Cand[]>([]);
@@ -26,7 +26,7 @@ export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrin
   const dq = useDebounced(q, 150);
   const addr = q.startsWith(">") ? null : addressOf(q);
   const actionMode = q.startsWith(">") || (!searchSymbols && !addr);
-  const acts: CommandAction[] = actionMode ? matchActions(q.replace(/^>/, "")).filter(({ cmd }) => allowsCommand(capabilities, cmd)) : [];
+  const acts: CommandAction[] = actionMode ? matchActions(q.replace(/^>/, ""), layoutActions(layouts)).filter(({ cmd }) => allowsCommand(capabilities, cmd)) : [];
   const hits: Hit[] = actionMode ? [] : [...(addr ? [{ kind: "address" as const, name: "Go to address", address: addr }] : []), ...rank(q, [...syms, ...strs])];
   const n = actionMode ? acts.length : hits.length;
   const runSyms = useRef(latest()).current, runStrs = useRef(latest()).current;

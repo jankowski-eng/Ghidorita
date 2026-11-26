@@ -24,6 +24,7 @@ export function createMenu({ getWin, pick }: Deps) {
     ({ id: p, label, enabled: allowsCommand(caps, { type: "toggle-pane", pane: p, visible: true }), type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p, visible: mi.checked }); } });
 
   function build() {
+    if (state.panes) Object.assign(shown, state.panes);
     const recent = getRecent();
     const recentItems: MenuItemConstructorOptions[] = recent.length
       ? [...recent.map((p): MenuItemConstructorOptions => ({ label: p.length > 80 ? "…" + p.slice(-79) : p, enabled: state.canOpen, click: () => send({ type: "open-path", path: p }) })),
@@ -89,6 +90,13 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "memory", label: "Target Memory", enabled: state.hasProgram && caps.has(dockCapability.memory), click: () => send({ type: "dock", panel: "memory" }) },
         { id: "memsearch", label: lab("Search Memory…", "dock:memsearch"), enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: acc("dock:memsearch"), click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: acc("datatypes"), click: () => send({ type: "datatypes" }) },
+        { label: "Layouts", enabled: state.hasProgram, submenu: [
+          { label: "Save Current Layout…", click: () => send({ type: "layout-save" }) },
+          { type: "separator" },
+          ...(state.layouts ?? ["Default"]).map((name): MenuItemConstructorOptions => ({ label: name, click: () => send({ type: "layout", op: "apply", name }) })),
+          { type: "separator" },
+          { label: "Delete Layout", enabled: (state.layouts ?? []).some((n) => n !== "Default"), submenu: (state.layouts ?? []).filter((n) => n !== "Default").map((name): MenuItemConstructorOptions => ({ label: name, click: () => send({ type: "layout", op: "delete", name }) })) },
+        ] },
         { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [

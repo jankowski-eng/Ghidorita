@@ -9,6 +9,7 @@ import type { XrefTarget } from "../editActions";
 import type { CommentKind } from "../../../../protocol";
 import { emptyNav } from "../nav";
 import { createStore } from "./createStore";
+import { layoutNames, readLayouts, startupLayout, type Sizes } from "../layouts";
 
 export type RangeList = { start: Address; end: Address }[] | null;
 export interface EditDialogState { spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> }
@@ -31,6 +32,9 @@ export interface Views {
   searchOpen: boolean; gotoOpen: boolean; typesOpen: boolean;
   dlg: EditDialogState | null; formDlg: FormDialogState | null;
   visible: Record<PaneId, boolean>;
+  paneOrder: PaneId[];                 // left to right
+  paneSizes: Sizes;                    // widths of the functions and listing panes
+  layoutNames: string[];               // the saved layouts (a user setting, not part of any program)
   dataVersion: number;                 // bumped on every program change: the dock windows refetch
   typesVersion: number;
   covVersion: number;                  // bumped whenever the coverage runs or their selection change
@@ -39,13 +43,17 @@ export interface Views {
 export const initialViews: Views = {
   nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, useHl: null,
   dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
-  visible: { functions: true, listing: true, decompiler: true }, dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
+  visible: { functions: true, listing: true, decompiler: true }, paneOrder: ["functions", "listing", "decompiler"], paneSizes: { functions: 260, listing: 560 }, layoutNames: ["Default"], dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };
 
 export type ViewsAction = { type: "set"; patch: Partial<Views> | ((v: Views) => Partial<Views>) } | { type: "reset" };
 export function viewsReducer(v: Views, a: ViewsAction): Views {
   if (a.type === "set") return { ...v, ...(typeof a.patch === "function" ? a.patch(v) : a.patch) };
   // the scroll request keeps counting so the listing notices the new position
-  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, visible: v.visible, graphOn: v.graphOn, callGraphOn: v.callGraphOn, pcodeOn: v.pcodeOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
+  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, visible: v.visible, paneOrder: v.paneOrder, paneSizes: v.paneSizes, layoutNames: v.layoutNames, graphOn: v.graphOn, callGraphOn: v.callGraphOn, pcodeOn: v.pcodeOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
 }
-export const createViews = () => createStore(viewsReducer, initialViews);
+/** The views store; the pane sizes and order start from the stored Default layout and the sizes last dragged to (storage read in try/catch, the built-in sizes if it fails). */
+export function createViews() {
+  const start = startupLayout();
+  return createStore(viewsReducer, { ...initialViews, paneOrder: start.order, paneSizes: start.sizes, layoutNames: layoutNames(readLayouts()) });
+}

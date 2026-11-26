@@ -1,40 +1,25 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 export type PaneId = "functions" | "listing" | "decompiler";
-const ORDER: PaneId[] = ["functions", "listing", "decompiler"];
 const LABEL: Record<PaneId, string> = { functions: "Functions", listing: "Listing", decompiler: "Decompiler" };
-const KEY = "ghidra.layout.v1", MIN = 120;
+const MIN = 120;
 type Sizes = Record<"functions" | "listing", number>;
-const DEFAULT: Sizes = { functions: 260, listing: 560 };
 
-function load(): Sizes {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (s && Number.isFinite(s.functions) && Number.isFinite(s.listing)) return { functions: Math.min(2000, Math.max(MIN, s.functions)), listing: Math.min(2000, Math.max(MIN, s.listing)) };
-  } catch { /* storage unavailable or corrupt: defaults */ }
-  return DEFAULT;
-}
-
-/** Three panes side by side; each visible pane except the last visible one has a fixed width and a drag handle to its right. */
-export function Panes({ visible, children }: { visible: Record<PaneId, boolean>; children: Record<PaneId, ReactNode> }) {
-  const [sizes, setSizes] = useState(load);
+/** The panes side by side in `order`; each visible sized pane except the last visible one has a drag handle to its right. The sizes are the owner's (`onSizes`, save = a drag or key step ended). */
+export function Panes({ visible, order, sizes, onSizes, children }: { visible: Record<PaneId, boolean>; order: PaneId[]; sizes: Sizes; onSizes: (s: Sizes, save: boolean) => void; children: Record<PaneId, ReactNode> }) {
   const sizesRef = useRef(sizes); sizesRef.current = sizes;
-  const resize = (id: "functions" | "listing", w: number, save: boolean) => {
-    const next = { ...sizesRef.current, [id]: Math.min(2000, Math.max(MIN, Math.round(w))) };
-    setSizes(next);
-    if (save) try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  };
-  const shown = ORDER.filter((p) => visible[p]);
+  const resize = (id: "functions" | "listing", w: number, save: boolean) => onSizes({ ...sizesRef.current, [id]: Math.min(2000, Math.max(MIN, Math.round(w))) }, save);
+  const shown = order.filter((p) => visible[p]);
   return (
     <div className="main">
-      {ORDER.map((id) => {
+      {order.map((id) => {
         const last = shown[shown.length - 1] === id;
         return (
           <div key={id} style={{ display: visible[id] ? "contents" : "none" }}>
             <section className="pane" aria-label={LABEL[id]} style={last || id === "decompiler" ? { flex: 1 } : { width: sizes[id as "functions" | "listing"], flex: "none" }}>
               {children[id]}
             </section>
-            {visible[id] && !last && <Handle label={LABEL[id]} width={sizes[id as "functions" | "listing"]} onResize={(w, save) => resize(id as "functions" | "listing", w, save)} />}
+            {visible[id] && !last && id !== "decompiler" && <Handle label={LABEL[id]} width={sizes[id as "functions" | "listing"]} onResize={(w, save) => resize(id as "functions" | "listing", w, save)} />}
           </div>
         );
       })}

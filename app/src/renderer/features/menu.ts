@@ -7,6 +7,7 @@ import { useProgram, useSession, useViews, type Session } from "../store/session
 import type { Views } from "../store/views";
 import type { EditAction } from "../editActions";
 import { requestOpen } from "./dialogs";
+import { applyLayout, movePane, removeLayout, saveCurrentLayout } from "./layouts";
 import { exportAs } from "./exports";
 import type { CoverageActions } from "./coverage";
 import type { CopyWhat } from "./copy";
@@ -48,6 +49,9 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn, callGraphOn: false, pcodeOn: false }); }
   else if (c.type === "callgraph") { if (opened()) set({ callGraphOn: !views.getState().callGraphOn, graphOn: false, pcodeOn: false }); }
   else if (c.type === "pcode") { if (opened()) set({ pcodeOn: !views.getState().pcodeOn, graphOn: false, callGraphOn: false }); }
+  else if (c.type === "layout") { if (c.op === "apply") applyLayout(s, c.name); else removeLayout(s, c.name); }
+  else if (c.type === "pane-move") movePane(s, c.pane, c.dir);
+  else if (c.type === "layout-save") set({ formDlg: { title: "Save layout", submit: "Save", fields: [{ key: "name", label: "Layout name" }], go: async (v) => saveCurrentLayout(s, v.name) } });
   else if (c.type === "datatypes") { if (opened()) set({ typesOpen: !views.getState().typesOpen }); }
   else if (c.type === "toggle-pane") set({ visible: { ...views.getState().visible, [c.pane]: c.visible } });
 }
@@ -62,15 +66,16 @@ export function useBusy() {
 export function useMenuState(canBack: boolean, canForward: boolean) {
   const s = useSession();
   const opened = useProgram((p) => !!p.program), saving = useProgram((p) => p.saving), undo = useProgram((p) => p.undo);
-  const busy = useBusy();
+  const busy = useBusy(), layouts = useViews((v) => v.layoutNames), panes = useViews((v) => v.visible);
   useEffect(() => {
     const state: MenuState = {
       canBack: canBack && !busy, canForward: canForward && !busy, canOpen: !busy, canEdit: opened && !busy && !saving && s.caps.has("editing"),
       hasProgram: opened && !busy && !saving, capabilities: [...s.caps], recovery: s.backend.recovery,
+      layouts: s.views.getState().layoutNames, panes: s.views.getState().visible,
       undoLabel: undo.canUndo ? "Undo " + (undo.undoName ?? "") : null, redoLabel: undo.canRedo ? "Redo " + (undo.redoName ?? "") : null, dirty: undo.dirty, canClose: opened && !busy && !saving,
     };
     s.menu.current = state; window.host.setMenuState(state).catch(() => {});
-  }, [canBack, canForward, busy, opened, saving, undo.canUndo, undo.canRedo, undo.undoName, undo.redoName, undo.dirty]); // eslint-disable-line
+  }, [canBack, canForward, busy, opened, saving, undo.canUndo, undo.canRedo, undo.undoName, undo.redoName, undo.dirty, layouts, panes]); // eslint-disable-line
 }
 export function useWindowTitle() {
   const name = useProgram((p) => p.program?.session.name ?? null), dirty = useProgram((p) => p.undo.dirty);

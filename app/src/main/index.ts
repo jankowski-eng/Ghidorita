@@ -99,7 +99,9 @@ ipcMain.handle("menu-state", (e, s: unknown) => {
   const interval = (o.recovery as { snapshotIntervalSeconds?: unknown } | undefined)?.snapshotIntervalSeconds;
   recovery = capabilities.includes("recovery") && typeof interval === "number" && Number.isFinite(interval) && interval > 0
     ? { snapshotIntervalSeconds: interval } : undefined;
-  const m = { capabilities, recovery, hasProgram: o.hasProgram === true, canBack: o.canBack, canForward: o.canForward, canOpen: o.canOpen, canEdit: o.canEdit === true, undoLabel: lbl(o.undoLabel), redoLabel: lbl(o.redoLabel), dirty: o.dirty === true, canClose: o.canClose === true };
+  const m = { capabilities, recovery, hasProgram: o.hasProgram === true, canBack: o.canBack, canForward: o.canForward, canOpen: o.canOpen, canEdit: o.canEdit === true, undoLabel: lbl(o.undoLabel), redoLabel: lbl(o.redoLabel), dirty: o.dirty === true, canClose: o.canClose === true,
+    layouts: Array.isArray(o.layouts) ? o.layouts.filter((n): n is string => typeof n === "string").slice(0, 100).map((n) => n.slice(0, 40)) : undefined,
+    panes: o.panes && typeof o.panes === "object" ? { functions: (o.panes as any).functions !== false, listing: (o.panes as any).listing !== false, decompiler: (o.panes as any).decompiler !== false } : undefined };
   menu?.setState(m);
   rendererReady = true;
   if (process.platform === "darwin") win.setDocumentEdited(m.dirty);

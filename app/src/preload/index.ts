@@ -8,7 +8,7 @@ export type MenuCommand =
   | { type: "open-path"; path: string } | { type: "coverage-path"; path: string } | { type: "coverage-clear" } | { type: "coverage-load" }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" } | { type: "datatypes" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
-  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" | "locals" | "memory" | "stack" | "undefined" | "hex" } | { type: "debug"; action: "attach" | "detach" | "continue" | "pause" | "step" | "stepinto" | "stepout" | "stepi" | "back" | "forward" | "breakpoint" } | { type: "xrefs" } | { type: "graph" } | { type: "pcode" } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" } | { type: "copy"; what: "address" | "bytes" | "carray" | "decompiled" }
+  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" | "locals" | "memory" | "stack" | "undefined" | "hex" } | { type: "debug"; action: "attach" | "detach" | "continue" | "pause" | "step" | "stepinto" | "stepout" | "stepi" | "back" | "forward" | "breakpoint" } | { type: "xrefs" } | { type: "graph" } | { type: "pcode" } | { type: "layout"; op: "apply" | "delete"; name: string } | { type: "layout-save" } | { type: "pane-move"; pane: Pane; dir: -1 | 1 } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" } | { type: "copy"; what: "address" | "bytes" | "carray" | "decompiled" }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "setEquate" | "noReturn" | "splitVariable" | "forceField" | "clear" | "signature" | "patch" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {
@@ -19,6 +19,8 @@ export interface MenuState {
   redoLabel: string | null;
   dirty: boolean;                   // unsaved edits: macOS document-edited dot
   canClose: boolean;                // File > Close Program (the sidecar autosaves on close)
+  panes?: Record<Pane, boolean>;    // which panes are shown (View > Function List / Listing / Decompiler checkmarks; a layout can change them)
+  layouts?: string[];               // saved layout names for View > Layouts (the Default first)
 }
 
 export interface Host {

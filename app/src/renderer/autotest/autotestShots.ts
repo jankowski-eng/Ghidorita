@@ -21,6 +21,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-warnings") return warningsShot(fl!, c, result);
   if (name === "shot-hex") return hexShot(fl!, c, result);
   if (name === "shot-pcode") return pcodeShot(fl!, c, result);
+  if (name === "shot-layout") return layoutShot(fl!, c, result);
   if (name === "shot-patch") return patchShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
@@ -352,6 +353,20 @@ async function pcodeShot(fl: { name: string; entry: string; size: number }[], c:
   const region = await waitFor(() => byLabel<HTMLElement>("region", "P-code"), 10000, "p-code pane");
   await waitFor(() => /ops/.test(region.querySelector('[aria-label="P-code state"]')!.textContent ?? ""), 30000, "high p-code");
   result.pcode = { function: f.name, state: region.querySelector('[aria-label="P-code state"]')!.textContent, rows: region.querySelectorAll(".pc-line").length };
+  await sleep(300);
+  return true;
+}
+
+async function layoutShot(fl: { entry: string }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  await c.select(fl[0].entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+  c.command({ type: "pane-move", pane: "decompiler", dir: -1 });
+  c.command({ type: "dock", panel: "hex" });
+  c.command({ type: "search" });
+  const input = await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Symbol or action"]'), 5000, "command bar");
+  typeInto(input, ">layout");
+  await waitFor(() => [...document.querySelectorAll('[role="listbox"] .hit')].some((e) => /Layout: Default/.test(e.textContent ?? "")), 5000, "Layout: Default in the command bar");
+  result.layout = { actions: [...document.querySelectorAll('[role="listbox"] .hit .n')].map((e) => e.textContent) };
   await sleep(300);
   return true;
 }

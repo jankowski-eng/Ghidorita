@@ -146,6 +146,37 @@ async function pcodeStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   R.pcode = { entry: f.entry, raw: want.raw.length, high: want.high.length };
 }
 
+async function layoutStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  const hasPcode = c.backend.capabilities.has("pcode");
+  const order = () => [...document.querySelectorAll<HTMLElement>("section.pane")].map((e) => e.getAttribute("aria-label"));
+  await c.select(fl[0].entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+  c.command({ type: "layout", op: "apply", name: "Default" });
+  await waitFor(() => !document.querySelector('section[aria-label="Dock"]') && order().join() === "Functions,Listing,Decompiler", 5000, "the Default layout");
+  // arrange: listing first, the hex dock open, p-code instead of the C; save it under a name through the dialog
+  c.command({ type: "pane-move", pane: "listing", dir: -1 });
+  c.command({ type: "dock", panel: "hex" });
+  if (hasPcode) c.command({ type: "pcode" });
+  await waitFor(() => order().join() === "Listing,Functions,Decompiler" && document.querySelector('section[aria-label="Dock"]'), 5000, "the arrangement");
+  c.command({ type: "layout-save" });
+  const dlg = await waitFor(() => byLabel("dialog", "Save layout"), 5000, "save layout dialog");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Layout name"]')!, "autotest layout");
+  dlg.querySelector<HTMLButtonElement>('button[aria-label="Save"]')!.click();
+  await waitFor(() => !byLabel("dialog", "Save layout"), 5000, "dialog closed");
+  // back to the Default, then restore the saved one
+  c.command({ type: "layout", op: "apply", name: "Default" });
+  await waitFor(() => !document.querySelector('section[aria-label="Dock"]') && order().join() === "Functions,Listing,Decompiler" && !byLabel("region", "P-code"), 5000, "back to the Default");
+  c.command({ type: "layout", op: "apply", name: "autotest layout" });
+  await waitFor(() => order().join() === "Listing,Functions,Decompiler" && byLabel("region", "Bytes") && (!hasPcode || byLabel("region", "P-code")), 10000, "the saved layout restored");
+  // the menu state carries the names; then delete it and leave the Default
+  need(c.lastMenu()?.layouts?.includes("autotest layout"), "View > Layouts lists it");
+  c.command({ type: "layout", op: "delete", name: "autotest layout" });
+  await waitFor(() => !c.lastMenu()?.layouts?.includes("autotest layout"), 5000, "deleted");
+  c.command({ type: "layout", op: "apply", name: "Default" });
+  await waitFor(() => order().join() === "Functions,Listing,Decompiler" && !document.querySelector('section[aria-label="Dock"]'), 5000, "Default again");
+  R.layout = { restored: "Listing,Functions,Decompiler", pcode: hasPcode };
+}
+
 async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
   need(c.backend.capabilities.has("calls"), "provider has no calls capability");
   let pick: { f: FunctionInfo; r: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["references"]["calls"]>["result"]> } | null = null;
@@ -273,6 +304,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   await undefinedStep(c, R);
   await hexStep(fl, c, R);
   await pcodeStep(fl, c, R);
+  await layoutStep(fl, c, R);
   await patchStep(fl, c, R, result);
   await bookmarkStep(fl, c, R, result);
   return true;

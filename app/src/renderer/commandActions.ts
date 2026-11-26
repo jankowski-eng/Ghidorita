@@ -70,8 +70,20 @@ export const ACTIONS: CommandAction[] = [
   { label: "Close Program", cmd: { type: "close-program" } },
 ];
 
-/** Actions whose label contains every word of `q` (case-insensitive); an empty query lists all. */
-export const matchActions = (q: string): CommandAction[] => {
+/** The actions that depend on what the user saved: restore or delete each layout, save the current one, move panes. */
+export function layoutActions(names: string[]): CommandAction[] {
+  const pane = (p: "functions" | "listing" | "decompiler", label: string): CommandAction[] => [
+    { label: `Move ${label} Left`, cmd: { type: "pane-move", pane: p, dir: -1 } }, { label: `Move ${label} Right`, cmd: { type: "pane-move", pane: p, dir: 1 } }];
+  return [
+    ...names.map((n): CommandAction => ({ label: `Layout: ${n}`, cmd: { type: "layout", op: "apply", name: n } })),
+    { label: "Layout: Save Current As…", cmd: { type: "layout-save" } },
+    ...names.filter((n) => n !== "Default").map((n): CommandAction => ({ label: `Layout: Delete ${n}`, cmd: { type: "layout", op: "delete", name: n } })),
+    ...pane("functions", "Function List"), ...pane("listing", "Listing"), ...pane("decompiler", "Decompiler"),
+  ];
+}
+
+/** Actions whose label contains every word of `q` (case-insensitive); an empty query lists all. `extra` are the saved-layout actions. */
+export const matchActions = (q: string, extra: CommandAction[] = []): CommandAction[] => {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return ACTIONS.filter((a) => words.every((w) => a.label.toLowerCase().includes(w)));
+  return [...ACTIONS, ...extra].filter((a) => words.every((w) => a.label.toLowerCase().includes(w)));
 };
