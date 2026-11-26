@@ -19,6 +19,7 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
   const [base, setBase] = useState("");
   const [filter, setFilter] = useState("");
   const [profile, setProfile] = useState<AnalysisProfile>("full");
+  const [adv, setAdv] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -63,8 +64,17 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
             <div className="ebars">{ready.entropy.map((x, i) => <span key={i} title={`${x} bits/byte`} style={{ height: `${Math.round((x / 8) * 100)}%`, background: x >= 7.5 ? "#e0a93b" : "#5a8f6a" }} />)}</div>
             <span className="meta">{mb(ready.sizeBytes)} · {entropyHint(ready.entropy)}</span>
           </div>}
+          <dl className="card-facts" aria-label="File summary">
+            <dt>Format</dt><dd>{cand.loader}{cand.preferred ? "" : " (not the preferred loader)"}</dd>
+            <dt>Architecture</dt><dd>{language ? `${language}${spec ? ` / ${spec}` : ""}` : "not chosen yet"}</dd>
+            <dt>Size</dt><dd>{mb(ready.sizeBytes)}</dd>
+            <dt>Analysis</dt><dd>{PROFILE_LABEL[profile]}</dd>
+          </dl>
+          {!language && <div className="err" role="status">This format needs a language: open Advanced options and choose one.</div>}
+          <button type="button" aria-expanded={adv || !language} onClick={() => setAdv(!adv)}>{adv || !language ? "Hide advanced options" : "Advanced options…"}</button>
+          <div hidden={!(adv || !language)} className="adv">
           <label>Loader
-            <select autoFocus aria-label="Loader" value={idx} onChange={(e) => pick(+e.target.value)}>
+            <select aria-label="Loader" value={idx} onChange={(e) => pick(+e.target.value)}>
               {ready.cands.map((c, i) => <option key={i} value={i}>{label(c)}</option>)}
             </select>
           </label>
@@ -92,9 +102,10 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
               {(["full", "fast"] as const).map((p) => <option key={p} value={p}>{PROFILE_LABEL[p]}</option>)}
             </select>
           </label>
+          </div>
         </>}
         <div className="row">
-          <button className="primary" disabled={!!err} onClick={submit}>Open</button>
+          <button className="primary" autoFocus disabled={!!err} onClick={submit}>Open</button>
           <button onClick={onCancel}>Cancel</button>
         </div>
       </div>
