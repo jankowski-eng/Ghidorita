@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame,
+  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -68,6 +68,8 @@ export interface Searches {
   topSymbols(params: { limit?: number }): Job<TopSymbol[]>;
   listSymbols(params: ListSymbolsParams): Job<{ total: number; items: SymbolRow[] }>;
   listStrings(params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }): Job<{ total: number; items: StringItem[] }>;
+  /** data references into undefined bytes (undefinedRefs capability): a scan, paged like listStrings */
+  listUndefinedRefs(params: { offset?: number; limit?: number }): Job<{ total: number; items: UndefinedRef[] }>;
   searchMemory(params: SearchMemoryParams): Job<{ items: MemoryHit[]; next: Address | null }>;
 }
 

@@ -122,6 +122,9 @@ export interface RowXrefs {
   items: { from: Address; kind: "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other" }[];
 }
 
+/** A reference into undefined bytes: `address` is the target, `from` the referring instruction or data, `function` the function containing `from`. type "pointer" = any other data reference (an address taken, a pointer). */
+export interface UndefinedRef { address: Address; type: "read" | "write" | "readwrite" | "pointer"; from: Address; function?: string }
+
 export interface DataPart {
   offset: number;   // byte offset inside the unit
   length: number;
@@ -143,7 +146,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -226,6 +229,8 @@ export interface Methods {
   variable_uses: { params: { entry: Address; name: string; timeoutSecs?: number }; result: XrefTo[] };
   xrefs_from: { params: { address: Address }; result: XrefFrom[] };
   list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }; result: { total: number; items: StringItem[] } };
+  // Data references (read, write, readwrite, pointer) whose target is undefined bytes: no instruction and no defined data there. Scan lane (cancel_search), paged like list_strings. Capability "undefinedRefs".
+  list_undefined_refs: { params: { offset?: number; limit?: number }; result: { total: number; items: UndefinedRef[] } };
   search_memory: { params: SearchMemoryParams; result: { items: MemoryHit[]; next: Address | null } };
   cancel_search: { params: { id: number }; result: { cancelled: boolean } };
   get_comments: { params: { address: Address }; result: Partial<Record<CommentKind, string>> }; // only kinds that are set; NotFound if no code unit

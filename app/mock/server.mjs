@@ -211,7 +211,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -573,6 +573,12 @@ const handlers = {
     const all = Array.from({ length: 300 }, (_, k) => { const value = `mock string #${k}${"x".repeat(k % 20)}`; return { address: hex(BASE + (k * 6000 + 11) * STRIDE), value, length: value.length + 1 }; })
       .map((s, k) => (k % 3 === 0 ? { ...s, refs: 0 } : { ...s, refs: (k % 4) + 1, refFrom: Array.from({ length: Math.min(3, (k % 4) + 1) }, (_, j) => ({ from: entryOf((k * 7 + j) % NFUNC), function: nameOf((k * 7 + j) % NFUNC) })) })) // every third string is unreferenced
       .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q) && (!referencedOnly || s.refs > 0) && S.data.get(parseAddr(s.address))?.mnemonic !== "??"); // clear_code removes a string
+    return { total: all.length, items: all.slice(off, off + lim) };
+  },
+  list_undefined_refs({ offset, limit }) { // fake: 40 references into undefined words; define_data on a target removes its row
+    const off = parseInt0(offset, 0, "offset"), lim = Math.min(5000, parseInt0(limit, 500, "limit"));
+    const all = Array.from({ length: 40 }, (_, k) => ({ address: hex(BASE + (k * 4000 + 5) * STRIDE), type: ["read", "write", "pointer"][k % 3], from: entryOf(k % NFUNC), function: nameOf(k % NFUNC) }))
+      .filter((r) => { const d = S.data.get(parseAddr(r.address)); return !d || d.mnemonic === "??"; });
     return { total: all.length, items: all.slice(off, off + lim) };
   },
   list_symbols({ offset, limit, query, kinds, sort, desc }) {

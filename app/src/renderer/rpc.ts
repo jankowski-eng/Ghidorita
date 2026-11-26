@@ -191,6 +191,7 @@ export class WebSocketBackend implements ApplicationBackend {
         topSymbols: (p) => job("suggestions", "top_symbols", p, "cancel_search"),
         listSymbols: (p) => job("symbolTable", "list_symbols", p, "cancel_search"),
         listStrings: (p) => job("strings", "list_strings", p, "cancel_search"),
+        listUndefinedRefs: (p) => job("undefinedRefs", "list_undefined_refs", p, "cancel_search"),
         searchMemory: (p) => job("memorySearch", "search_memory", p, "cancel_search"),
       },
       types: {

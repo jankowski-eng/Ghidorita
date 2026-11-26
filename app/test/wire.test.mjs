@@ -25,6 +25,8 @@ const cases = {
   stack_frame: [{ entry: "0x1000", name: "f", localSize: 8, parameterSize: 4, slots: [{ offset: -8, size: 4, name: "x", dataType: "int", parameter: false, source: "user" }] },
     [["slot without name", { entry: "0x1000", name: "f", localSize: 8, parameterSize: 4, slots: [{ offset: -8, size: 4, dataType: "int", parameter: false, source: "user" }] }],
      ["slot with an unknown source", { entry: "0x1000", name: "f", localSize: 8, parameterSize: 4, slots: [{ offset: -8, size: 4, name: "x", dataType: "int", parameter: false, source: "guess" }] }]]],
+  list_undefined_refs: [{ total: 1, items: [{ address: "0x2000", type: "pointer", from: "0x1000", function: "f" }] },
+    [["item without from", { total: 1, items: [{ address: "0x2000", type: "read" }] }], ["unknown access", { total: 1, items: [{ address: "0x2000", type: "execute", from: "0x1000" }] }]]],
   listing_info: [{ totalBytes: 1, ranges: [{ start: "0x1000", size: 1 }] }, [["range without size", { totalBytes: 1, ranges: [{ start: "0x1000" }] }]]],
   listing_rows: [[row], [["row without bytes", [without(row, "bytes")]]]],
   list_functions: [[{ name: "f", entry: "0x1000", size: 1 }], [["function without entry", [{ name: "f", size: 1 }]]]],

@@ -1,7 +1,9 @@
 """Scan lane: symbols, strings, memory search, cancel_search."""
 import time
 
-from testlib import CANCELLED, Client, INVALID, run
+import pytest
+
+from testlib import CANCELLED, Client, INVALID, inproc, run
 
 
 def test_list_symbols(env):
@@ -165,4 +167,55 @@ def test_top_symbols_and_refs(env):
             hit = next(h for h in await c.ok("search_symbols", query=fn[0]["name"]) if h["address"] == fn[0]["address"])
             assert hit["refs"] == fn[0]["refs"]
             await c.err("top_symbols", INVALID, limit=-1)
+    run(go())
+
+
+def test_list_undefined_refs(sc, tmp_path, monkeypatch):
+    """Three data references into undefined bytes (a read, a pointer added by hand, a write): listed by target with their function; defining the
+    data takes the item out of the next scan; paging and cancellation as the other scans."""
+    import asyncio, threading, time
+    from ghidorita.core.errors import RpcError
+    from ghidorita.domains import search as search_mod
+    from test_edits import open_edit_blob
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            from ghidra.program.model.symbol import RefType, SourceType
+            fns = await open_edit_blob(call, tmp_path)
+            prog, base = ctx.session.program, int(fns["callee"], 16) - 0x40
+            tx = prog.startTransaction("pointer")
+            try:  # the x86 analyzers add no reference for an address that is only loaded: add what a pointer table would have
+                prog.getReferenceManager().addMemoryReference(ctx.session.addr(fns["p"]), ctx.session.addr(hex(base + 0x1F4)), RefType.DATA, SourceType.USER_DEFINED, 0)
+            finally:
+                prog.endTransaction(tx, True)
+            want = [{"address": hex(base + 0x1F0), "type": "read", "from": fns["X"], "function": "X"},
+                    {"address": hex(base + 0x1F4), "type": "pointer", "from": fns["p"], "function": "p"},
+                    {"address": hex(base + 0x1F8), "type": "write", "from": fns["w"], "function": "w"}]
+            assert await call("list_undefined_refs") == {"total": 3, "items": want}
+            assert await call("list_undefined_refs", offset=1, limit=1) == {"total": 3, "items": want[1:2]}
+            await call("define_data", address=want[0]["address"], dataType="int")  # one target is defined now: its item leaves the list
+            assert (await call("list_undefined_refs"))["items"] == want[1:]
+            await call("undo")
+            assert (await call("list_undefined_refs"))["total"] == 3
+            for bad in (dict(offset=-1), dict(limit="x")):
+                with pytest.raises((RpcError, TypeError, ValueError)):
+                    await call("list_undefined_refs", **bad)
+
+            entered = threading.Event()
+
+            def endless(self, prog, scan):
+                entered.set()
+                while True:
+                    scan.check()
+                    time.sleep(0.01)
+            with monkeypatch.context() as patch:
+                patch.setattr(search_mod.Search, "_undefined_refs", endless)
+                ctx.events.record({"data"}, None)  # drop the cached snapshot so the patched scan runs
+                req = asyncio.create_task(call("list_undefined_refs", rid=9))
+                assert await asyncio.to_thread(entered.wait, 5)
+                assert await asyncio.wait_for(call("listing_info"), 1)  # R is free while the scan runs
+                assert await call("cancel_search", id=9) == {"cancelled": True}
+                with pytest.raises(RpcError) as caught:
+                    await asyncio.wait_for(req, 3)
+                assert caught.value.code == CANCELLED
     run(go())

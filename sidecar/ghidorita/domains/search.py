@@ -242,6 +242,40 @@ class Search:
                 break
         return out
 
+    @rpc(lane="scan")
+    def list_undefined_refs(self, offset=0, limit=500, scan=None):
+        """Data references (read, write, pointer) whose target is undefined bytes: initialized memory where the code unit is neither an instruction nor
+        defined data. Calls and jumps are not listed. Items are in target order, then referring address: {address (target), type, from, function?}.
+        The full scan is cached until the next program change (a scan worker, cancellable with cancel_search); `total` counts every reference."""
+        with self.ctx.lanes.scanning(scan) as prog:
+            offset, limit = lim(offset, 0), lim(limit, 500, 5000)
+            items = self.snap(("undef",), lambda: self._undefined_refs(prog, scan))
+            return {"total": len(items), "items": items[offset:offset + limit]}
+
+    def _undefined_refs(self, prog, scan):
+        from ghidra.program.model.listing import Instruction
+        rm, lst, fm, fa = prog.getReferenceManager(), prog.getListing(), prog.getFunctionManager(), self.ses.fmtr(prog)
+        out, n = [], 0
+        dests = rm.getReferenceDestinationIterator(prog.getMemory().getAllInitializedAddressSet(), True)
+        while dests.hasNext():
+            n += 1
+            if n & 255 == 0:
+                scan.check()
+            a = dests.next()
+            cu = lst.getCodeUnitContaining(a)
+            if cu is None or isinstance(cu, Instruction) or cu.isDefined():
+                continue
+            refs = sorted((r for r in rm.getReferencesTo(a) if not r.getReferenceType().isFlow()), key=lambda r: r.getFromAddress().getOffset() & 0xFFFFFFFFFFFFFFFF)
+            for r in refs:
+                t = r.getReferenceType()
+                kind = "readwrite" if t.isRead() and t.isWrite() else "read" if t.isRead() else "write" if t.isWrite() else "pointer"
+                item = {"address": fa(a), "type": kind, "from": fa(r.getFromAddress())}
+                f = fm.getFunctionContaining(r.getFromAddress())
+                if f is not None:
+                    item["function"] = str(f.getName())
+                out.append(item)
+        return out
+
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
 
     @rpc(lane="scan")

@@ -37,6 +37,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Add Bookmark", cmd: { type: "edit", action: "bookmark" } },
   { label: "Bookmarks", cmd: { type: "dock", panel: "bookmarks" } },
   { label: "Show Calls (callers and callees)", cmd: { type: "dock", panel: "calls" } },
+  { label: "Undefined Data References", cmd: { type: "dock", panel: "undefined" } },
   { label: "Stack Frame", cmd: { type: "dock", panel: "stack" } },
   { label: "Search Memory", cmd: { type: "dock", panel: "memsearch" } },
   { label: "Data Type Manager", cmd: { type: "datatypes" } },
