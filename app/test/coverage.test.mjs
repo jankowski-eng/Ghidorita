@@ -53,7 +53,7 @@ test("funcDiff: functions reached only in A or only in B, any overlap counts; ma
   const fs = [{ entry: "0x10", size: 8 }, { entry: "0x20", size: 8 }, { entry: "0x30", size: 8 }, { entry: "0x40", size: 8 }];
   r.add("a", cov(["0x14", "0x14"], ["0x20", "0x27"])); // a touches f1 (partly) and f2
   assert.equal(r.funcDiff(fs), null);
-  const b = r.add("b", cov(["0x20", "0x20"], ["0x3f", "0x3f"])); // b touches f2 and f3
+  const b = r.add("b", cov(["0x20", "0x20"], ["0x37", "0x37"])); // b touches f2 and f3
   r.select("b", b.id); r.select("a", 1);
   const d = r.funcDiff(fs);
   assert.deepEqual(d.onlyA.map((f) => f.entry), ["0x10"]);
