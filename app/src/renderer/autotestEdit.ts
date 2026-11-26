@@ -198,7 +198,14 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   const get = (path: string) => rpc.call("get_data_type", { path });
   const rowsText = () => [...document.querySelectorAll(".lrow")].map((x) => x.textContent ?? "");
   const listingHas = (text: string) => rowsText().some((x) => x.includes(text));
-  const listingShows = (text: string, what: string, want = true) => waitFor(() => listingHas(text) === want, 10000, what).catch((e) => { throw new Error(`${e.message}; visible rows: ${rowsText().slice(0, 8).join(" | ")}`); });
+  // wait for the listing to (not) show `text` at `addr`; a late program_changed refresh can scroll it back, so navigate again on a miss
+  const listingShows = async (addr: string, text: string, what: string, want = true) => {
+    for (let n = 0; ; n++) {
+      await goTo(addr);
+      try { await waitFor(() => listingHas(text) === want, 4000, what); return; }
+      catch (e) { if (n >= 3) throw new Error(`${(e as Error).message}; visible rows: ${rowsText().slice(0, 8).join(" | ")}`); }
+    }
+  };
   const base = await rpc.call("undo_state", {});
   const strings = (await rpc.call("list_strings", { limit: 2, minLength: 1 })).items;
   const a = strings[0].address, b = strings[1].address;
@@ -242,8 +249,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   await fillAll("Apply data type", { Address: a, "Data type": "/" + NAME }); steps++;
   await click("Close data types");
   await waitFor(() => !byLabel("region", "Data Type Manager"), 3000, "manager to close");
-  await goTo(a);
-  await listingShows(NAME, "struct in the listing");
+  await listingShows(a, NAME, "struct in the listing");
   R.listing = true;
 
   // 5. the decompiler shows the type: set a parameter of the function to NAME * through Edit Function Signature
@@ -262,7 +268,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   // labels repeat ("Edit S: add" twice), so a step is noticed by the undo state *and* the struct's content changing
   const depth = async () => JSON.stringify([await rpc.call("undo_state", {}), (await get("/" + NAME).catch(() => null))?.components?.map((x) => [x.type, x.name, x.comment])]);
   await undo(); await waitFor(() => !c.editorText().includes(NAME), 15000, "undo signature");
-  await undo(); await goTo(a); await listingShows(NAME, "undo apply", false);
+  await undo(); await listingShows(a, NAME, "undo apply", false);
   for (let i = 2; i < steps; i++) { const n = await depth(); await undo(); await until(async () => (await depth()) !== n, "undo step " + (i + 1)); }
   await until(async () => (await rpc.call("get_data_type", { path: "/" + NAME }).then(() => false, () => true)), "struct gone after undoing everything");
   const st = await rpc.call("undo_state", {});
@@ -273,7 +279,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   for (let i = 0; i < steps; i++) { const n = await depth(); await c.menu("redo"); await until(async () => (await depth()) !== n, "redo step " + (i + 1)); }
   const d2 = await get("/" + NAME);
   if (d2.size !== 16 || d2.components!.length !== 3 || d2.components![0].name !== "f_first") throw new Error("redo did not restore the struct: " + JSON.stringify(d2.components));
-  await goTo(a); await listingShows(NAME, "redo apply");
+  await listingShows(a, NAME, "redo apply");
   await goTo(entry); await waitFor(() => c.editorText().includes(NAME), 15000, "redo signature in the decompiler");
   R.redoAll = true;
 
@@ -287,9 +293,9 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   const f2 = await get("/AutotestFromData");
   R.fromData = f2.components!.filter((x) => !x.undefined).map((x) => `${x.offset}:${x.type}`);
   if (f2.size !== 6 || R.fromData.join() !== "0:int,4:short") throw new Error("unexpected struct from data " + JSON.stringify(R.fromData));
-  await listingShows("AutotestFromData", "struct from data in the listing");
+  await listingShows(b, "AutotestFromData", "struct from data in the listing");
   await undo(); await until(async () => !(await rpc.call("get_data_type", { path: "/AutotestFromData" }).then(() => true, () => false)), "undo struct from data");
-  await listingShows("AutotestFromData", "listing without the struct from data", false);
+  await listingShows(b, "AutotestFromData", "listing without the struct from data", false);
   await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
   R.fromDataUndoRedo = true;
 
