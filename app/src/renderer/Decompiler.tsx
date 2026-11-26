@@ -97,7 +97,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     if (coverage.shown) for (const t of tokens) if (t.address) { const l = byLine.get(t.line); if (l) l.push(t.address); else byLine.set(t.line, [t.address]); }
     covDecor.current?.set([...byLine].flatMap(([line, addrs]) => {
       const c = coverage.markAny(addrs).trim();
-      return c ? [{ range: { startLineNumber: line + 1, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, options: { isWholeLine: true, className: "d" + c } }] : [];
+      return c ? [{ range: { startLineNumber: line + 1, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, options: { isWholeLine: true, className: "d" + c, linesDecorationsClassName: c === "cov-a" ? "gcov-a" : c === "cov-b" ? "gcov-b" : undefined } }] : [];
     }));
   }, [tokens, text, tabId, covVersion]);
   useEffect(() => { // the values after the lines that name a variable: content widgets (injected text and inlay hints did not render in this editor)
@@ -129,6 +129,6 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   }, [highlight, text, tabId]); // eslint-disable-line
   return (
     <Editor language="c" theme="vs-dark" path={`tab-${tabId ?? 0}`} value={text} onMount={onMount}
-      options={{ readOnly: true, glyphMargin: !!onGutter, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }} />
+      options={{ readOnly: true, glyphMargin: !!onGutter, minimap: { enabled: false }, fontSize: 13, lineDecorationsWidth: 16, scrollBeyondLastLine: false, automaticLayout: true }} />
   );
 }

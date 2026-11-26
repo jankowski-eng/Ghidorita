@@ -4,6 +4,8 @@ The wire contract is `../protocol.md` / `../protocol.ts`; the backend's layering
 
 ## Layout
 
+`src/keys.ts` (shared with the main process) is the one table of keys: the application menu (`main/menu.ts`) reads accelerators and label hints from it, the command bar (`SearchPanel`) shows the key of each action, and `StatusBar` builds the key hint line for the focused view (`hintLine`, filtered by `allowsCommand`). `renderer/palette.ts` holds the colour language (naming dots, coverage marks) that the function list, call graph, binary map and coverage views share.
+
 ```
 src/renderer/
   main.tsx             entry: Monaco setup, WebSocketBackend, render <App backend=…/>; dynamic-imports autotest/ only in AUTOTEST/BENCH mode
@@ -20,6 +22,7 @@ src/renderer/
     editing.ts         useEditing: edit commands on the listing cursor row / decompiler token, show references, what the context menu may offer
     dialogs.ts         requestOpen / confirmImport / cancelImport (the import dialog comes before an open when the provider offers options)
     DialogHost.tsx     renders the modal dialogs: opening progress, import, edit, form
+    drop.tsx           drag and drop: window listeners and the "Drop to open" overlay; a drop goes through `host.checkDrop` (preload: `webUtils.getPathForFile`, then main `drop-check` -> `main/drop.ts`: one regular file, absolute path) and `requestOpen`; refused while an open runs or a dialog is up (`dropAllowed.ts`)
     menu.ts            routeMenu (every menu/command-bar command), useMenuState (pushed to main), useWindowTitle, useBusy
     coverage.ts        load / clear coverage runs and repaint
     exports.ts         File > Export (symbol map, C header, Ghidra archive)

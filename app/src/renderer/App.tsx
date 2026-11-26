@@ -3,6 +3,7 @@ import type { ApplicationBackend } from "./backend";
 import { AppStatusBar, AppToolbar, BottomDock, Notice, TopBars, TypeManager } from "./Shell";
 import { WelcomePane } from "./WelcomePane";
 import { Workbench } from "./Workbench";
+import { DropOverlay, useDropOpen } from "./features/drop";
 import { DialogHost } from "./features/DialogHost";
 import { useBootstrap, type Api, type TestDriver } from "./features/bootstrap";
 import { coverageActions } from "./features/coverage";
@@ -41,6 +42,7 @@ function Main({ onReady }: { onReady?: (driver: TestDriver) => void }) {
   useProgramReactions(tabs);
   useMenuState(nav.nav.back.length > 0, nav.nav.forward.length > 0);
   useWindowTitle();
+  const dragging = useDropOpen();
 
   return (
     <div className="app">
@@ -52,6 +54,7 @@ function Main({ onReady }: { onReady?: (driver: TestDriver) => void }) {
       <AppStatusBar nav={nav} />
       <TypeManager />
       <DialogHost />
+      <DropOverlay show={dragging} />
     </div>
   );
 }

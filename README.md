@@ -15,7 +15,9 @@ Ghidrette is a fast desktop reverse-engineering workspace on top of [Ghidra](htt
 Shortcuts are shown for macOS (use Ctrl on other platforms). Screenshots: `mysqldump` (arm64), `/usr/bin/zip`, `/usr/bin/vim` and `/bin/bash` (x86-64 Mach-O); the Calls, Bookmarks and Copy screenshots are `/bin/ls`.
 
 ### Open a binary
-File > Open Binary… (`Cmd+O`), or reopen a program from the start screen's **Programs in this project** list (each with its size, analysis state, last opening and import options; **Delete** removes it). Before anything is analysed, an import card shows what the file is: format, architecture, entry point, size, an entropy strip over the whole file and every section with its size and entropy, so packed or encrypted regions stand out. Loader, language, compiler, base address and the Full/Fast analysis profile sit behind **Advanced options…** (Fast skips switch analysis, call-convention ID and stack analysis; it is the default above 20 MB). Analysis is stored per file (sha256), so reopening skips it.
+Drop a file anywhere on the window, or use File > Open Binary… (`Cmd+O`) or the start screen's **Drop a binary here** area (a button: Enter opens the file picker). One regular file at a time; a folder, several files, a drop while another binary is opening or while a dialog is up is refused with a message. With a program already open, a drop replaces it like File > Open Binary does (edits are saved first). Or reopen a program from the start screen's **Programs in this project** list (each with its size, analysis state, last opening and import options; **Delete** removes it). Before anything is analysed, an import card shows what the file is: format, architecture, entry point, size, an entropy strip over the whole file and every section with its size and entropy, so packed or encrypted regions stand out. Loader, language, compiler, base address and the Full/Fast analysis profile sit behind **Advanced options…** (Fast skips switch analysis, call-convention ID and stack analysis; it is the default above 20 MB). Analysis is stored per file (sha256), so reopening skips it.
+
+![Start screen: drop area and the programs in this project](screenshots/start.png)
 
 ![Import card with entropy strip and section list](screenshots/import.png)
 
@@ -25,22 +27,29 @@ The workspace opens as soon as the import is saved; analysis keeps running in th
 ![Decompiling while the analysis indicator runs in the status bar](screenshots/analysis.png)
 
 ### Command bar (`Cmd+K`)
-One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high; source-file paths (`__FILE__` in asserts) and very short words are left out of the string leads. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, toggle a graph, export, …). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
+One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high; source-file paths (`__FILE__` in asserts) and very short words are left out of the string leads. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, toggle a graph, export, …); each action that has a key shows it on the right (`Rename  L`, `Call Graph  ⌘⇧G`). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
 
 ![Command bar with ranked leads](screenshots/command-bar.png)
 
+![Command bar actions with their keys](screenshots/command-actions.png)
+
+### Key hints and colours
+The right side of the status bar lists the keys that work in the view you are in, taken from the same table as the menu and the command bar and limited to what the provider can do: listing `L rename · ; comment · F function · T data · C clear · X refs · Space graph`; decompiler `L rename · ⌘L retype · ; comment · X refs · Space graph`; graphs `Space back · wheel zoom · drag pan · Fit · 1:1`; elsewhere `⌘K commands · ⌘G go to`. A long line is cut, hover it for the whole text.
+
+Colours always come with a shape, so nothing depends on colour alone. Who named a function (function list, call graph): off-white solid dot = named by you, amber ring = named by analysis (a guess), light-blue solid dot = from the file or a library signature, grey dashed ring = unnamed (`FUN_…`). Orange-red marks attention: code reached by only one coverage run. The binary map is the one place that uses the library blue for something else: it paints every function in it. Green is the "both runs" tint.
+
 ### Read: function list, binary map, listing, decompiler, references
-The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and toggle its layers with **R** (renamed functions) and **C** (coverage); hovering a toggle says what its colours mean. The listing shows function headers, plate/pre/post/EOL/repeatable comments, all labels, `XREF[n]` annotations (click to follow) and folded structures and arrays (click the arrow or Left/Right), across all address spaces including overlays. The decompiler follows the cursor and opens one tab per function; click a call to go to the callee.
+The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and the map draws every function in light blue, and its layers toggle with **R** (functions you named, off-white) and **C** (coverage); hovering a toggle says what its colours mean. The listing shows function headers, plate/pre/post/EOL/repeatable comments, all labels, `XREF[n]` annotations (click to follow) and folded structures and arrays (click the arrow or Left/Right), across all address spaces including overlays. The decompiler follows the cursor and opens one tab per function; click a call to go to the callee.
 
 The panel under the function list shows the references to the cursor (calls, jumps, reads, writes, pointers, each with its function). `X` on a listing row or decompiler token (or Go > Show References To) pins it to that target, **Follow cursor** unpins it, and **from…** lists what the current instruction references. `X` on a decompiler temporary (`iVar1`) lists where it is written and read.
 
 ### Control-flow graph (`Space`)
-`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are blue (true), orange (false) and grey (jump). A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
+`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are told apart by line style as well as colour: true is blue and solid, false is orange and dashed, a jump is thin grey, and a loop-back edge (its target starts at or before its source) is dotted. A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
 
 ![Control-flow graph at C level](screenshots/graph.png)
 
 ### Call graph (`Cmd+Shift+G`)
-View > Call Graph (or the command bar) swaps the decompiler for the functions around the current one: callers above, callees below, two calls each way. Imports are dashed leaves, `×n` on an edge counts its call sites, a pink dot marks functions you named, and with coverage loaded each function says whether the shown runs reached it (**never ran** = 0×). Type a function into **routes to function…** and **Find routes** to see the ways from here to it: the shortest route and those one call longer. A click on a function goes there.
+View > Call Graph (or the command bar) swaps the decompiler for the functions around the current one: callers above, callees below, two calls each way. Imports are dashed leaves, `×n` on an edge counts its call sites, each function carries the naming dot described under Key hints and colours (imports keep a dashed box in the library colour), and with coverage loaded each function says whether the shown runs reached it (**never ran** = 0×). Type a function into **routes to function…** and **Find routes** to see the ways from here to it: the shortest route and those one call longer. A click on a function goes there.
 
 ![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
 
@@ -71,7 +80,7 @@ View > Data Type Manager browses the program's types and Ghidra's built-in types
 ![Data Type Manager editing a struct](screenshots/data-types.png)
 
 ### Coverage runs
-File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` or `0xADDR` per line (`#` comments allowed). Load several runs: the first becomes run **A**, the second run **B**, so loading two shows their difference at once (View > Coverage picks other runs and renames them): the listing, decompiler, binary map and call graph tint code reached by both runs, only A (orange, `A` in the gutter) or only B (blue, `B`), and the tab lists the functions reached by only one run.
+File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` or `0xADDR` per line (`#` comments allowed). Load several runs: the first becomes run **A**, the second run **B**, so loading two shows their difference at once (View > Coverage picks other runs and renames them): the listing, decompiler, binary map and call graph tint code reached by both runs, only A (orange-red, a solid bar and an `A` in the gutter) or only B (orange-red, a hatched bar and a `B`; hatched stripes on the binary map), and the tab lists the functions reached by only one run.
 
 ![Two coverage runs compared in listing and decompiler](screenshots/coverage.png)
 

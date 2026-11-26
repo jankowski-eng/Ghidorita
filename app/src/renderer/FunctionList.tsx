@@ -5,9 +5,9 @@ import type { Searches } from "./backend";
 import { latest } from "./latest";
 import { useDebounced } from "./hooks";
 import { notRenamed } from "./names";
+import { dotOf } from "./palette";
 import { useContextMenu, type MenuItem } from "./ContextMenu";
 
-const SRC_TITLE: Record<string, string> = { user: "named by you", analysis: "named by analysis (a guess)", imported: "name from the file", default: "default name, not yet named", other: "" };
 
 /** Listbox: click/Enter opens a preview tab, double-click/Shift+Enter pins; arrows move the cursor (also from the filter box). */
 export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin, menu }: { menu?: (entry: Address) => MenuItem[]; searchSymbols?: Searches["searchSymbols"]; funcs: FunctionInfo[]; selected: Address | null; onSelect: (e: Address) => void; onPin?: (e: Address) => void }) {
@@ -61,7 +61,7 @@ export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin, 
                 className={"frow" + (f.entry === selected ? " sel" : "") + (it.index === cursor ? " cur" : "")}
                 onClick={() => { setCursor(it.index); onSelect(f.entry); }} onDoubleClick={onPin ? () => onPin(f.entry) : undefined} onContextMenu={menu ? (e) => ctx.open(e, menu(f.entry)) : undefined}
                 style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${it.start}px)` }}>
-                <span className={"psrc " + (f.source ?? src.get(f.entry) ?? "other")} title={SRC_TITLE[f.source ?? src.get(f.entry) ?? "other"]} />{f.name} <span style={{ color: "#777" }}>{f.entry}</span>
+                <Dot source={f.source ?? src.get(f.entry)} />{f.name} <span style={{ color: "#777" }}>{f.entry}</span>
               </div>
             );
           })}
@@ -69,4 +69,9 @@ export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin, 
       </div>
     </div>
   );
+}
+
+function Dot({ source }: { source: FunctionInfo["source"] | undefined }) {
+  const d = dotOf(source);
+  return <span className={"psrc " + d.shape} style={{ "--c": d.color } as React.CSSProperties} title={d.label} role="img" aria-label={d.label} />;
 }

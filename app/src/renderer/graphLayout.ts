@@ -66,3 +66,7 @@ export function initialView(size: { w: number; h: number }, top: number, graph: 
   if (fit >= READABLE || !focus) return { k: fit, x: (size.w - graph.width * fit) / 2, y: top };
   return { k: 1, x: size.w / 2 - (focus.x + focus.w / 2), y: top + 12 - focus.y };
 }
+
+const addrNum = (a: string) => BigInt("0x" + (/([0-9a-f]+)$/i.exec(a)?.[1] ?? "0"));
+/** A back edge (a loop): its target block starts at or before its source block. shortcut: compares the offset part, so addresses of different spaces are not ordered; graphs stay inside one function. */
+export const isBackEdge = (from: string, to: string): boolean => addrNum(to) <= addrNum(from);

@@ -4,10 +4,10 @@ import type { References } from "./backend";
 import { coverage } from "./coverage";
 import { initialView, layout } from "./graphLayout";
 import { nodeInfo } from "./callGraph";
+import { COLORS, covStyle, dotOf } from "./palette";
 import { usePanZoom } from "./usePanZoom";
 
 const CW = 7.3, LH = 15, PAD = 8, TOP = 34; // 12px monospace character width, line height, node padding, room for the bar above
-const COV: Record<string, string> = { " cov": "#4ec36b", " cov-a": "#e0a93b", " cov-b": "#5aa0e0" };
 
 /**
  * Call graph around the function at `entry`: callers above, callees below (two calls each way), or with a target the routes from entry to it
@@ -28,7 +28,7 @@ export function CallGraphView({ source, entry, funcs, version, covVersion, onGo 
   const L = useMemo(() => {
     if (!g) return null;
     void covVersion; // coverage marks change the second line
-    const nodes = g.nodes.map((n) => { const i = nodeInfo(n, byEntry.get(n.entry), coverage); return { id: n.entry, n, ...i, w: Math.max(n.name.length, i.sub.length, 6) * CW + 2 * PAD, h: (i.sub ? 2 : 1) * LH + 2 * PAD }; });
+    const nodes = g.nodes.map((n) => { const i = nodeInfo(n, byEntry.get(n.entry), coverage); return { id: n.entry, n, ...i, w: Math.max(n.name.length, i.sub.length, 6) * CW + 2 * PAD + 22, h: (i.sub ? 2 : 1) * LH + 2 * PAD }; });
     return { nodes, byId: new Map(nodes.map((x) => [x.id, x])), ...layout(nodes, g.edges, entry, 36, 56) };
   }, [g, entry, byEntry, covVersion]);
   const show = (fit: boolean) => {
@@ -73,20 +73,21 @@ export function CallGraphView({ source, entry, funcs, version, covVersion, onGo 
               // an edge that skips a row would run behind the nodes in between: bow it out to the side
               const off = y2 - y1 > 130 ? (x2 >= x1 ? 1 : -1) * (Math.max(na.w, nb.w) / 2 + 40) : 0;
               return (<g key={i}>
-                <path d={`M${x1} ${y1} C${x1 + off} ${y1 + dy} ${x2 + off} ${y2 - dy} ${x2} ${y2}`} fill="none" stroke={to ? "#e0a93b" : "#888"} strokeWidth={1.5} markerEnd="url(#cg-ah)" />
-                {e.sites > 1 && <text x={(x1 + x2) / 2 + off * 0.75 + 4} y={(y1 + y2) / 2} fontSize={11} fill="#aaa">×{e.sites}</text>}
+                <path d={`M${x1} ${y1} C${x1 + off} ${y1 + dy} ${x2 + off} ${y2 - dy} ${x2} ${y2}`} fill="none" stroke={to ? COLORS.attention : "#888"} strokeWidth={1.5} markerEnd="url(#cg-ah)" />
+                {e.sites > 1 && <text x={(x1 + x2) / 2 + off * 0.75 + 4} y={(y1 + y2) / 2} fontSize={12} fill="#aaa">×{e.sites}</text>}
               </g>);
             })}
             {L.nodes.map((x) => {
-              const p = L.pos.get(x.id)!, root = x.id === entry, target = x.id === to;
+              const p = L.pos.get(x.id)!, root = x.id === entry, target = x.id === to, cs = covStyle(x.cov), isImport = x.n.kind === "import", dot = dotOf(isImport ? "imported" : byEntry.get(x.id)?.source);
               return (
                 <g key={x.id} transform={`translate(${p.x} ${p.y})`} role="button" aria-label={`${x.n.name}${x.sub ? ", " + x.sub : ""}`} aria-current={root ? "true" : undefined}
                   style={{ cursor: x.n.kind === "import" ? "default" : "pointer" }} onClick={() => { if (!moved() && x.n.kind !== "import" && !root) onGo(x.id); }}>
-                  <rect width={x.w} height={x.h} rx={4} fill={root ? "#094771" : "#252526"} stroke={target ? "#e0a93b" : root ? "#9cdcfe" : COV[x.cov] ?? "#555"}
-                    strokeWidth={root || target || x.cov ? 2 : 1} strokeDasharray={x.n.kind === "import" ? "4 3" : undefined} opacity={x.ran === false ? 0.55 : 1} />
-                  {x.named && <circle cx={x.w - 7} cy={7} r={3.5} fill="#c586c0"><title>named by you</title></circle>}
+                  <rect width={x.w} height={x.h} rx={4} fill={root ? "#094771" : "#252526"} stroke={target ? COLORS.attention : root ? "#9cdcfe" : cs?.color ?? (isImport ? COLORS.library : "#555")}
+                    strokeWidth={root || target || x.cov ? 2 : 1} strokeDasharray={isImport ? "4 3" : cs?.hatched ? "5 3" : undefined} opacity={x.ran === false ? 0.55 : 1} />
+                  {(isImport || byEntry.has(x.id)) && <circle cx={x.w - 9} cy={9} r={4} fill={dot.shape === "solid" ? dot.color : "none"} stroke={dot.color} strokeWidth={1.5} strokeDasharray={dot.shape === "dashed" ? "2 1.5" : undefined}><title>{dot.label}</title></circle>}
+                  {cs?.letter && <text x={x.w - 22} y={13} textAnchor="end" fontSize={12} fontWeight={700} fill={cs.color}>{cs.letter}</text>}
                   <text x={PAD} y={PAD + LH - 4} fontFamily="Menlo, monospace" fontSize={12} fill={x.n.kind === "import" ? "#9cdcfe" : "#d4d4d4"}>{x.n.name}</text>
-                  {x.sub && <text x={PAD} y={PAD + 2 * LH - 4} fontFamily="Menlo, monospace" fontSize={11} fill={x.ran === false ? "#e0a93b" : "#888"}>{x.sub}</text>}
+                  {x.sub && <text x={PAD} y={PAD + 2 * LH - 4} fontFamily="Menlo, monospace" fontSize={12} fill={x.ran === false ? COLORS.attention : cs?.letter ? cs.color : "#888"}>{x.sub}</text>}
                 </g>
               );
             })}

@@ -4,9 +4,10 @@ import { isFailure } from "./backend";
 import { Confirm } from "./Confirm";
 import { latest } from "./latest";
 import { useProgram, useSession } from "./store/session";
+import { requestOpen } from "./features/dialogs";
 import { Welcome } from "./Welcome";
 
-/** Shown while no program is open: the hint and (when the provider keeps a project) the program browser with its delete confirmation. */
+/** Shown while no program is open: the drop area and (when the provider keeps a project) the program browser with its delete confirmation. */
 export function WelcomePane() {
   const s = useSession();
   const projects = s.caps.has("projects");
@@ -37,7 +38,10 @@ export function WelcomePane() {
       {deleting && <Confirm title="Delete program?" message={`Remove ${deleting.entry.name} from the project? Its analysis is deleted; the original file is not touched.`} error={deleting.error} busy={deleting.busy}
         actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
       <div className="notice">
-        <p>{projects ? "Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below." : "Open a file to browse its listing."}</p>
+        <button className="dropzone" onClick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(s, p); }}>
+          <span className="big">Drop a binary here</span>
+          <span className="sub">or ⌘O · any format; raw dumps can be set up under Advanced options</span>
+        </button>
         {projects && <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={(entry) => void s.openStored(entry)} onFull={(entry) => void s.openStored(entry, "full")} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} />}
       </div>
     </>

@@ -6,6 +6,8 @@ import { addressOf } from "./parseGoto";
 import { latest } from "./latest";
 import { isLeadString, rank, type Cand } from "./rank";
 import { matchActions, type CommandAction } from "./commandActions";
+import { keyOf, showKey } from "../keys";
+import { isMac } from "./platform";
 import type { MenuCommand } from "../preload";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
@@ -68,7 +70,7 @@ export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrin
         {acts.map((a, i) => (
           <div key={a.label} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}
             onMouseDown={(e) => e.preventDefault()} onClick={() => runAct(a)}>
-            <span className="k">action</span><span className="n">{a.label}</span>
+            <span className="k">action</span><span className="n">{a.label}</span>{keyOf(a.cmd) && <kbd className="kb">{showKey(keyOf(a.cmd)!, isMac)}</kbd>}
           </div>
         ))}
         {hits.map((h, i) => (

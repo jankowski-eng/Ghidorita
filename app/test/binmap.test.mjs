@@ -44,7 +44,7 @@ test("mapLayers: renamed functions, coverage in both/only A/only B, switches", a
   assert.deepEqual(L[1].spans, [{ pos: 0, len: 0x10 }]); // only the function named by the user
   assert.deepEqual(L[2].spans, [{ pos: 0x20, len: 0x20 }]);
   assert.deepEqual(L[3].spans, [{ pos: 0, len: 0x20 }]); assert.deepEqual(L[4].spans, [{ pos: 0x40, len: 0x20 }]);
-  assert.notDeepEqual(L[3].color, L[4].color);
+  assert.deepEqual(L[3].color, L[4].color); assert.ok(!L[3].hatched && L[4].hatched); // only A and only B differ by shape (B hatched), not colour
   const one = mapLayers(m, fs, on, { a: { name: "A", spans: A } });
   assert.deepEqual(one.map((l) => l.name).slice(2), ["Coverage (A)"]); assert.deepEqual(one[2].color, L[2].color); // one run: all green
   assert.deepEqual(mapLayers(m, fs, { renamed: false, coverage: false }, { a: { name: "A", spans: A } }).map((l) => l.name), ["Functions"]);

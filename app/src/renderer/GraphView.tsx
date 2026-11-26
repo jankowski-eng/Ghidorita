@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Address, FunctionGraph } from "../../../protocol";
 import { coverage } from "./coverage";
-import { blockAt, dedent, initialView, layout } from "./graphLayout";
+import { blockAt, dedent, initialView, isBackEdge, layout } from "./graphLayout";
+import { covStyle } from "./palette";
 import type { Decompilation } from "./backend";
 import { usePanZoom } from "./usePanZoom";
 
 const CW = 7.3, LH = 15, PAD = 8, MAXC = 90, MAXL = 40; // character width / line height of the 12px monospace, padding, caps per node
 const EDGE = { true: "#5aa0e0", false: "#e0a93b", uncond: "#888" } as const; // blue / orange / neutral: no red-green
-const COV: Record<string, string> = { " cov": "#4ec36b", " cov-a": "#e0a93b", " cov-b": "#5aa0e0" };
+/** Line style by meaning, not colour alone: true solid, false dashed, jump thin solid, back edge (a loop) dotted. */
+export const edgeStyle = (kind: keyof typeof EDGE, back: boolean) => ({ stroke: EDGE[kind], strokeWidth: kind === "uncond" ? 1 : 1.5, strokeDasharray: back ? "1.5 4" : kind === "false" ? "6 4" : undefined, strokeLinecap: back ? "round" as const : undefined });
+const Line = ({ kind, back }: { kind: keyof typeof EDGE; back?: boolean }) => { const s = edgeStyle(kind, !!back); return <svg width={26} height={8} aria-hidden="true"><line x1={1} x2={25} y1={4} y2={4} {...s} /></svg>; };
 const cut = (s: string) => (s.length > MAXC ? s.slice(0, MAXC - 1) + "…" : s);
 
 /** Control-flow graph of the function at `entry`: one node per basic block (C where the decompiler maps it, else assembly). Wheel zooms, drag pans, click a node to go there. */
@@ -51,7 +54,7 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
       {...handlers}>
       {!g && !err && <div className="empty">Building graph…</div>}
       {err && <div className="empty err">{err}</div>}
-      <div className="glegend" aria-label="Legend"><span style={{ color: EDGE.true }}>── true</span> <span style={{ color: EDGE.false }}>── false</span> <span>── jump</span>
+      <div className="glegend" aria-label="Legend"><span style={{ color: EDGE.true }}><Line kind="true" /> true</span> <span style={{ color: EDGE.false }}><Line kind="false" /> false</span> <span><Line kind="uncond" /> jump</span> <span><Line kind="uncond" back /> loop back</span>
         <button className="gbtn" onPointerDown={(e) => e.stopPropagation()} onClick={() => show("fit")} title="Show the whole graph">Fit</button>
         <button className="gbtn" onPointerDown={(e) => e.stopPropagation()} onClick={() => show("1:1")} title="Actual size at the cursor's block">1:1</button></div>
       {g && L && (
@@ -62,15 +65,15 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
               const a = L.pos.get(e.from), b = L.pos.get(e.to), na = L.nodes.find((n) => n.id === e.from), nb = L.nodes.find((n) => n.id === e.to);
               if (!a || !b || !na || !nb) return null;
               const x1 = a.x + na.w / 2, y1 = a.y + na.h, x2 = b.x + nb.w / 2, y2 = b.y, dy = Math.max(30, Math.abs(y2 - y1) / 2);
-              return <path key={i} d={`M${x1} ${y1} C${x1} ${y1 + dy} ${x2} ${y2 - dy} ${x2} ${y2}`} fill="none" stroke={EDGE[e.kind]} strokeWidth={1.5} markerEnd={`url(#ah-${e.kind})`} />;
+              return <path key={i} d={`M${x1} ${y1} C${x1} ${y1 + dy} ${x2} ${y2 - dy} ${x2} ${y2}`} fill="none" {...edgeStyle(e.kind, isBackEdge(e.from, e.to))} markerEnd={`url(#ah-${e.kind})`} />;
             })}
             {L.nodes.map((n) => {
-              const p = L.pos.get(n.id)!, m = mark(n.b);
+              const p = L.pos.get(n.id)!, m = mark(n.b), cs = covStyle(m);
               return (
                 <g key={n.id} transform={`translate(${p.x} ${p.y})`} role="button" aria-label={`Block ${n.b.start}`} aria-current={n.id === cur ? "true" : undefined} style={{ cursor: "pointer" }}
                   onClick={() => { if (!moved()) onGo(n.b.start); }}>
-                  <rect width={n.w} height={n.h} rx={4} fill={n.id === cur ? "#094771" : "#252526"} stroke={n.id === cur ? "#9cdcfe" : COV[m] ?? "#555"} strokeWidth={n.id === cur || m ? 2 : 1} />
-                  {m && <text x={n.w - 6} y={12} textAnchor="end" fontSize={10} fontWeight={700} fill={COV[m]}>{m === " cov-a" ? "A" : m === " cov-b" ? "B" : ""}</text>}
+                  <rect width={n.w} height={n.h} rx={4} fill={n.id === cur ? "#094771" : "#252526"} stroke={n.id === cur ? "#9cdcfe" : cs?.color ?? "#555"} strokeWidth={n.id === cur || m ? 2 : 1} strokeDasharray={cs?.hatched ? "5 3" : undefined} />
+                  {cs?.letter && <text x={n.w - 6} y={13} textAnchor="end" fontSize={12} fontWeight={700} fill={cs.color}>{cs.letter}</text>}
                   {n.ls.map((l, i) => <text key={i} x={PAD} y={PAD + (i + 1) * LH - 4} xmlSpace="preserve" fontFamily="Menlo, monospace" fontSize={12} fill="#d4d4d4" style={{ whiteSpace: "pre" }}>{l}</text>)}
                   {n.more && <text x={PAD} y={PAD + (n.ls.length + 1) * LH - 4} fontFamily="Menlo, monospace" fontSize={12} fill="#888">…</text>}
                 </g>
