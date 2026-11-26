@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const r = await build({ entryPoints: [new URL("../src/renderer/editActions.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false });
-const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf, arrayPlan } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
+const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf, arrayPlan, arrayType } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 
 test("listing keys", () => {
   assert.equal(listingKey({ key: "l" }), "rename"); assert.equal(listingKey({ key: "L" }), "rename");
@@ -72,4 +72,12 @@ test("Define Array: element type and default count", () => {
   assert.equal(arrayPlan([u("0x10", { label: "start" }), u("0x11")]).count, 2); // the cursor row's own label does not stop it
   assert.equal(arrayPlan([{ address: "0x10", length: 2, bytes: "90 90", mnemonic: "NOP", operands: "" }]), null); // code
   assert.equal(arrayPlan([]), null);
+});
+
+test("Define Array wraps an array-valued row: the new dimension goes first", () => {
+  assert.equal(arrayType("dword", 3), "dword[3]");
+  assert.equal(arrayType("/A/S", 3), "/A/S[3]");
+  assert.equal(arrayType("/A/S[4]", 3), "/A/S[3][4]");
+  assert.equal(arrayType("char *", 2), "char *[2]");
+  assert.equal(arrayType("int *32[5]", 2), "int *32[2][5]");
 });

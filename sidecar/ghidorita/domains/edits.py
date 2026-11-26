@@ -112,7 +112,7 @@ class Edits:
         """`/Category/Name` followed by array (`[n]`) and pointer (`*`) suffixes, resolved by hand; None when it is not that shape or the path is unknown."""
         import re
         from ghidra.program.model.data import ArrayDataType, PointerDataType
-        m = re.fullmatch(r"(/[^\[\]*]*?)\s*((?:\[\d+\]|\*|\s)+)", text)
+        m = re.fullmatch(r"(/[^\[\]*]*?)\s*((?:\[\d+\]|\*\d*|\s)+)", text)
         base = dtm.getDataType(m.group(1)) if m else None
         if base is None:
             return None
@@ -125,14 +125,14 @@ class Edits:
                 dt = ArrayDataType(dt, n, dt.getLength())
             group.clear()
             return dt
-        for s in re.findall(r"\[\d+\]|\*", m.group(2)):
-            if s != "*":
+        for s in re.findall(r"\[\d+\]|\*\d*", m.group(2)):
+            if s[0] == "[":
                 group.append(int(s[1:-1]))
                 continue
             dt = arrays(dt)
             if dt is None:
                 return None
-            dt = PointerDataType(dt)
+            dt = PointerDataType(dt, int(s[1:]) // 8) if len(s) > 1 else PointerDataType(dt)  # "*32": an explicit width in bits
         return arrays(dt)
 
     @rpc(lane="R")

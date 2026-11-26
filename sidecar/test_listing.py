@@ -134,6 +134,10 @@ def test_row_data_type_same_name_in_two_categories(sc):
     sc.define_data("0x610020", "/B/S *")
     assert sc.listing_rows("0x610020", 1)[0]["dataType"] == "/B/S *"
     # consecutive array suffixes reverse like Ghidra's name parser: qualified and unqualified give the same layout
+    sc.define_data("0x6100a0", "/A/S *32")  # an explicit 4-byte pointer keeps its width in the reference
+    assert sc.listing_rows("0x6100a0", 1)[0]["length"] == 4 and sc.listing_rows("0x6100a0", 1)[0]["dataType"] == "/A/S *32"
+    sc.define_data("0x6100b0", "/A/S *32[2]")
+    assert sc.listing_rows("0x6100b0", 1)[0]["length"] == 8
     sc.define_data("0x610030", "/A/S[2][3]")
     sc.define_data("0x610050", "byte[2][3]")
     assert sc.listing_rows("0x610030", 1)[0]["dataType"] == "/A/S[2][3]" and sc.listing_rows("0x610050", 1)[0]["dataType"] == "byte[2][3]"

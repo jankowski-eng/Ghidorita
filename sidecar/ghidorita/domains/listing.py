@@ -142,7 +142,8 @@ class Listing:
                 dt = dt.getDataType()
             return Listing._dt_ref(dt) + dims
         if isinstance(dt, Pointer) and dt.getDataType() is not None:
-            return Listing._dt_ref(dt.getDataType()) + " *"
+            width = "" if dt.hasLanguageDependantLength() else str(int(dt.getLength()) * 8)  # an explicit width ("int *32") stays
+            return Listing._dt_ref(dt.getDataType()) + " *" + width
         return str(dt.getPathName()) if isinstance(dt, (Composite, Enum, TypeDef)) else str(dt.getName())
 
     def _row_parts(self, cu):

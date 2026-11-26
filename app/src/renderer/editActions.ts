@@ -103,3 +103,9 @@ export function arrayPlan(rows: ListingRow[]): { elem: string; count: number } |
   }
   return { elem: row.dataType === "undefined" ? "byte" : row.dataType, count: Math.max(1, Math.floor(bytes / len)) };
 }
+
+/** The array type for `count` elements of `elem`. When `elem` is itself an array (`S[4]`) the new dimension goes first, `S[3][4]`: three arrays of four. */
+export function arrayType(elem: string, count: number): string {
+  const m = /^(.*?)((?:\[\d+\])*)$/.exec(elem)!;
+  return `${m[1]}[${count}]${m[2]}`;
+}

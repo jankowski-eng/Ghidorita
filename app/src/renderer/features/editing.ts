@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { Address, CommentKind } from "../../../../protocol";
 import { allowsEdit } from "../../capabilities";
-import { arrayPlan, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
+import { arrayPlan, arrayType, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
 import type { EditSpec } from "../EditDialog";
 import type { Program } from "../store/program";
 import { useSession } from "../store/session";
@@ -65,7 +65,7 @@ export function useEditing(tabs: TabsApi) {
         go: async (v) => {
           const n = Number(v.count.trim());
           if (!Number.isInteger(n) || n < 1) throw new Error("Enter a whole number of elements, 1 or more.");
-          await ops.edits.defineData({ address: at, dataType: `${plan.elem}[${n}]` });
+          await ops.edits.defineData({ address: at, dataType: arrayType(plan.elem, n) });
         } } } });
     }
     else if (a === "createStruct") views.dispatch({ type: "set", patch: { formDlg: { title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
