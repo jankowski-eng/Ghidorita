@@ -35,6 +35,6 @@ find $B/python -name __pycache__ -prune -exec rm -rf {} +
 mkdir -p $B/sidecar/jscans/out; cp sidecar/main.py $B/sidecar/; cp -R sidecar/ghidrette $B/sidecar/
 find $B/sidecar -name __pycache__ -prune -exec rm -rf {} +
 # the scan helper ships precompiled (the jlink runtime has no javac launcher to rely on); core/jscans.py recompiles only if the class is missing
-CP=$(find "$GHIDRA_INSTALL_DIR/Ghidra/Framework" "$GHIDRA_INSTALL_DIR/Ghidra/Features/Base" -name '*.jar' | tr '\n' ':')
-"$JAVA_HOME/bin/javac" -nowarn -cp "$CP" -d $B/sidecar/jscans/out sidecar/jscans/GhidretteScans.java
+CP=$(find "$GHIDRA_INSTALL_DIR/Ghidra/Framework" "$GHIDRA_INSTALL_DIR/Ghidra/Features/Base" "$GHIDRA_INSTALL_DIR/Ghidra/Features/Decompiler" -name '*.jar' | tr '\n' ':')
+"$JAVA_HOME/bin/javac" -nowarn -cp "$CP" -d $B/sidecar/jscans/out sidecar/jscans/*.java
 echo "bundle staged:"; du -sh $B/jdk $B/ghidra $B/python $B/sidecar

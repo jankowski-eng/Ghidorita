@@ -1,9 +1,11 @@
 """Persistence, save, define_data / clear_code against real Ghidra on /bin/ls. One analysis (module fixture) is copied per test."""
 import asyncio, glob, os, shutil, signal, time
+from pathlib import Path
 
 import pytest
 
-from testlib import BIN, INVALID, NO_PROGRAM, Client, Proc, run
+from ghidrette.core.errors import INTERNAL
+from testlib import BASE, BIN, INVALID, NO_PROGRAM, X86, Client, Proc, blob, run
 
 
 @pytest.fixture(scope="module")
@@ -287,27 +289,35 @@ def test_define_data_clear_code_undo_dirty(projects):
     run(go())
 
 
-def test_corrupt_persisted_item_is_reimported(projects):
-    gbfs = glob.glob(os.path.join(projects, "**", "*.gbf"), recursive=True)
+def test_corrupt_persisted_item_is_preserved(projects, tmp_path):
+    gbfs = list(Path(projects).rglob("*.gbf"))
     assert gbfs, "no .gbf files under the scratch project"
     for g in gbfs:  # a SIGKILL during the first (non-atomic) save leaves something like this
         with open(g, "r+b") as fh:
             fh.truncate(max(16, os.path.getsize(g) // 10))
+    saved = {g: g.read_bytes() for g in gbfs}
+    other = blob(tmp_path, "working.bin")
 
     async def go():
         proc = Proc(projects)
         try:
             async with Client(proc.port) as c:
-                r = await c.ok("open_binary", path=BIN)
-                assert r["persisted"] is False  # corrupt item deleted and re-imported, not "failing forever"
-                assert len(await c.ok("list_functions")) > 100
-                assert await c.ok("undo_state") == {"canUndo": False, "canRedo": False, "dirty": False}
-        finally:
-            proc.stop()
-        proc = Proc(projects)
-        try:
-            async with Client(proc.port) as c:
-                assert (await c.ok("open_binary", path=BIN))["persisted"] is True  # and the re-import was saved
+                entries = await c.ok("list_programs")
+                assert len(entries) == 1
+                rid = entries[0]["programId"]
+                await c.ok("open_binary", path=other, loader="Raw Binary", language=X86, baseAddress=BASE)
+                await c.ok("set_comment", address=BASE, kind="eol", text="keep this edit")
+                before = await c.ok("undo_state")
+                entries = await c.ok("list_programs")
+                r = await c.call("open_binary", path=BIN)
+                assert r["error"]["code"] == INTERNAL
+                assert rid in r["error"]["message"] and "preserved" in r["error"]["message"]
+                assert await c.ok("undo_state") == before
+                assert (await c.ok("listing_info"))["ranges"][0]["start"] == BASE
+                assert await c.ok("list_programs") == entries
+                assert {g: g.read_bytes() for g in gbfs} == saved
+                await c.ok("delete_program", programId=rid)
+                assert (await c.ok("open_binary", path=BIN))["persisted"] is False
         finally:
             proc.stop()
     run(go())

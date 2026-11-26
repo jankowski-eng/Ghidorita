@@ -8,7 +8,52 @@ import { LARGE_FUNCTION } from "./tabs";
 export async function runFocusedFlow(flow: string, file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   if (flow === "locked") return lockedFlow(c, result);
   if (flow === "big") return bigFlow(file, c, result);
+  if (flow === "open-preserve") return openPreserveFlow(file, c, result);
   throw new Error("unknown AUTOTEST_FLOW " + flow);
+}
+
+async function openPreserveFlow(file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  const functions = await c.open(file);
+  const entry = functions?.find((f) => f.size > 0)?.entry;
+  if (!entry) throw new Error("no test function");
+  await c.select(entry);
+  const title = c.title();
+  const originalCall = rpc.call, onNotification = rpc.onNotification;
+  let cancel: (() => void) | undefined;
+  let editArrived = false, refreshDuringOpen = false, refreshed = false;
+  rpc.call = (method, params) => {
+    if (method === "open_binary") return new Promise((_, reject) => { cancel = () => reject(new RpcError(ErrorCode.Cancelled, "Cancelled")); });
+    if (method === "list_functions") {
+      if (c.status().opening) {
+        refreshDuringOpen = true;
+        return Promise.reject(new RpcError(ErrorCode.NoProgram, "open_binary in progress"));
+      }
+      refreshed = true;
+    }
+    return originalCall(method, params);
+  };
+  rpc.onNotification = (method, params) => {
+    onNotification(method, params);
+    if (method === "program_changed") editArrived = true;
+  };
+  try {
+    const replacement = c.open(file);
+    const finish = await waitFor(() => cancel, 5000, "replacement open");
+    await rpc.call("rename_symbol", { address: entry, newName: "open_preserve_probe" });
+    await waitFor(() => editArrived, 5000, "edit notification during open");
+    finish();
+    await replacement;
+    await waitFor(() => c.lastMenu()?.dirty && refreshed, 5000, "preserved session refresh");
+    result.openPreserve = {
+      opened: c.status().opened, selection: c.selected(), title, activeTitle: c.title(),
+      notice: c.status().notice, refreshDuringOpen, undo: await rpc.call("undo_state", {}),
+    };
+    return c.status().opened && c.selected() === entry && c.status().notice === "Open cancelled."
+      && c.title().includes(title) && result.openPreserve.undo.canUndo && !refreshDuringOpen;
+  } finally {
+    rpc.call = originalCall;
+    rpc.onNotification = onNotification;
+  }
 }
 
 // Another Ghidrette holds the projects dir: the welcome pane must say so (the sidecar answers ProjectLocked to list_programs).

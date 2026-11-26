@@ -9,7 +9,7 @@ import pytest
 
 from ghidrette.core.events import Events
 from ghidrette.core.context import Ctx
-from ghidrette.core.errors import CANCELLED, RpcError
+from ghidrette.core.errors import CANCELLED, INTERNAL, RpcError
 from ghidrette.core.lanes import Lanes
 from ghidrette.core.rpc import Dispatcher, Method
 from ghidrette.core.server import Server
@@ -34,9 +34,42 @@ def test_close_save_failure_keeps_program():
     assert ses.program is prog and ses.epoch == 0
 
 
-def test_permission_denied_never_counts_as_corrupt_project():
-    assert Program._not_corruption(OSError("Permission denied"))
-    assert Program._transient_open_error(OSError("Permission denied"))
+@pytest.mark.parametrize("error, attempts", [(OSError("Permission denied"), 11),
+                                             (OSError("unreadable database"), 1), (MemoryError(), 1)])
+def test_saved_program_load_failures(monkeypatch, error, attempts):
+    domain = Program(SimpleNamespace(session=Session()))
+    proj, monitor = object(), object()
+    op = SimpleNamespace(monitor=lambda: monitor, check=lambda: None)
+    calls = []
+
+    def load(project, path, mon):
+        calls.append((project, path, mon))
+        raise error
+
+    monkeypatch.setattr(domain, "_consume", load)
+    monkeypatch.setattr("ghidrette.domains.program.time.sleep", lambda _: None)
+    with pytest.raises(RpcError, match=r"stored program key \(preserved\)") as caught:
+        domain._load_persisted(proj, "key", op)
+    assert caught.value.code == INTERNAL
+    assert calls == [(proj, "/key", monitor)] * attempts
+
+
+def test_deferred_snapshot_retries_same_revision(monkeypatch):
+    ses = Session()
+    ses.program = SimpleNamespace(isChanged=lambda: True)
+    domain = Program(SimpleNamespace(session=ses))
+    outcomes = iter([False, True, True])
+
+    def snapshot(prog):
+        assert prog is ses.program and ses.save_lock.locked()
+        return next(outcomes)
+
+    monkeypatch.setattr("ghidrette.domains.program.take_recovery_snapshot", snapshot)
+    assert domain._snapshot() is False
+    assert domain._snapshot() is True
+    assert domain._snapshot() is None
+    ses.revision += 1
+    assert domain._snapshot() is True
 
 
 @pytest.mark.parametrize("failure, expected", [(False, 0), (True, 1)])
@@ -170,7 +203,7 @@ def test_prepared_variable_edit_rejects_intervening_write(monkeypatch):
 
     @contextlib.contextmanager
     def decompile(*_args):
-        yield hf
+        yield hf, None, None
 
     def on_r(fn):
         with ses.lock:

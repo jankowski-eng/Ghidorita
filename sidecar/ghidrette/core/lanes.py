@@ -22,8 +22,9 @@ class Job:
 
     def cancel(self):
         self.cancelled = True
-        if self.mon is not None:
-            self.mon.cancel()
+        mon = self.mon
+        if mon is not None:
+            mon.cancel()
 
 
 class Scan:
@@ -87,6 +88,11 @@ class Opening:
     def check(self):
         if self.cancelled:
             raise RpcError(CANCELLED, "open cancelled")
+
+    def begin_commit(self):
+        with self.lock:
+            self.check()
+            self.saving = True
 
 
 class Worker:

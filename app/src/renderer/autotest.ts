@@ -248,7 +248,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
         && badDisables && tooBigDisables && goodEnables && errorOk;
 
       result.importOk = importOk;
-      await c.open(file); // the explicit-option opens above ended closed; the default import is open from here on
+      await c.open(file); // use the default import for the remaining checks
       result.r5Ok = await runR5Flow(file, c, result); // strings, references from, comment prefill, labels, import profile; ends with the default import open
       result.saveOk = dirtyShown && savedClean && !m0?.dirty;
       const bo = result.browserOpen as any, cl = result.close as any;

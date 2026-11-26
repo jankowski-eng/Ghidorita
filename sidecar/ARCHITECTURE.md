@@ -39,13 +39,13 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 | lane | thread | notes |
 |---|---|---|
 | `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
-| `edit` | S pool, then R | variable edits decompile on S, then queue only the commit on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. The commit checks program epoch and write revision |
+| `edit` | S pool, then R | variable edits decompile and infer structure fields on S, then queue the write on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. Structure inference shares a deadline across the initial decompile, direct callees, and pointer tracing. The commit checks program epoch and write revision |
 | `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | symbol table, strings, memory search, `list_data_types`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
 | `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile` only. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `file` | asyncio file thread | `load_coverage` parses its file without occupying R and checks the program epoch before returning |
 | `project` | R | `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
 | `loop` | the asyncio loop | `cancel_*`: quick, only flip flags |
-| `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | import + analysis + save; calls back onto R with `lanes.on_r()` for the program swap |
+| `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | validate, load or import the replacement, then call back onto R with `lanes.on_r()` to save and swap the current program |
 
 One more thread: the recovery snapshot loop (`program.py`, every `SIDECAR_SNAPSHOT_SECS`) only sleeps; the snapshot itself runs on R via `lanes.on_r()` and preserves undo history. The three worker queues are bounded at 128 items each. A connection admits at most 64 outstanding requests and a 2 MiB message; disconnect cancels queued requests and cancellable work.
 
@@ -77,8 +77,9 @@ attached with `events.attach(prog)` after the initial analysis and removed with 
 
 Everything a domain shares goes through `ctx`. The only direct calls between domain modules:
 
-1. `highvars` -> `decompile.decompile_for_edit(ctx, prog, func, timeoutSecs, job)`: a context manager that decompiles on the calling scan worker with
-   a short-lived `DecompInterface` and yields the `HighFunction`. R commits only if no write or program swap occurred since preparation.
+1. `highvars` -> `decompile.decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False)`: a context manager that decompiles on the calling scan worker
+   and yields the `HighFunction`, short-lived `DecompInterface`, and task monitor. Structure inference reuses the interface and timed monitor.
+   R commits only if the write revision and program still match.
 2. `program` -> `project`: `ctx.project` (Ghidra project, `lock`, `meta_touch`) and the persistence-key helpers `project.program_key`,
    `analysis_disabled`, `FAST_PROFILE`, `RAW`, which belong to the key format in protocol.md "Persistence".
 

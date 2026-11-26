@@ -102,7 +102,7 @@ Data types: Types button / View > Data Type Manager (Cmd+Shift+T); Edit > Create
 
 ## Round 9 additions
 - `sidecar/jscans/GhidretteScans.java`: the strings scan and the symbol kind filter/sort run in Java. `ghidrette/core/jscans.py` compiles it with `$JAVA_HOME/bin/javac` at start when the class is missing or older (`prepare.sh` ships it precompiled). Do not name a directory `java` next to `main.py` (the sidecar directory): it shadows JPype's `java` package.
-- Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron (needs a display): `AUTOTEST_FLOW=locked|big`, `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` (test hook for a real Timeout).
+- Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron and needs a display. Its focused flows are `AUTOTEST_FLOW=locked|big|open-preserve`. Set `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` to exercise the decompile timeout.
 - Benchmarks wait for a quiet machine (`bench/common.py: wait_quiet`) and exit 3 instead of measuring under load. `bench/run_round9.sh` runs the repeats.
-- A failed `open_binary` always leaves no program open (protocol.md).
+- A failed replacement open preserves the active program and undo history (protocol.md).
 - `MANUAL_TEST.md`: the 30-minute checklist for what scripts cannot do.

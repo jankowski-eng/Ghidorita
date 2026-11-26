@@ -1,7 +1,7 @@
 """Round 9 (hardening): defects that were reproduced, each with the test that fails on the old code. Real Ghidra on /bin/ls (one analysis, copied per test)."""
-import asyncio, os
+import asyncio
 
-from ghidrette.core.errors import RpcError
+from ghidrette.core.errors import INTERNAL, RpcError
 from ghidrette.domains import search
 from testlib import BIN, CANCELLED, Client, INVALID, NOT_FOUND, NO_PROGRAM, Proc, run
 from test_persist import base, projects  # noqa: F401  (fixtures)
@@ -68,8 +68,8 @@ def test_clear_code_inside_a_defined_unit(projects):
     run(go())
 
 
-def test_failed_open_leaves_no_program(projects, tmp_path):
-    """One end state for every failed open_binary: no program open (before: bad arguments kept the old one open, a failure after the close did not)."""
+def test_failed_open_preserves_program(projects, tmp_path):
+    """Failed opens leave the current program, listing, and undo history intact."""
     unreadable = tmp_path / "unreadable"
     unreadable.write_bytes(b"x" * 64)
     unreadable.chmod(0)
@@ -78,19 +78,22 @@ def test_failed_open_leaves_no_program(projects, tmp_path):
         proc = Proc(projects)
         try:
             async with Client(proc.port) as c:
-                for what, code, kw in (("missing file", NOT_FOUND, dict(path="/no/such/file")),
-                                       ("unknown loader", INVALID, dict(path=BIN, loader="No Such Loader")),
-                                       ("bad profile", INVALID, dict(path=BIN, profile="turbo")),
-                                       ("unreadable file", -32603, dict(path=str(unreadable)))):
-                    await c.ok("open_binary", path=BIN)
-                    await c.ok("list_functions")
+                await c.err("open_binary", NOT_FOUND, path="/no/such/file")
+                await c.err("list_functions", NO_PROGRAM)
+                await c.ok("open_binary", path=BIN)
+                f = (await c.ok("list_functions"))[0]
+                await c.ok("rename_symbol", address=f["entry"], newName="open_hardening_probe")
+                reads = ("list_functions", "undo_state", "listing_info")
+                before = {m: await c.ok(m) for m in reads}
+                assert before["undo_state"]["canUndo"] and before["undo_state"]["dirty"]
+                for code, kw in ((NOT_FOUND, dict(path="/no/such/file")),
+                                 (INVALID, dict(path=BIN, loader="No Such Loader")),
+                                 (INVALID, dict(path=BIN, profile="turbo")),
+                                 (INTERNAL, dict(path=str(unreadable)))):
                     await c.err("open_binary", code, **kw)
-                    for m in ("list_functions", "undo_state", "listing_info"):
-                        await c.err(m, NO_PROGRAM)
-                    assert (await c.ok("close_program")) == {}  # idempotent
-                    assert any(p["analyzed"] for p in await c.ok("list_programs")), what  # the old program's analysis is still stored
-                r = await c.ok("open_binary", path=BIN)  # and the sidecar is fine
-                assert r["persisted"] is True and await c.ok("list_functions")
+                    assert {m: await c.ok(m) for m in reads} == before
+                await c.ok("undo")
+                assert (await c.ok("get_function_at", address=f["entry"]))["name"] == f["name"]
         finally:
             unreadable.chmod(0o600)
             proc.stop()

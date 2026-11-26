@@ -177,7 +177,7 @@ export interface Methods {
   // Struct from the data items in [address, address+length) (instructions refused), applied at address unless apply=false; one transaction.
   create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
   // Ghidra's Auto Create Structure on a decompiler variable: infers a struct from the field accesses through it, retypes the variable to a pointer to it; one transaction. structName default: Ghidra's unique name in /auto_structs.
-  auto_create_structure: { params: { entry: Address; name: string; structName?: string }; result: { path: string } };
+  auto_create_structure: { params: { entry: Address; name: string; structName?: string; timeoutSecs?: number }; result: { path: string } };
   // ---- persistence ----
   // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
   save: { params: {}; result: { saved: boolean } };

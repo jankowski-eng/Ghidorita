@@ -11,22 +11,24 @@ def build():
     """Directory with the compiled GhidretteScans.class (loaded by `scans()`). Compiled with $JAVA_HOME/bin/javac against the Ghidra jars
     when the class is missing or older than the source; a bundle ships it precompiled (packaging/prepare.sh). Call before the JVM starts."""
     global DIR
-    src, out = os.path.join(SIDECAR, "jscans", "GhidretteScans.java"), os.path.join(SIDECAR, "jscans", "out")
+    sources = sorted(glob.glob(os.path.join(SIDECAR, "jscans", "*.java")))
+    out = os.path.join(SIDECAR, "jscans", "out")
     cls = os.path.join(out, "GhidretteScans.class")
     DIR = out
-    if os.path.exists(cls) and (not os.path.exists(src) or os.path.getmtime(cls) >= os.path.getmtime(src)):
+    if os.path.exists(cls) and all(os.path.getmtime(cls) >= os.path.getmtime(src) for src in sources):
         return out
     gh = os.environ["GHIDRA_INSTALL_DIR"]
-    cp = ":".join(j for d in ("Ghidra/Framework", "Ghidra/Features/Base") for j in glob.glob(os.path.join(gh, d, "**", "*.jar"), recursive=True))
+    cp = ":".join(j for d in ("Framework", "Features/Base", "Features/Decompiler")
+                  for j in glob.glob(os.path.join(gh, "Ghidra", d, "**", "*.jar"), recursive=True))
     javac = os.path.join(os.environ["JAVA_HOME"], "bin", "javac") if os.environ.get("JAVA_HOME") else shutil.which("javac")
     os.makedirs(out, exist_ok=True)
     tmp = tempfile.mkdtemp(dir=out)  # a concurrent sidecar compiling the same file must never see a half-written class
     try:
-        subprocess.run([javac, "-nowarn", "-cp", cp, "-d", tmp, src], check=True, capture_output=True, text=True)
-        for f in os.listdir(tmp):
+        subprocess.run([javac, "-nowarn", "-cp", cp, "-d", tmp, *sources], check=True, capture_output=True, text=True)
+        for f in sorted(os.listdir(tmp), key=lambda f: f == "GhidretteScans.class"):
             os.replace(os.path.join(tmp, f), os.path.join(out, f))
     except subprocess.CalledProcessError as e:
-        sys.exit("javac failed for %s:\n%s" % (src, e.stderr))
+        sys.exit("javac failed for sidecar scan helpers:\n%s" % e.stderr)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return out

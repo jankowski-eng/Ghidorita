@@ -5,6 +5,7 @@ import asyncio, hashlib, re, threading, time, os
 from ..core.args import hx, text_arg
 from ..core.errors import BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NOT_FOUND, RpcError, log
 from ..core.lanes import Opening
+from ..core.recovery import take_recovery_snapshot
 from ..core.rpc import rpc
 from ..core.session import undo_state
 from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
@@ -13,6 +14,7 @@ from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 class Program:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
+        self.snapshot_revision = None
 
     def start(self):
         if float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120")) > 0:
@@ -30,22 +32,17 @@ class Program:
 
     def _snapshot(self):
         prog = self.ses.program
-        if prog is not None and prog.isChanged():
-            from java.lang import System
-            key = "SystemUtilities.isHeadless"
-            was = System.getProperty(key)
-            # Ghidra's lockForSnapshot refuses in headless mode (default "true") and takeRecoverySnapshot then silently does nothing,
-            # so the snapshot would never exist. The flag is only read for that check; set it for the call.
-            # shortcut: process-wide for a few ms, other threads may see it; upgrade to taking the snapshot through DBHandle if that matters.
-            System.setProperty(key, "false")
-            try:
-                with self.ses.save_lock:
-                    prog.getDomainFile().takeRecoverySnapshot()
-            finally:
-                if was is None:
-                    System.clearProperty(key)
-                else:
-                    System.setProperty(key, was)
+        revision = (self.ses.epoch, self.ses.revision)
+        if prog is None or not prog.isChanged() or self.snapshot_revision == revision:
+            return
+        with self.ses.save_lock:
+            completed = take_recovery_snapshot(prog)
+        if completed:
+            self.snapshot_revision = revision
+            log("recovery snapshot current for", self.ses.program_id)
+        else:
+            log("recovery snapshot deferred for", self.ses.program_id)
+        return completed
 
     @rpc(lane="project")
     def close_program(self):
@@ -120,15 +117,13 @@ class Program:
                             generation=self.ctx.events.generation)
         return {"saved": saved}
 
-    def _publish(self, prog, res, consumer, op, key):
+    def _replace(self, prog, res, consumer, key):
         from ghidra.app.plugin.core.analysis import AutoAnalysisManager
-        with op.lock:  # commit point: after this cancel_open answers false, before it the open still fails with Cancelled
-            if op.cancelled:
-                raise RpcError(CANCELLED, "open cancelled")
-            op.saving = True
-        prog.clearUndo()  # the analysis transaction must not be undoable
+        # Run on R. The staged replacement is ready before we save and release the old program.
         # follow-on analysis would write from the manager's own thread, outside R and outside our transactions
         AutoAnalysisManager.getAnalysisManager(prog).setIgnoreChanges(True)
+        self.close()
+        prog.clearUndo()  # the analysis transaction must not be undoable
         self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
         self.ses.results, self.ses.consumer = res, consumer
         self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
@@ -212,12 +207,10 @@ class Program:
                 self.ctx.lanes.opening = None
 
     def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile):
-        """Thread O. One end state for every failure (bad arguments, missing file, cancel, load error): no program is open, nothing is
-        saved, the project stays usable. The one exception is a failed save of the old program: it stays open (see close)."""
-        res = prog = None
+        """Thread O. Stage the replacement before touching the active program on R."""
+        res = prog = consumer = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
-            self.ctx.lanes.on_r(self.close)  # old program goes first (listener removed, cache cleared, interfaces disposed)
             op.check()
             text_arg(path, "path")
             if not os.path.isfile(path):
@@ -229,65 +222,38 @@ class Program:
             disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
             if sorted(disabled) == FAST_PROFILE:
                 opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
-            h, done, size = hashlib.sha256(), 0, max(1, os.path.getsize(path))
+            size = os.path.getsize(path)
+            h, done = hashlib.sha256(), 0
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(1 << 20), b""):
                     op.check()
                     h.update(chunk)
                     done += len(chunk)
-                    self.ctx.progress("import", min(10, done * 10 // size), "hashing")
+                    self.ctx.progress("import", min(10, done * 10 // max(1, size)), "hashing")
             key = program_key(h.hexdigest(), opts, disabled)
             proj = self.ctx.project.ghidra_project()
             t0 = time.monotonic()
             persisted = proj.getProjectData().getFile("/" + key) is not None
             if persisted:
                 self.ctx.progress("import", 100, "loading persisted analysis")
-                try:
-                    prog, consumer = self._consume(proj, "/" + key)
-                except Exception as e:  # noqa
-                    if self._transient_open_error(e):
-                        for _ in range(10):
-                            op.check()
-                            time.sleep(0.1)
-                            try:
-                                prog, consumer = self._consume(proj, "/" + key)
-                                break
-                            except Exception as retry:  # noqa
-                                if not self._transient_open_error(retry):
-                                    raise
-                        else:
-                            raise  # never delete a saved item just because Ghidra could not access it
-                    else:
-                        # A SIGKILL during the first (non-atomic) save can leave an unreadable item.
-                        if op.cancelled or self._not_corruption(e):
-                            raise  # not corruption: never delete a program that may hold saved edits
-                        log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
-                        proj.getProjectData().getFile("/" + key).delete()
-                        persisted = False
-                if persisted:
-                    op.check()
-                    self.ctx.project.meta_touch(key)
-                    log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
-            if not persisted:
-                res, prog, consumer = self._import_and_analyze(path, key, proj, op, opts, disabled), None, None
+                prog, consumer = self._load_persisted(proj, key, op)
+                op.check()
+                self.ctx.project.meta_touch(key)
+                log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
+            else:
+                res = self._import_and_analyze(path, key, proj, op, opts, disabled)
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
-                self.ctx.project.meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=os.path.getsize(path),
+                self.ctx.project.meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=size,
                                  analyzed=True, options=opts)
-            try:
-                self._publish(prog, res, consumer, op, key)
-            except BaseException:
-                self.ctx.events.detach(prog)
-                self.ses.results = self.ses.consumer = None
-                raise
+            # Claim the commit before queueing it, so shutdown waits for the whole swap.
+            op.begin_commit()
+            self.ctx.lanes.on_r(lambda: self._replace(prog, res, consumer, key))
+            res = prog = consumer = None  # the session now owns the staged program
             self.ctx.progress("ready", 100, "ready")
             self.open_secs = time.monotonic() - t0
-            op.finished = True
             return {"programId": key, "name": os.path.basename(path), "persisted": persisted}
         except BaseException as e:  # noqa
-            op.finished = True
-            if self.ses.program is None:  # not when the old program stayed open because its save failed
-                self.ses.program_id, self.ses.undo_snap = None, {"canUndo": False, "canRedo": False, "dirty": False}
             if res is not None:
                 try:
                     res.close()
@@ -309,34 +275,31 @@ class Program:
             raise RpcError(INTERNAL, "open failed: %s" % e)
         finally:
             self.ctx.project.lock.release()
+            op.finished = True
+
+    def _load_persisted(self, proj, key, op):
+        mon = op.monitor()
+        for attempt in range(11):
+            op.check()
+            try:
+                return self._consume(proj, "/" + key, mon)
+            except Exception as e:
+                op.check()
+                if attempt == 10 or not re.search(r"permission denied|access denied|locked|in use|already open", repr(e), re.I):
+                    log("could not load stored program %s:" % key, repr(e))
+                    raise RpcError(INTERNAL, "could not load stored program %s (preserved): %s" % (key, e)) from e
+                time.sleep(0.1)
 
     @staticmethod
-    def _transient_open_error(e):
-        return bool(re.search(r"permission denied|access denied|locked|in use|already open", repr(e), re.I))
-
-    @staticmethod
-    def _not_corruption(e):
-        """True for load failures that say nothing about the file being damaged: locked, a Ghidra version mismatch (older or newer
-        build than the one that saved it), or the JVM running out of memory."""
-        if Program._transient_open_error(e) or re.search(r"lock|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
-            return True
-        try:
-            name = str(e.getClass().getSimpleName())
-            return name == "OutOfMemoryError" or (name == "VersionException" and int(e.getVersionIndicator()) in (1, 2))  # OLDER, NEWER
-        except Exception:
-            return False
-
-    @staticmethod
-    def _consume(proj, path):
+    def _consume(proj, path, monitor):
         """pyghidra.consume_program with Ghidra recovery enabled for any valid existing recovery file."""
         from java.lang import Object
         from ghidra.program.model.listing import Program
-        from ghidra.util.task import TaskMonitor
         consumer = Object()
         df = proj.getProjectData().getFile(path)
         if df is None:
             raise FileNotFoundError(path)
-        dobj = df.getDomainObject(consumer, True, True, TaskMonitor.DUMMY)
+        dobj = df.getDomainObject(consumer, True, True, monitor)
         if not Program.class_.isAssignableFrom(dobj.getClass()):
             dobj.release(consumer)
             raise TypeError("%s is not a Program" % path)
@@ -362,8 +325,8 @@ class Program:
         if "baseAddress" in opts:
             b = b.addLoaderArg("-loader-baseAddr", opts["baseAddress"])
         res = b.load()
-        op.check()
         try:
+            op.check()
             self._analyze(res.getPrimaryDomainObject(), op, disabled)
         except BaseException:
             res.close()
@@ -432,10 +395,7 @@ class Program:
 
     def _save(self, res, op):
         from ghidra.util.task import TaskMonitor
-        with op.lock:
-            if op.cancelled:
-                raise RpcError(CANCELLED, "open cancelled")
-            op.saving = True  # point of no return: cancel_open now answers cancelled=false
+        op.begin_commit()
         self.ctx.progress("saving", -1, "saving to project")
         res.save(TaskMonitor.DUMMY)
 

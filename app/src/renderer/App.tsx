@@ -70,6 +70,7 @@ export function App() {
   const [visible, setVisible] = useState<Record<PaneId, boolean>>({ functions: true, listing: true, decompiler: true });
   const navRef = useRef(nav);
   const openingRef = useRef(false);
+  const changeDuringOpen = useRef<Parameters<typeof onProgramChanged>[0] | null>(null);
   const openedRef = useRef(false);
   const cancellingRef = useRef(false);
   const funcsCountRef = useRef(0);
@@ -136,30 +137,31 @@ export function App() {
   };
   const open = async (p: string, opts: ImportOptions = {}) => {
     if (openingRef.current) return; // the sidecar would answer Busy
-    openingRef.current = true; cancellingRef.current = false; coverage.current = null;
+    openingRef.current = true; cancellingRef.current = false;
     setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
-    clearProgram();
+    let swapped = false;
     try {
       const r = await rpc.call("open_binary", { path: p, ...opts });
+      swapped = true;
+      clearProgram();
       const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
       funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); rpc.call("undo_state", {}).then(setUndo, fail); setMap(new AddrMap(info.ranges)); setProgramName(r.name); setOpened(true); openedRef.current = true;
       if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
     } catch (e) {
-      // the UI already forgot the old program; a rejected open (NotFound/InvalidArgument/Busy) leaves it open in the sidecar. close_program is idempotent.
-      await rpc.call("close_program", {}).catch(() => {});
-      if (e instanceof RpcError && e.code === -32002) setNotice("Open cancelled."); // not an error
-      else {
+      if (swapped) await rpc.call("close_program", {}).catch(() => {});
+      if (e instanceof RpcError && e.code === -32002) {
+        setNotice("Open cancelled.");
+        if (openedRef.current) setFlash("Open cancelled.");
+      } else {
         fail(e); setNotice("Could not open " + p);
-        if (/save failed before closing/.test(e instanceof Error ? e.message : "")) { // the old program (with its unsaved edits) is still open: show it again
-          try {
-            const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
-            funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
-            rpc.call("undo_state", {}).then(setUndo, fail);
-          } catch { /* stays closed */ }
-        }
       }
-    } finally { openingRef.current = false; setOpening(null); setProgress(null); }
+    } finally {
+      openingRef.current = false; setOpening(null); setProgress(null);
+      const change = changeDuringOpen.current;
+      changeDuringOpen.current = null;
+      if (!swapped && change) api.current.programChanged(change);
+    }
   };
 
   // Open entry point for Open, Open Recent and the path box: pick import options first. Unsaved edits of the open program are autosaved by the sidecar when it is replaced.
@@ -202,6 +204,12 @@ export function App() {
   // program_changed: one subscription, all reactions in changes.ts
   const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
     if (!openedRef.current) return;
+    if (openingRef.current) {
+      // Program RPCs resume when the open finishes. Keep the last undo state and coalesce any required refresh.
+      const refresh = changeDuringOpen.current?.ranges === null || !p.ranges || p.ranges.length > 0 || p.kinds.length > 0;
+      changeDuringOpen.current = { ranges: refresh ? null : [], kinds: refresh ? ["other"] : [], undo: p.undo };
+      return;
+    }
     if (p.ranges && !p.ranges.length && !p.kinds.length) { setUndo(p.undo); return; } // save: only `dirty` changed
     clearFunctionCache(); setDataVersion((v) => v + 1); setTypesVersion((v) => v + 1);
     onProgramChanged(p, {

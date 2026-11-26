@@ -1,8 +1,12 @@
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.data.NoisyStructureBuilder;
 import ghidra.program.model.data.StringDataInstance;
+import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
@@ -18,7 +22,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The two loops that were Python over JPype objects (defined-string scan, symbol kind filter and sort), moved next to the data so only results cross
+ * Read-only scan loops run next to the data so only results cross
  * into Python: a Java call releases the GIL, and the loop makes no JPype call per element. Cancellation: the loops poll the TaskMonitor
  * (CancelledException). Called from sidecar/main.py on a scan worker; nothing here touches the program except by reading.
  */
@@ -27,6 +31,11 @@ public final class GhidretteScans {
 
     public static final int STRING_VALUE_CAP = 1000;
     public static final int K_FUNCTION = 1, K_LABEL = 2, K_DATA = 4, K_EXTERNAL = 8, K_VARIABLE = 16, K_OTHER = 32;
+
+    public static NoisyStructureBuilder inferStructure(Program program, HighVariable root, Structure existing,
+            DecompInterface decompiler, TaskMonitor monitor) throws CancelledException {
+        return StructureInference.infer(program, root, existing, decompiler, monitor);
+    }
 
     // ---- strings -------------------------------------------------------------------------------------------------------------
 

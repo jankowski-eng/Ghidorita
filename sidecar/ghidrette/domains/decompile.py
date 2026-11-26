@@ -16,30 +16,45 @@ RANGE_ONLY_KINDS = {"comment", "code"}
 
 
 @contextlib.contextmanager
-def decompile_for_edit(ctx, prog, func, timeoutSecs, job):
-    """Decompile `func` with a short-lived DecompInterface on the calling scan worker and yield the HighFunction; the interface is
-    disposed when the with block ends. `job` is registered for cancel_decompile (its monitor is the one the decompile runs under).
-    Raises Cancelled / Timeout / Internal exactly like the pool's decompile. See highvars._high_edit for the revision check."""
+def decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False):
+    """Yield the high function, decompiler and monitor on the scan worker. A timed monitor
+    also bounds any follow-up decompiles and analysis in the caller's with block."""
+    from java.util.concurrent import TimeUnit
     from ghidra.app.decompiler import DecompInterface
     from ghidra.pyghidra import PyGhidraTaskMonitor
-    mon = PyGhidraTaskMonitor(None, None)
+    from ghidra.util.exception import CancelledException
+    from ghidra.util.task import TimeoutTaskMonitor
+    mon = TimeoutTaskMonitor.timeoutIn(timeoutSecs, TimeUnit.SECONDS) if timed else PyGhidraTaskMonitor(None, None)
+    d = DecompInterface()
     with ctx.lanes.mon_lock:
         job.mon = mon
         if job.cancelled:
             mon.cancel()
-    d = DecompInterface()
     try:
-        if not d.openProgram(prog):
+        mon.checkCancelled()
+        opened = d.openProgram(prog)
+        mon.checkCancelled()
+        if not opened:
             raise RpcError(INTERNAL, "decompiler failed to open program: %s" % d.getLastMessage())
         res = d.decompileFunction(func, timeoutSecs, mon)
-        if res.isCancelled() or mon.isCancelled():
-            raise RpcError(CANCELLED, "decompile cancelled")
+        mon.checkCancelled()
         if res.isTimedOut():
             raise RpcError(TIMEOUT, "decompile timed out after %ss" % timeoutSecs)
+        if res.isCancelled():
+            raise RpcError(CANCELLED, "decompile cancelled")
         if not res.decompileCompleted():
             raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
-        yield res.getHighFunction()
+        yield res.getHighFunction(), d, mon
+        mon.checkCancelled()
+    except CancelledException as e:
+        if timed and mon.didTimeout() and not job.cancelled:
+            raise RpcError(TIMEOUT, "structure inference timed out after %ss" % timeoutSecs) from e
+        raise RpcError(CANCELLED, "decompile cancelled") from e
     finally:
+        with ctx.lanes.mon_lock:
+            job.mon = None
+        if timed:
+            mon.cancel()
         d.dispose()
 
 

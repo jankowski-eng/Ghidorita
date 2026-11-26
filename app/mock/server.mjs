@@ -270,7 +270,7 @@ const handlers = {
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
     const opts = optsOf(p);
-    opening = true; openCancelled = false; resetProgram(); opened = false;
+    opening = true; openCancelled = false;
     const an = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
     const steps = [
       { phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" },
@@ -284,6 +284,8 @@ const handlers = {
       }
       const programId = idFor(path, opts);
       const persisted = programs.has(programId), name = path.split("/").pop();
+      for (const cancel of [...cancels.values()]) cancel();
+      resetProgram();
       programs.set(programId, { programId, name, sourcePath: path, sizeBytes: 4096, analyzed: true, lastOpened: new Date().toISOString(), options: opts });
       if (stored.has(programId)) S = structuredClone(stored.get(programId));
       opened = true; openId = programId;

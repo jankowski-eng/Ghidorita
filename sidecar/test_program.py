@@ -78,10 +78,16 @@ def test_open_cancel_busy_failfast(tmp_path):
                 assert len({p["analyzer"] for p in new if p.get("analyzer")}) > 3
                 fns = await c.ok("list_functions")
                 assert fns
-                # opening another binary while one is loaded closes the old one first
+                await c.ok("rename_symbol", address=fns[0]["entry"], newName="open_failure_probe")
+                undo_before = await c.ok("undo_state")
+                assert undo_before["dirty"] and undo_before["canUndo"]
                 other = os.path.join(HERE, "..", "bench", "nonexistent")
                 await c.err("open_binary", NOT_FOUND, path=other)
-                await c.err("list_functions", NO_PROGRAM)  # a failed open leaves no program open (protocol.md, open_binary)
+                await c.err("open_binary", INVALID, path=BIN, profile="unknown")
+                await c.err("open_binary", INVALID, path=blob(tmp_path))
+                assert await c.ok("undo_state") == undo_before
+                assert any(f["name"] == "open_failure_probe" for f in await c.ok("list_functions"))
+                await c.ok("undo")
                 assert (await c.ok("open_binary", path=BIN))["persisted"] is True
                 assert len(await c.ok("list_functions")) == len(fns)
                 # now it is persisted, cancel is a no-op and reopen is quick
