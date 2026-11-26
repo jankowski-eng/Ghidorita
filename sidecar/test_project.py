@@ -10,7 +10,8 @@ def test_candidates_and_languages(bproc):
 
     async def go():
         async with Client(proc.port) as c:
-            assert (await c.ok("import_candidates", path=raw)) == {"candidates": [], "sizeBytes": os.path.getsize(raw)}  # nothing recognises a bare blob
+            r0 = await c.ok("import_candidates", path=raw)
+            assert r0["candidates"] == [] and r0["sizeBytes"] == os.path.getsize(raw) and r0["entropy"] and all(0 <= e <= 8 for e in r0["entropy"])  # nothing recognises a bare blob
             await c.err("import_candidates", NOT_FOUND, path=str(d / "nope"))
             await c.err("import_candidates", INVALID)
             res = await c.ok("import_candidates", path=BIN)

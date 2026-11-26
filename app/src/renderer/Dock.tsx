@@ -3,9 +3,10 @@ import type { Address } from "../../../protocol";
 import { StringsPanel } from "./StringsPanel";
 import { SymbolsPanel } from "./SymbolsPanel";
 import { MemSearchPanel } from "./MemSearchPanel";
+import { ChangesPanel } from "./ChangesPanel";
 
-export type DockId = "strings" | "symbols" | "memsearch";
-const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["memsearch", "Search Memory"]];
+export type DockId = "strings" | "symbols" | "memsearch" | "changes";
+const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["memsearch", "Search Memory"], ["changes", "Changes"]];
 
 /** Bottom dock with the navigate-and-find windows. A panel keeps its filter/results while another tab is shown (hidden, not unmounted). */
 export function Dock({ active, onActivate, onClose, version, onGo, onError }: {
@@ -28,6 +29,7 @@ export function Dock({ active, onActivate, onClose, version, onGo, onError }: {
       <div className="dock-body">
         {seen.includes("symbols") && <div hidden={active !== "symbols"}><SymbolsPanel {...P} /></div>}
         {seen.includes("strings") && <div hidden={active !== "strings"}><StringsPanel {...P} /></div>}
+        {seen.includes("changes") && <div hidden={active !== "changes"}><ChangesPanel onGo={onGo} /></div>}
         {seen.includes("memsearch") && <div hidden={active !== "memsearch"}><MemSearchPanel {...P} /></div>}
       </div>
     </section>

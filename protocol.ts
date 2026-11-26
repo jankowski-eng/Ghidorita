@@ -41,6 +41,7 @@ export interface FunctionInfo {
   name: string;
   entry: Address;
   size: number;
+  source?: SymbolSource; // where the name came from: "user" = renamed by a person, "default" = FUN_xxxx, "analysis"/"imported" = a guess or the file's own
 }
 
 export type TokenKind =
@@ -120,7 +121,7 @@ export interface AddrRange {
 export interface Methods {
   open_binary: { params: { path: string } & ImportOptions; result: { programId: string; name: string; persisted: boolean } };
   cancel_open: { params: {}; result: { cancelled: boolean } };
-  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number } };
+  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number; entropy: number[] } };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
   list_programs: { params: {}; result: ProgramEntry[] };

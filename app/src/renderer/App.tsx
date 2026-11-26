@@ -438,7 +438,7 @@ export function App() {
       {importFor && !opening && <ImportDialog key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
       {deleting && <Confirm title="Delete program?" message={`Remove ${deleting.entry.name} from the project? Its analysis is deleted; the original file is not touched.`} error={deleting.error} busy={deleting.busy}
         actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
-      {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onRun={(c) => api.current.handleMenu(c)} onClose={() => setSearchOpen(false)} />}
       {gotoOpen && opened && <GoTo onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
       {opened ? (
         <Panes visible={visible}>{{

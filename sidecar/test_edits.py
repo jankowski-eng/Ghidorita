@@ -45,3 +45,25 @@ def test_get_comments_and_create_label(env):
             assert u["canRedo"] is True
             await c.ok("redo"); await c.ok("undo")  # round trip; leaves the shared program as it was
     run(go())
+
+
+def test_function_source_and_load_coverage(env, tmp_path):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            assert all(f["source"] in ("user", "analysis", "imported", "default") for f in await c.ok("list_functions"))
+            f = fns[0]
+            await c.ok("rename_symbol", address=f["entry"], name="cov_renamed")
+            assert next(g for g in await c.ok("list_functions") if g["entry"] == f["entry"])["source"] == "user"
+            p = tmp_path / "cov.txt"
+            p.write_text("# trace\n0x401000-0x40100f\n\n0x401020  # one\n")
+            assert await c.ok("load_coverage", path=str(p)) == {"ranges": [{"start": "0x401000", "end": "0x40100f"}, {"start": "0x401020", "end": "0x401020"}]}
+            p.write_text("0x10\nnope\n")
+            await c.err("load_coverage", INVALID, path=str(p))
+            p.write_text("0x20-0x10\n")
+            await c.err("load_coverage", INVALID, path=str(p))
+            await c.err("load_coverage", NOT_FOUND, path=str(tmp_path / "missing"))
+            await c.ok("undo")
+
+    run(go())

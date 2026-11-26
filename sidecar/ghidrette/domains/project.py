@@ -13,6 +13,23 @@ RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a bas
 KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 
 
+def entropy_profile(path, size, buckets=48, sample=16384):
+    """Shannon entropy (bits/byte, 0-8) of up to `buckets` evenly spaced slices of the file, `sample` bytes read from the start of each:
+    constant cost whatever the file size. shortcut: sampled, so a short packed stretch can hide inside a slice; upgrade to a full pass if triage must be exact."""
+    import math
+    from collections import Counter
+    n, out = max(1, min(buckets, -(-size // 4096))), []
+    with open(path, "rb") as f:
+        for i in range(n):
+            f.seek(size * i // n)
+            b = f.read(min(sample, max(1, size // n)))  # never past this slice
+            if not b:
+                out.append(0.0)
+                continue
+            out.append(abs(round(-sum(c / len(b) * math.log2(c / len(b)) for c in Counter(b).values()), 2)))  # abs: a constant slice is -0.0
+    return out
+
+
 def analysis_disabled():
     """Analyzer names from SIDECAR_ANALYSIS_DISABLE ("Name 1;Name 2"), empty if unset."""
     return [n for n in os.environ.get("SIDECAR_ANALYSIS_DISABLE", "").split(";") if n]
@@ -142,8 +159,9 @@ class Project:
                 lm = LoaderService.getAllSupportedLoadSpecs(p, TaskMonitor.DUMMY)
                 chosen = LoadSpecChooser.CHOOSE_THE_FIRST_PREFERRED.choose(lm)
                 size = os.path.getsize(path)
+                ent = entropy_profile(path, size)
                 if chosen is None:  # only Raw Binary (always offered, needs a language) applies: "nothing recognises the file"
-                    return {"candidates": [], "sizeBytes": size}
+                    return {"candidates": [], "sizeBytes": size, "entropy": ent}
                 out = []
                 for e in lm.entrySet():
                     loader = str(e.getKey().getName())
@@ -157,7 +175,7 @@ class Project:
                                     "compilerSpec": str(lcs.compilerSpecID) if lcs is not None else None,
                                     "preferred": spec == chosen,
                                     "acceptsBaseAddress": loader == RAW})
-                return {"candidates": out, "sizeBytes": size}
+                return {"candidates": out, "sizeBytes": size, "entropy": ent}
             finally:
                 p.close()
 

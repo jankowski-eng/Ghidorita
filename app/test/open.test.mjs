@@ -6,7 +6,7 @@ const load = async (f) => {
   const r = await build({ entryPoints: [new URL(`../src/renderer/${f}`, import.meta.url).pathname], bundle: true, format: "esm", write: false });
   return import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 };
-const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, RAW_CANDIDATE } = await load("openOptions.ts");
+const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, RAW_CANDIDATE, entropyHint } = await load("openOptions.ts");
 const { windowTitle } = await load("session.ts");
 
 test("parseBase: normalises, validates, 64-bit limit", () => {
@@ -70,4 +70,11 @@ test("optionsSummary / reopenParams carry the profile", () => {
   assert.equal(optionsSummary({ profile: "fast" }), "fast analysis");
   assert.equal(optionsSummary({ loader: "Raw Binary", language: "ARM:LE:32:v8", profile: "fast" }), "Raw Binary · ARM:LE:32:v8 · fast analysis");
   assert.deepEqual(reopenParams({ programId: "x", name: "n", sizeBytes: 1, analyzed: true, sourcePath: "/p", options: { profile: "fast" } }), { path: "/p", profile: "fast" });
+});
+
+test("entropyHint: none, some, mostly high", () => {
+  assert.equal(entropyHint([]), "");
+  assert.match(entropyHint([5, 6, 6]), /No packed/);
+  assert.match(entropyHint([5, 7.9, 6, 6]), /1 of 4/);
+  assert.match(entropyHint([7.9, 7.8, 5]), /Mostly high/);
 });

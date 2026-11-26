@@ -7,7 +7,7 @@ export type MenuCommand =
   | { type: "open-path"; path: string }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" } | { type: "datatypes" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
-  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" } | { type: "xrefs" }
+  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" } | { type: "xrefs" }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {

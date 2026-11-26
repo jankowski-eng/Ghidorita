@@ -14,7 +14,7 @@ GOLDEN = {
     "decompile": "decomp",
     "rename_variable": "R+job", "retype_variable": "R+job", "auto_create_structure": "R+job",
     **{m: "R" for m in (
-        "list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",
+        "list_functions", "load_coverage", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",
         "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment", "create_function",
         "set_function_signature", "undo", "redo", "define_data", "clear_code", "save", "dt_sources", "dt_children",
         "get_data_type", "create_data_type", "delete_data_type", "rename_data_type", "edit_struct", "edit_enum",

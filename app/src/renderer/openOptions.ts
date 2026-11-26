@@ -44,3 +44,12 @@ export const optionsSummary = (o: ImportOptions): string =>
 /** Parameters to reopen a stored program exactly as it was imported (undefined path = nothing to reopen). */
 export const reopenParams = (e: ProgramEntry): { path: string } & ImportOptions | null =>
   e.sourcePath ? { path: e.sourcePath, ...e.options } : null;
+
+/** Plain-language read of an entropy profile (bits/byte per slice): mostly 7.5+ is packed or encrypted, a high tail is a likely appended or packed section. */
+export function entropyHint(e: number[]): string {
+  if (!e.length) return "";
+  const hi = e.filter((x) => x >= 7.5).length;
+  if (hi * 2 > e.length) return "Mostly high entropy: likely packed or encrypted.";
+  if (hi > 0) return `${hi} of ${e.length} slices look packed or encrypted.`;
+  return "No packed or encrypted slices.";
+}

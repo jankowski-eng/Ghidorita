@@ -235,8 +235,9 @@ const handlers = {
     if (opening) throw { code: -32005, message: "Busy" };
     if (/missing/.test(path)) throw { code: -32004, message: "NotFound" }; // mock: paths containing "missing"
     const sizeBytes = /big/.test(path) ? 30 * 1048576 : 4096; // mock: paths containing "big" are 30 MB (the UI defaults those to the fast profile)
-    if (/\.(bin|rom|img)$/i.test(path)) return { sizeBytes, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
-    return { sizeBytes, candidates: [
+    const entropy = Array.from({ length: 24 }, (_, i) => (i < 6 ? 5.8 : i < 18 ? 6.4 : 7.9)); // mock: some code, data, then a packed tail
+    if (/\.(bin|rom|img)$/i.test(path)) return { sizeBytes, entropy, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
+    return { sizeBytes, entropy, candidates: [
       { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", preferred: true, acceptsBaseAddress: true },
       { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", preferred: false, acceptsBaseAddress: true },
       { loader: "Raw Binary", language: null, compilerSpec: null, preferred: false, acceptsBaseAddress: true }] };

@@ -53,6 +53,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { label: "Symbol Table", accelerator: "CmdOrCtrl+Shift+Y", click: () => send({ type: "dock", panel: "symbols" }) },
         { label: "Defined Strings", accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
+        { label: "Changes", accelerator: "CmdOrCtrl+Shift+H", click: () => send({ type: "dock", panel: "changes" }) },
         { label: "Search Memory…", accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { label: "Data Type Manager", accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },
@@ -60,6 +61,7 @@ export function createMenu({ getWin, pick }: Deps) {
       { label: "Go", submenu: [
         { label: "Back", accelerator: "CmdOrCtrl+[", enabled: state.canBack, click: () => send({ type: "nav-back" }) },
         { label: "Forward", accelerator: "CmdOrCtrl+]", enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
+        { label: "Command Bar…", accelerator: "CmdOrCtrl+K", click: () => send({ type: "search" }) },
         { label: "Search Symbols…", accelerator: "CmdOrCtrl+Shift+O", click: () => send({ type: "search" }) },
         { label: "Go to Address…", accelerator: "CmdOrCtrl+G", click: () => send({ type: "goto" }) },
         // the key is only a hint in the label (a real accelerator would swallow a typed x): Listing and Decompiler handle X themselves

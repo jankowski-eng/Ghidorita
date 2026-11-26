@@ -1,8 +1,12 @@
 """The listing and function reads (thread R): the table behind the listing pane, the function list, comments."""
-from ..core.args import MASK64, akey, hx, ref_kind
-from ..core.errors import NOT_FOUND, RpcError
+import os
+
+from ..core.args import MASK64, akey, hx, ref_kind, text_arg
+from ..core.errors import INVALID, NOT_FOUND, RpcError
 from ..core.rpc import rpc
 
+SOURCES = {"USER_DEFINED": "user", "ANALYSIS": "analysis", "IMPORTED": "imported", "DEFAULT": "default"}  # SourceType name -> protocol SymbolSource
+COVERAGE_MAX_BYTES, COVERAGE_MAX_RANGES = 32 << 20, 1_000_000
 ROW_COMMENT_KINDS = {"eol": "comment", "pre": "pre", "post": "post", "plate": "plate", "repeatable": "repeatable"}  # CommentType name -> row field
 
 
@@ -21,9 +25,38 @@ class Listing:
             ea = f.getEntryPoint()
             if ea.getAddressSpace() != dspace:  # shortcut: functions in other spaces are not listed (the listing shows them), upgrade with qualified entries
                 continue
-            out.append((ea.getOffset() & MASK64, str(f.getName()), f.getBody().getNumAddresses()))
+            out.append((ea.getOffset() & MASK64, str(f.getName()), f.getBody().getNumAddresses(), str(f.getSymbol().getSource())))
         out.sort()
-        return [{"name": n, "entry": hx(o), "size": int(s)} for o, n, s in out]
+        return [{"name": n, "entry": hx(o), "size": int(s), "source": SOURCES.get(src, "other")} for o, n, s, src in out]
+
+    @rpc(lane="R")
+    def load_coverage(self, path):
+        """Text coverage file -> address ranges. One entry per line: `0xSTART-0xEND` (END inclusive) or a single `0xADDR`; blank lines and `#` comments skipped.
+        shortcut: plain text only; drcov and other tool formats need converting first, upgrade when a real trace format is wanted."""
+        text_arg(path, "path")
+        self.ses.need()
+        if not os.path.isfile(path):
+            raise RpcError(NOT_FOUND, "no such file: %s" % path)
+        if os.path.getsize(path) > COVERAGE_MAX_BYTES:
+            raise RpcError(INVALID, "coverage file over %d MB" % (COVERAGE_MAX_BYTES >> 20))
+        out = []
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for n, line in enumerate(f, 1):
+                s = line.split("#", 1)[0].strip()
+                if not s:
+                    continue
+                try:
+                    a, _, b = s.partition("-")
+                    lo = int(a.strip(), 16)
+                    hi = int(b.strip(), 16) if b.strip() else lo
+                except ValueError:
+                    raise RpcError(INVALID, "line %d: expected 0xSTART-0xEND or 0xADDR, got %r" % (n, s[:40]))
+                if lo < 0 or hi < lo or hi >= 1 << 64:
+                    raise RpcError(INVALID, "line %d: bad range %r" % (n, s[:40]))
+                out.append({"start": hx(lo), "end": hx(hi)})
+                if len(out) > COVERAGE_MAX_RANGES:
+                    raise RpcError(INVALID, "more than %d ranges" % COVERAGE_MAX_RANGES)
+        return {"ranges": out}
 
     @rpc(lane="R")
     def get_function_at(self, address):

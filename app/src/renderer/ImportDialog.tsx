@@ -3,15 +3,16 @@ import type { AnalysisProfile, ImportCandidate, ImportOptions, LanguageInfo } fr
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import { trapTab, useRestoreFocus } from "./hooks";
-import { PROFILE_LABEL, RAW_CANDIDATE, buildOptions, choiceError, defaultProfile, parseBase } from "./openOptions";
+import { PROFILE_LABEL, RAW_CANDIDATE, buildOptions, choiceError, defaultProfile, entropyHint, parseBase } from "./openOptions";
 
 const label = (c: ImportCandidate) => `${c.loader}${c.language ? ` — ${c.language} / ${c.compilerSpec}` : " — choose language"}${c.preferred ? " (preferred)" : ""}`;
+const mb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const errText = (e: unknown) => e instanceof RpcError ? (e.code === -32005 ? "The sidecar is busy, try again in a moment." : e.code === -32004 ? "File not found." : e.message) : e instanceof Error ? e.message : String(e);
 
 /** Asks Ghidra which loaders/languages fit the file. Enter = open with the preselected (default) choice. */
 export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen: (o: ImportOptions | undefined) => void; onCancel: () => void }) {
   useRestoreFocus();
-  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note: string } | { error: string } | null>(null);
+  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note: string; entropy: number[]; sizeBytes: number } | { error: string } | null>(null);
   const [idx, setIdx] = useState(0);
   const [language, setLanguage] = useState<string | null>(null);
   const [spec, setSpec] = useState<string | null>(null);
@@ -22,13 +23,13 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
   useEffect(() => {
     let live = true;
     (async () => {
-      const { candidates, sizeBytes } = await rpc.call("import_candidates", { path });
+      const { candidates, sizeBytes, entropy } = await rpc.call("import_candidates", { path });
       const langs = await rpc.call("list_languages", {}).catch(() => [] as LanguageInfo[]); // optional unless the user must choose
       const cands = candidates.length ? candidates : [RAW_CANDIDATE];
       if (!live) return;
       const pre = Math.max(0, cands.findIndex((c) => c.preferred));
       setProfile(defaultProfile(sizeBytes)); setIdx(pre); setLanguage(cands[pre].language); setSpec(cands[pre].compilerSpec);
-      setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary." });
+      setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary.", entropy, sizeBytes });
     })().catch((e) => { if (live) setState({ error: errText(e) }); });
     return () => { live = false; };
   }, [path]);
@@ -58,6 +59,10 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
         {state && "error" in state && <div className="err" role="alert">{state.error}</div>}
         {ready && cand && <>
           {ready.note && <div role="status">{ready.note}</div>}
+          {ready.entropy.length > 0 && <div className="triage" role="img" aria-label={`Entropy by file position. ${entropyHint(ready.entropy)}`}>
+            <div className="ebars">{ready.entropy.map((x, i) => <span key={i} title={`${x} bits/byte`} style={{ height: `${Math.round((x / 8) * 100)}%`, background: x >= 7.5 ? "#e0a93b" : "#5a8f6a" }} />)}</div>
+            <span className="meta">{mb(ready.sizeBytes)} · {entropyHint(ready.entropy)}</span>
+          </div>}
           <label>Loader
             <select autoFocus aria-label="Loader" value={idx} onChange={(e) => pick(+e.target.value)}>
               {ready.cands.map((c, i) => <option key={i} value={i}>{label(c)}</option>)}

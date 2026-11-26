@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FunctionInfo, Address } from "../../../protocol";
 import { searchSymbols } from "./symbols";
 import { latest } from "./latest";
 import { useDebounced } from "./hooks";
+
+const SRC_TITLE: Record<string, string> = { user: "named by you", analysis: "named by analysis (a guess)", imported: "name from the file", default: "default name, not yet named", other: "" };
 
 /** Listbox: click/Enter opens a preview tab, double-click/Shift+Enter pins; arrows move the cursor (also from the filter box). */
 export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: FunctionInfo[]; selected: Address | null; onSelect: (e: Address) => void; onPin: (e: Address) => void }) {
@@ -18,6 +20,7 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
       (e) => setErr(e instanceof Error ? e.message : String(e)));
   }, [dq, funcs]); // eslint-disable-line
   const shown = hits ?? funcs;
+  const src = useMemo(() => new Map(funcs.map((f) => [f.entry, f.source])), [funcs]); // filter hits come from search_symbols, which has no source
   const [cursor, setCursor] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: shown.length, getScrollElement: () => ref.current, estimateSize: () => 20, overscan: 10 });
@@ -44,7 +47,7 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
                 className={"frow" + (f.entry === selected ? " sel" : "") + (it.index === cursor ? " cur" : "")}
                 onClick={() => { setCursor(it.index); onSelect(f.entry); }} onDoubleClick={() => onPin(f.entry)}
                 style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${it.start}px)` }}>
-                {f.name} <span style={{ color: "#777" }}>{f.entry}</span>
+                <span className={"psrc " + (f.source ?? src.get(f.entry) ?? "other")} title={SRC_TITLE[f.source ?? src.get(f.entry) ?? "other"]} />{f.name} <span style={{ color: "#777" }}>{f.entry}</span>
               </div>
             );
           })}
