@@ -5,23 +5,19 @@ Threads: the asyncio loop (dispatch, cancel_*), R (all program reads and ALL wri
 import + analysis + save), N decompiler workers sharing one queue, each owning a DecompInterface, and M scan workers
 (S) sharing one queue for the slow reads that must never delay listing fetches: symbol table, strings, memory search.
 """
-import asyncio, concurrent.futures, contextlib, datetime, hashlib, json, os, queue, re, signal, sys, threading, time
+import asyncio, datetime, hashlib, json, os, re, signal, sys, threading, time
 from collections import OrderedDict
 
-import websockets
-
 from ghidrette.core.args import hx, lim, name_arg, text_arg
+from ghidrette.core.context import Ctx
+from ghidrette.core.lanes import Job, Opening, Scan
+from ghidrette.core.server import Server
+from ghidrette.core.session import undo_state
 from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_METHOD, NO_PROGRAM, NOT_FOUND,
-                                   PROJECT_LOCKED, TIMEOUT, RpcError, java_error, log)
+                                   PROJECT_LOCKED, TIMEOUT, RpcError, log)
 
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
-# program_changed kinds, see protocol.md. Everything not listed is "other".
-ALL_KINDS = ["symbol", "comment", "function", "data", "code", "type", "other"]
-KIND_PREFIX = [("SYMBOL_", "symbol"), ("EXTERNAL_", "symbol"), ("REFERENCE_", "symbol"), ("REFERNCE_", "symbol"), ("EQUATE_", "symbol"),
-               ("COMMENT_", "comment"), ("FUNCTION_", "function"), ("VARIABLE_REFERENCE_", "function"),
-               ("CODE_UNIT_PROPERTY_", "data"), ("MEMORY_BYTES_", "data"), ("CODE_", "code"), ("FALLTHROUGH_", "code"),
-               ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code"}
 ROW_COMMENT_KINDS = {"eol": "comment", "pre": "pre", "post": "post", "plate": "plate", "repeatable": "repeatable"}  # CommentType name -> row field
@@ -36,56 +32,6 @@ RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a bas
 KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 
 
-class Job:
-    """A decompile request (loop thread creates it, a pool worker runs it)."""
-    def __init__(self, epoch):
-        self.cancelled, self.mon, self.epoch = False, None, epoch
-
-
-class Scan:
-    """A slow read (list_symbols, list_strings, search_*, search_memory): created by the loop thread, run by a scan worker, cancellable by request id."""
-    def __init__(self, epoch):
-        self.cancelled, self.mon, self.epoch = False, None, epoch
-
-    def cancel(self):
-        self.cancelled = True
-        if self.mon is not None:
-            self.mon.cancel()
-
-    def check(self):
-        if self.cancelled:
-            raise RpcError(CANCELLED, "cancelled")
-
-
-class Opening:
-    """The open_binary in progress. cancel() is called from the loop thread, mon is swapped by thread O."""
-    def __init__(self):
-        self.cancelled, self.mon, self.saving, self.finished = False, None, False, False
-        self.lock = threading.Lock()
-
-    def cancel(self):
-        with self.lock:
-            if self.saving:  # saving to the project is not interruptible: a half-written program must never happen
-                return False
-            self.cancelled = True
-            if self.mon is not None:
-                self.mon.cancel()
-            return True
-
-    def monitor(self, cb=None):
-        from ghidra.pyghidra import PyGhidraTaskMonitor
-        m = PyGhidraTaskMonitor(None, cb)
-        with self.lock:
-            self.mon = m
-            if self.cancelled:
-                m.cancel()
-        return m
-
-    def check(self):
-        if self.cancelled:
-            raise RpcError(CANCELLED, "open cancelled")
-
-
 STRING_VALUE_CAP = 1000
 
 
@@ -95,164 +41,30 @@ class _SymSnap:
         self.it, self.total, self.syms, self.lock = it, total, [], threading.Lock()
 
 
-class Worker:
-    def __init__(self):
-        self.decomp, self.epoch, self.busy = None, -1, False
-
-
 class Sidecar:
     def __init__(self):
-        self.loop = None
-        self.ws = None
-        self.jobs = queue.Queue()    # thread R: reads, edits, undo/redo. Never waits behind a decompile or an open.
-        self.djobs = queue.Queue()   # decompiler pool, one shared queue
-        self.program = self.results = self.consumer = self.listener = None
-        self.epoch = 0               # bumped whenever the program changes (open/close); guarded by pool_lock
-        self.pool_lock = threading.Lock()
-        self.running = set()         # decompile Jobs currently inside a worker; pool_lock
-        self.workers = []
+        self.ctx = ctx = Ctx()
         self.cache = OrderedDict()   # entry offset -> (lo, hi, result); cache_lock
         self.cache_ver = 0
         self.cache_lock = threading.Lock()
-        self.dj = {}                 # request id -> Job, loop thread only
-        self.mon_lock = threading.Lock()
-        self.opening = None          # Opening, loop thread only
         self.proj = self.gp = None
         self.proj_lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
-        self.program_id = None
-        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
-        self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
-        self.sd_lock, self.sd_started = threading.Lock(), False
-        self.sjobs = queue.Queue()   # scan workers (thread S): symbol table, strings, memory search; one shared queue
-        self.sj = {}                 # request id -> Scan, loop thread only
-        self.active = set()          # Scans currently running; pool_lock
         self.snaps = OrderedDict()   # (kind, ...) -> snapshot of a slow read, LRU; snap_lock. Dropped on any program change.
         self.snap_ver = 0
         self.snap_lock = threading.Lock()
-        self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
-        self.plock = threading.Lock()
-        self.tl = threading.local()
-        threading.Thread(target=self._worker, args=(self.jobs,), daemon=True).start()
-        if float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120")) > 0:
-            threading.Thread(target=self._snapshot_loop, daemon=True).start()
-        for _ in range(max(1, int(os.environ.get("SIDECAR_SCAN_WORKERS", "2")))):
-            threading.Thread(target=self._worker, args=(self.sjobs,), daemon=True).start()
-        for _ in range(max(1, int(os.environ.get("SIDECAR_DECOMP_WORKERS", "2")))):
-            w = Worker()
-            self.workers.append(w)
-            threading.Thread(target=self._pool_worker, args=(w,), daemon=True).start()
+        ctx.events.subscribe(self._invalidate)
+        ctx.shutdown_hooks += [lambda: self._close(), self._close_project]
+        self.server = Server(ctx, self.handle)
+        ctx.lanes.start()
 
-    # ---- worker plumbing ----
-    def _worker(self, q):
-        while True:
-            fn, fut = q.get()
-            try:
-                res, exc = fn(), None
-            except BaseException as e:  # noqa
-                res, exc = None, e
-            self._deliver(fut, res, exc)
-
-    def _snapshot_loop(self):
-        """Crash safety: every SIDECAR_SNAPSHOT_SECS, unsaved edits go to Ghidra's recovery file (what the GUI does). Unlike save it
-        keeps the undo history; the next open of the program restores them (_consume). Runs on thread R, like every program write."""
-        secs = float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120"))
-        while True:
-            time.sleep(secs)
-            try:
-                self.on_r(self._snapshot)
-            except Exception as e:  # noqa
-                log("recovery snapshot failed:", repr(e))
-
-    def _snapshot(self):
-        prog = self.program
-        if prog is not None and prog.isChanged():
-            with self.save_lock:
-                prog.getDomainFile().takeRecoverySnapshot()
-
-    def _pool_worker(self, w):
-        self.tl.w = w
-        while True:
-            try:
-                item = self.djobs.get(timeout=0.1)
-            except queue.Empty:
-                item = None
-            # dispose on the owning thread once the program this interface was opened on is gone
-            if w.decomp is not None and w.epoch != self.epoch:
-                self._dispose(w)
-            if item is None:
-                continue
-            fn, fut = item
-            try:
-                res, exc = fn(), None
-            except BaseException as e:  # noqa
-                res, exc = None, e
-            self._deliver(fut, res, exc)
-
-    @staticmethod
-    def _dispose(w):
-        d, w.decomp = w.decomp, None
-        if d is not None:
-            try:
-                d.dispose()
-            except Exception:
-                pass
-
-    @staticmethod
-    def _settle(fut, res, exc):
-        if not fut.done():
-            fut.set_exception(exc) if exc else fut.set_result(res)
-
-    def _deliver(self, fut, res, exc):
-        if isinstance(fut, concurrent.futures.Future):  # waited on by a thread, not the loop
-            self._settle(fut, res, exc)
+    def _invalidate(self, kinds, ranges, broad):
+        self.snap_clear()
+        # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
+        # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
+        if ranges is None or not kinds <= RANGE_ONLY_KINDS:
+            self.cache_clear()
         else:
-            self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
-
-    def run(self, fn, q=None):
-        fut = self.loop.create_future()
-        (q or self.jobs).put((fn, fut))
-        return fut
-
-    def on_r(self, fn):
-        """Blocking call from another thread (O, shutdown): run fn on thread R, after everything queued before it."""
-        f = concurrent.futures.Future()
-        self.jobs.put((fn, f))
-        return f.result()
-
-    def notify(self, method, params):  # thread-safe
-        def send():
-            if self.ws is not None:
-                asyncio.ensure_future(self._send(json.dumps({"jsonrpc": "2.0", "method": method, "params": params})))
-        self.loop.call_soon_threadsafe(send)
-
-    async def _send(self, s):
-        try:
-            await self.ws.send(s)
-        except Exception:
-            pass
-
-    def progress(self, phase, pct, message="", **extra):
-        self.notify("progress", {"phase": phase, "pct": pct, "message": message, **extra})
-
-    # ---- helpers ----
-    def need(self):
-        if self.program is None:
-            raise RpcError(NO_PROGRAM, "no program open")
-        return self.program
-
-    def addr(self, s, prog=None):
-        """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1."""
-        prog = prog or self.need()
-        try:
-            f = prog.getAddressFactory()
-            name, _, h = s.rpartition(":") if ":" in s else ("", "", s)
-            sp = f.getAddressSpace(name[:-1] if name.endswith(":") else name) if name else f.getDefaultAddressSpace()
-            if sp is None or not re.fullmatch(r"(0[xX])?[0-9a-fA-F]{1,16}", h):
-                raise ValueError(s)
-            off = int(h, 16)
-            return sp.getAddress(off - (1 << 64) if off >= 1 << 63 else off)
-        except Exception:
-            raise RpcError(INVALID, "bad address %r" % (s,))
+            self.cache_invalidate(ranges)
 
     def fmtr(self, prog=None):
         """-> function Address -> protocol string (the default space as "0x..", others space-qualified); one lookup of the default space."""
@@ -438,7 +250,7 @@ class Sidecar:
     def _close(self, strict=False):
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
-        prog, res, consumer, lst = self.program, self.results, self.consumer, self.listener
+        prog, res, consumer = self.program, self.results, self.consumer
         if prog is not None:  # autosave: closing must never lose edits (see protocol.md, Persistence and crash safety)
             try:
                 self._save_program(prog, "close")
@@ -457,22 +269,14 @@ class Sidecar:
                         j.mon.cancel()
             for sc in list(self.active):
                 sc.cancel()
-        if prog is not None and lst is not None:
-            try:
-                prog.removeListener(lst)
-            except Exception:
-                pass
-        self.listener = None
+        self.ctx.events.detach(prog)
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and (self.active or any(w.busy or w.decomp is not None for w in self.workers)):
             time.sleep(0.02)
         stuck = bool(self.active) or any(w.busy or w.decomp is not None for w in self.workers)
         if stuck:
             log("decompiler or scan worker still busy after 10 s: leaking the old program instead of releasing it under a live reader")
-        self.cache_clear()
-        self.snap_clear()
-        with self.plock:
-            self.pending.update(ranges=[], kinds=set(), broad=False)
+        self.ctx.events.reset()
         self.results = self.consumer = None
         if not stuck:
             if res is not None:
@@ -498,7 +302,7 @@ class Sidecar:
     def save(self):
         prog = self.need()
         saved = self._save_program(prog, "save")
-        self.undo_snap = self.undo_state(prog)
+        self.refresh_undo(prog)
         if saved:  # Ghidra's save drops the undo/redo stacks and clears dirty: tell the client (empty ranges/kinds = nothing to refetch)
             self.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.undo_snap})
         return {"saved": saved}
@@ -512,10 +316,9 @@ class Sidecar:
         prog.clearUndo()  # the analysis transaction must not be undoable
         # follow-on analysis would write from the manager's own thread, outside R and outside our transactions
         AutoAnalysisManager.getAnalysisManager(prog).setIgnoreChanges(True)
-        lst = self._make_listener(prog)
-        prog.addListener(lst)  # only now: progress covers the initial analysis
-        self.listener, self.results, self.consumer = lst, res, consumer
-        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
+        self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
+        self.results, self.consumer = res, consumer
+        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}  # just cleared and saved; no Program read on thread O
         self.program_id = key
         with self.pool_lock:
             self.epoch += 1
@@ -595,7 +398,7 @@ class Sidecar:
                 res, exc = self._do_open(path, op, opts, disabled), None
             except BaseException as e:  # noqa
                 res, exc = None, e
-            self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
+            self.loop.call_soon_threadsafe(self.ctx.lanes.settle, fut, res, exc)
         threading.Thread(target=body, daemon=True, name="open").start()
         try:
             return await fut
@@ -624,10 +427,10 @@ class Sidecar:
             if persisted:
                 self.progress("import", 100, "loading persisted analysis")
                 try:
-                    prog, consumer = self._consume(proj, "/" + key)
+                    prog, consumer = pyghidra.consume_program(proj, "/" + key)
                 except Exception as e:  # noqa
                     # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
-                    if op.cancelled or self._not_corruption(e):
+                    if op.cancelled or re.search(r"lock|in use|already open|upgrade", repr(e), re.I):
                         raise  # not corruption: never delete a program that may hold saved edits
                     log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
                     proj.getProjectData().getFile("/" + key).delete()
@@ -645,9 +448,8 @@ class Sidecar:
             try:
                 self._publish(prog, res, consumer, op, key)
             except BaseException:
-                if self.listener is not None:
-                    prog.removeListener(self.listener)
-                self.listener = self.results = self.consumer = None
+                self.ctx.events.detach(prog)
+                self.results = self.consumer = None
                 raise
             self.progress("ready", 100, "ready")
             self.open_secs = time.monotonic() - t0
@@ -676,34 +478,6 @@ class Sidecar:
             raise RpcError(INTERNAL, "open failed: %s" % e)
         finally:
             self.proj_lock.release()
-
-    @staticmethod
-    def _not_corruption(e):
-        """True for load failures that say nothing about the file being damaged: locked, a Ghidra version mismatch (older or newer
-        build than the one that saved it), or the JVM running out of memory."""
-        if re.search(r"lock|in use|already open|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
-            return True
-        try:
-            name = str(e.getClass().getSimpleName())
-            return name == "OutOfMemoryError" or (name == "VersionException" and int(e.getVersionIndicator()) in (1, 2))  # OLDER, NEWER
-        except Exception:
-            return False
-
-    @staticmethod
-    def _consume(proj, path):
-        """pyghidra.consume_program, but with okToRecover: unsaved edits of a crashed session (see _snapshot_loop) come back."""
-        from java.lang import Object
-        from ghidra.program.model.listing import Program
-        from ghidra.util.task import TaskMonitor
-        consumer = Object()
-        df = proj.getProjectData().getFile(path)
-        if df is None:
-            raise FileNotFoundError(path)
-        dobj = df.getDomainObject(consumer, True, True, TaskMonitor.DUMMY)
-        if not Program.class_.isAssignableFrom(dobj.getClass()):
-            dobj.release(consumer)
-            raise TypeError("%s is not a Program" % path)
-        return dobj, consumer
 
     def _import_and_analyze(self, path, key, proj, op, opts, disabled):
         from ghidra.app.util.importer import ProgramLoader
@@ -802,85 +576,6 @@ class Sidecar:
         self.progress("saving", -1, "saving to project")
         res.save(TaskMonitor.DUMMY)
 
-    # ---- change events (listener runs on Ghidra's event thread; it only copies data and never touches the DB) ----
-    def _make_listener(self, prog):
-        from jpype import JClass, JImplements, JObject, JOverride
-        sc = self
-
-        @JImplements("ghidra.framework.model.DomainObjectListener")
-        class L:
-            @JOverride
-            def domainObjectChanged(self, ev):
-                try:
-                    sc._on_events(ev)
-                except Exception as e:  # noqa
-                    log("listener error", repr(e))
-                    sc._record(set(ALL_KINDS), None)
-        # Ghidra keeps listeners in a weak set: hold a strong reference to the *Java* proxy, or a GC silently drops it
-        return JObject(L(), JClass("ghidra.framework.model.DomainObjectListener"))
-
-    def _on_events(self, ev):
-        from ghidra.program.util import ProgramChangeRecord
-        kinds, ranges, broad = set(), [], False
-        for r in ev:
-            name = str(r.getEventType())
-            if not isinstance(r, ProgramChangeRecord):  # DomainObjectEvent: RESTORED (undo/redo), SAVED, ... : anything may have changed
-                if name == "RESTORED":
-                    kinds.update(ALL_KINDS)
-                    broad = True
-                continue
-            kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
-            s, e = r.getStart(), r.getEnd()
-            if s is None or not s.isMemoryAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
-                broad = True  # type events, stack/register/external addresses, ...: no usable range
-            else:
-                ranges.append(self._rng(s, e or s))
-        if not kinds:
-            return
-        self._record(kinds, None if broad else ranges)
-
-    def _record(self, kinds, ranges):
-        self.snap_clear()
-        # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
-        # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
-        # the cache is keyed by default-space offsets (shortcut: a function inside an overlay clears everything, upgrade by keying on the Address)
-        dname = str(self.program.getAddressFactory().getDefaultAddressSpace().getName()) if self.program is not None else ""
-        if ranges is None or not kinds <= RANGE_ONLY_KINDS or any(sp != dname for sp, _, _ in ranges):
-            self.cache_clear()
-        else:
-            self.cache_invalidate([(a, b) for _, a, b in ranges])
-        with self.plock:
-            p = self.pending
-            p["kinds"] |= kinds
-            if ranges is None:
-                p["broad"] = True
-            else:
-                p["ranges"].extend(ranges)
-            if p["armed"]:
-                return
-            p["armed"] = True
-        self.loop.call_soon_threadsafe(lambda: self.loop.call_later(0.05, self._emit))
-
-    def _emit(self):
-        with self.plock:
-            p = self.pending
-            kinds, broad, ranges = sorted(p["kinds"], key=ALL_KINDS.index), p["broad"], sorted(p["ranges"])
-            p.update(ranges=[], kinds=set(), broad=False, armed=False)
-        merged = []
-        for sp, s, e in ranges:
-            if merged and merged[-1][0] == sp and s <= merged[-1][2] + 1:
-                merged[-1][2] = max(merged[-1][2], e)
-            else:
-                merged.append([sp, s, e])
-        if broad or len(merged) > 1000:
-            out = None
-        else:
-            f, prog = self.fmtr(), self.program
-            def at(sp, off):
-                return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
-            out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
-        self.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": self.undo_snap})
-
     # ---- decompile cache (shared by the pool and by the event listener) ----
     def cache_clear(self):
         with self.cache_lock:
@@ -914,22 +609,6 @@ class Sidecar:
             return None
         return {"name": str(f.getName()), "entry": self.fmt(f.getEntryPoint()),
                 "size": int(f.getBody().getNumAddresses()), "signature": str(f.getSignature().getPrototypeString())}
-
-    # ---- slow reads: scan workers (thread S). They never run on R, so a long scan cannot delay listing fetches. ----
-    @contextlib.contextmanager
-    def scanning(self, scan):
-        with self.pool_lock:
-            prog = self.program
-            if scan.cancelled or scan.epoch != self.epoch:  # cancelled while queued, or the program was closed/swapped meanwhile
-                raise RpcError(CANCELLED, "cancelled")
-            if prog is None:
-                raise RpcError(NO_PROGRAM, "no program open")
-            self.active.add(scan)
-        try:
-            yield prog
-        finally:
-            with self.pool_lock:
-                self.active.discard(scan)
 
     def snap_clear(self):
         with self.snap_lock:
@@ -1194,7 +873,7 @@ class Sidecar:
             items = self.snap(("str", minLength), lambda: self._scan_strings(prog, minLength, scan))
             q = query.strip().lower()
             if q:
-                items = [i for i in items if q in i["value"].lower()]  # not cached: one snapshot per typed prefix would evict the symbol snapshots from the LRU
+                items = self.snap(("str", minLength, q), lambda: [i for i in items if q in i["value"].lower()])
             return {"total": len(items), "items": items[offset:offset + limit]}
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
@@ -1250,24 +929,20 @@ class Sidecar:
                 last = ad
             return {"items": items, "next": None if done or last is None else fa(last.next() or last)}
 
-    def list_data_types(self, query, limit=100, scan=None):
-        """Scan worker (thread S): walks every program and built-in type, so it must not hold up listing fetches on R."""
+    def list_data_types(self, query, limit=100):
         from ghidra.program.model.data import BuiltInDataTypeManager
-        with self.scanning(scan) as prog:
-            text_arg(query, "query")
-            limit, q = lim(limit, 100, 1000), query.strip().lower()
-            hits, seen, n = [], set(), 0
-            for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
-                for dt in dtm.getAllDataTypes():
-                    n += 1
-                    if n & 255 == 0:
-                        scan.check()
-                    name = str(dt.getName())
-                    if q in name.lower() and str(dt.getPathName()) not in seen:
-                        seen.add(str(dt.getPathName()))
-                        hits.append((0 if name.lower().startswith(q) else 1, len(name), dict(self._dt_node(dt), source=src)))
-            hits.sort(key=lambda h: h[:2])
-            return [h[2] for h in hits[:limit]]
+        prog = self.need()
+        text_arg(query, "query")
+        limit, q = lim(limit, 100, 1000), query.strip().lower()
+        hits, seen = [], set()
+        for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
+            for dt in dtm.getAllDataTypes():
+                n = str(dt.getName())
+                if q in n.lower() and str(dt.getPathName()) not in seen:
+                    seen.add(str(dt.getPathName()))
+                    hits.append((0 if n.lower().startswith(q) else 1, len(n), dict(self._dt_node(dt), source=src)))
+        hits.sort(key=lambda h: h[:2])
+        return [h[2] for h in hits[:limit]]
 
     # ---- data types: tree, detail, editors (reads on R; edits are one transaction each) ----
     @staticmethod
@@ -1586,17 +1261,11 @@ class Sidecar:
                 self._cmd(CreateDataCmd(a, True, False, dt))(p)
         self.edit("Create structure %s" % name, go)
         if apply:
-            self._record({"data"}, [self._rng(a, a.add(length - 1))])
+            self.ctx.events.record({"data"}, [(a.getOffset(), a.getOffset() + length - 1)])
         return {"path": str(dtm.getDataType(cp, name).getPathName())}
 
     def undo_state(self, prog=None):
-        prog = prog or self.need()
-        o = {"canUndo": bool(prog.canUndo()), "canRedo": bool(prog.canRedo()), "dirty": bool(prog.isChanged())}
-        if o["canUndo"]:
-            o["undoName"] = str(prog.getUndoName())
-        if o["canRedo"]:
-            o["redoName"] = str(prog.getRedoName())
-        return o
+        return undo_state(prog or self.need())
 
     def listing_info(self):
         prog = self.need()
@@ -1743,32 +1412,7 @@ class Sidecar:
             rows.append(row)
         return rows
 
-    # ---- edits (thread R). One transaction each; its name is the undo label. ----
-    def edit(self, name, fn):
-        """Run fn(prog) in one transaction, then flush Ghidra's event queue so the cache invalidation (listener) has
-        happened before the reply is sent: a decompile requested after the reply can never see a stale entry."""
-        import jpype
-        prog = self.need()
-        tx, ok = prog.startTransaction(name), False
-        try:
-            r = fn(prog)
-            ok = True
-        except jpype.JException as e:
-            raise java_error(e)
-        finally:
-            prog.endTransaction(tx, ok)  # not ok => rolled back, nothing on the undo stack
-            prog.flushEvents()  # also on rollback: a decompile that saw the half-applied state must not be cached
-        self.undo_snap = self.undo_state(prog)
-        return r
-
     _name_arg = staticmethod(name_arg)
-
-    @staticmethod
-    def _cmd(cmd):
-        def run(prog):
-            if not cmd.applyTo(prog):
-                raise RpcError(INVALID, str(cmd.getStatusMsg() or "command failed"))
-        return run
 
     def rename_symbol(self, address, newName):
         from ghidra.app.cmd.label import RenameLabelCmd
@@ -1851,8 +1495,6 @@ class Sidecar:
         if not prog.getMemory().contains(a):
             raise RpcError(INVALID, "address %s is not in memory" % address)
 
-        out = {}
-
         def go(p):
             dtm = p.getDataTypeManager()
             dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
@@ -1865,9 +1507,9 @@ class Sidecar:
                 raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
             self._cmd(CreateDataCmd(a, True, False, dt))(p)
-            out["range"] = self._rng(a, a.add(dt.getLength() - 1))
+            self._data_ranges = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
         self.edit("Define data", go)
-        self._record({"data"}, [out["range"]])
+        self.ctx.events.record({"data"}, [self._data_ranges])
         return {}
 
     def clear_code(self, address, length=None):
@@ -1893,15 +1535,8 @@ class Sidecar:
         if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
             raise RpcError(INVALID, "no instructions or defined data in range")
         self.edit("Clear code", lambda p: self._cmd(ClearCmd(view))(p))
-        self._record({"code", "data"}, [self._rng(lo, hi)])
+        self.ctx.events.record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
         return {}
-
-    def _function(self, entry):
-        prog = self.need()
-        f = prog.getFunctionManager().getFunctionAt(self.addr(entry))
-        if f is None:
-            raise RpcError(NOT_FOUND, "no function at %s" % entry)
-        return prog, f
 
     def set_function_signature(self, entry, signature):
         from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
@@ -2052,8 +1687,7 @@ class Sidecar:
         except Exception as e:  # noqa
             raise RpcError(INTERNAL, "%s failed: %s" % ("undo" if undo else "redo", e))
         prog.flushEvents()  # RESTORED -> program_changed (ranges null) and cache clear
-        self.undo_snap = self.undo_state(prog)
-        return self.undo_snap
+        return self.ctx.session.refresh_undo(prog)
 
     def undo(self):
         return self._undo_redo(True)
@@ -2088,7 +1722,7 @@ class Sidecar:
                     self.cache.move_to_end(key)
                     return {**hit[2], "cached": True}
             if w.decomp is None or w.epoch != epoch:
-                self._dispose(w)
+                self.ctx.lanes.dispose(w)
                 d = DecompInterface()
                 if not d.openProgram(prog):
                     raise RpcError(INTERNAL, "decompiler failed to open program: %s" % d.getLastMessage())
@@ -2180,9 +1814,9 @@ class Sidecar:
     def cancel_open(self):
         return {"cancelled": bool(self.opening is not None and self.opening.cancel())}
 
-    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory", "list_data_types")  # scan workers, see the module docstring
+    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory")  # scan workers, see the module docstring
     R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable",
-                 "xrefs_from", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
+                 "xrefs_from", "list_data_types", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
                  "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
                  "define_data", "clear_code", "save", "dt_sources", "dt_children", "get_data_type", "create_data_type",
                  "delete_data_type", "rename_data_type", "edit_struct", "edit_enum", "create_struct_from_data", "auto_create_structure")
@@ -2264,52 +1898,23 @@ class Sidecar:
         except Exception:
             pass
 
-    async def conn(self, ws):
-        if self.ws is not None:  # shortcut: newest client wins nothing; second client just rejected
-            await ws.close(1013, "one client at a time")
-            return
-        self.ws = ws
-        try:
-            async for raw in ws:
-                asyncio.create_task(self.handle(ws, raw))
-        finally:
-            self.ws = None
 
-    def shutdown(self):
-        """stdin EOF / SIGTERM. Never exits while a save is running; the close on thread R saves unsaved edits."""
-        with self.sd_lock:
-            if self.sd_started:
-                return
-            self.sd_started = True
-        if self.opening is not None:
-            self.opening.cancel()
-        with self.pool_lock:
-            for j in list(self.running):  # let running decompiles return so dispose() can reach the native child
-                j.cancelled = True
-                if j.mon is not None:
-                    j.mon.cancel()
-        with self.mon_lock:
-            for j in list(self.dj.values()):  # queued decompiles and a variable edit running on R
-                j.cancelled = True
-                if j.mon is not None:
-                    j.mon.cancel()
-        for sc in list(self.sj.values()):
-            sc.cancel()
+# Temporary forwarding to the runtime objects until the domains move out (step 5): attributes and the helpers the methods call on self.
+def _fwd(target, names, rename=None):
+    for n in names:
+        a = (rename or {}).get(n, n)
+        setattr(Sidecar, n, property(lambda s, a=a: getattr(getattr(s.ctx, target) if target else s.ctx, a),
+                                     lambda s, v, a=a: setattr(getattr(s.ctx, target) if target else s.ctx, a, v)))
 
-        op = self.opening
-        while op is not None and op.saving and not op.finished:
-            time.sleep(0.02)  # never exit mid-save: a half-written project file would load as "persisted"
-        t0 = time.monotonic()
-        f = concurrent.futures.Future()
-        def close_all():
-            self._close()
-            self._close_project()  # releases the project so the lock files go away
-        self.jobs.put((close_all, f))  # close (and autosave) on thread R, like every other program change
-        # R may be busy with a long edit; give up only if it is not saving (Electron's SIGKILL is the backstop)
-        while not f.done() and (time.monotonic() - t0 < 45 or self.save_lock.locked()):
-            time.sleep(0.02)
-        log("shutdown: close finished in %.2fs" % (time.monotonic() - t0))
-        os._exit(0)
+
+_fwd("session", ["program", "results", "consumer", "epoch", "program_id", "undo_snap", "save_lock"], {})
+_fwd("session", ["pool_lock"], {"pool_lock": "lock"})
+_fwd("lanes", ["jobs", "djobs", "sjobs", "workers", "running", "active", "tl", "dj", "sj", "opening", "mon_lock"])
+_fwd(None, ["loop"])
+for _n, _t in (("need", "session"), ("addr", "session"), ("edit", "session"), ("_cmd", "session"), ("_function", "session"),
+               ("refresh_undo", "session"), ("run", "lanes"), ("on_r", "lanes"), ("scanning", "lanes"), ("notify", None), ("progress", None)):
+    _a = {"_cmd": "cmd", "_function": "function"}.get(_n, _n)
+    setattr(Sidecar, _n, property(lambda s, _t=_t, _a=_a: getattr(getattr(s.ctx, _t) if _t else s.ctx, _a)))
 
 
 def analysis_disabled():
@@ -2354,31 +1959,18 @@ def main():
 
     sc = Sidecar()
 
-    async def serve():
-        sc.loop = asyncio.get_running_loop()
-        token = os.environ.get("SIDECAR_TOKEN")  # empty only with SIDECAR_ALLOW_NO_AUTH=1 (checked in main)
-
-        def guard(conn, request):  # a web page can reach 127.0.0.1; require the secret URL path set by Electron main
-            if token and request.path != "/" + token:
-                return conn.respond(403, "forbidden\n")
-
-        async with websockets.serve(sc.conn, "127.0.0.1", 0, max_size=None, process_request=guard) as srv:
-            port = srv.sockets[0].getsockname()[1]
-            print(port, file=out, flush=True)
-            await asyncio.Future()
-
     def watch_stdin():
         try:
             while sys.stdin.buffer.read(4096):
                 pass
         except Exception:
             pass
-        sc.shutdown()
+        sc.server.shutdown()
 
     threading.Thread(target=watch_stdin, daemon=True).start()
     for _sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(_sig, lambda *_: threading.Thread(target=sc.shutdown, daemon=True).start())
-    asyncio.run(serve())
+        signal.signal(_sig, lambda *_: threading.Thread(target=sc.server.shutdown, daemon=True).start())
+    asyncio.run(sc.server.serve(out))
 
 
 if __name__ == "__main__":
