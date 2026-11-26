@@ -1110,9 +1110,9 @@ class Sidecar:
         timeoutSecs = lim(timeoutSecs, 30)
         with self.pool_lock:
             prog, epoch = self.program, self.epoch
-            if prog is None:
             if job.cancelled or job.epoch != epoch:  # cancelled while queued, or the program was closed/swapped meanwhile
                 raise RpcError(CANCELLED, "decompile cancelled")
+            if prog is None:
                 raise RpcError(NO_PROGRAM, "no program open")
             w.busy = True
             self.running.add(job)
@@ -1233,12 +1233,12 @@ class Sidecar:
                 result = self.cancel_open(**params)
             elif method == "open_binary":
                 result = await self.open_binary(**params)
-            elif method == "decompile" or method in self.R_METHODS:
             elif method in self.P_METHODS:
                 if self.opening is not None and method != "list_languages":
                     raise RpcError(BUSY, "open_binary in progress")
                 fn = getattr(self, method)
                 result = await self.run(lambda: fn(**params))
+            elif method == "decompile" or method in self.R_METHODS:
                 if self.opening is not None:  # fail fast: never queue behind an open
                     raise RpcError(NO_PROGRAM, "open_binary in progress")
                 if method == "decompile":
@@ -1308,6 +1308,9 @@ class Sidecar:
 
 
 def main():
+    if not os.environ.get("SIDECAR_TOKEN") and os.environ.get("SIDECAR_ALLOW_NO_AUTH") != "1":
+        print("SIDECAR_TOKEN is not set: refusing to start without auth (SIDECAR_ALLOW_NO_AUTH=1 is the test-only escape)", file=sys.stderr)
+        sys.exit(2)
     # keep real stdout for the port line only; JVM/Ghidra chatter goes to stderr
     out = os.fdopen(os.dup(1), "w")
     os.dup2(2, 1)
@@ -1320,9 +1323,6 @@ def main():
     import pyghidra
     from pyghidra.launcher import HeadlessPyGhidraLauncher
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(os.environ["GHIDRA_INSTALL_DIR"]))
-    if not os.environ.get("SIDECAR_TOKEN") and os.environ.get("SIDECAR_ALLOW_NO_AUTH") != "1":
-        print("SIDECAR_TOKEN is not set: refusing to start without auth (SIDECAR_ALLOW_NO_AUTH=1 is the test-only escape)", file=sys.stderr)
-        sys.exit(2)
     if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
     launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
