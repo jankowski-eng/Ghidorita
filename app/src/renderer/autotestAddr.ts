@@ -1,5 +1,4 @@
 import type { FunctionInfo, Token } from "../../../protocol";
-import { rpc } from "./client";
 import { byLabel, isMock, press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Round 8 flow of the autotest: X on a decompiler global opens the references to its address, X on a decompiler temporary (iVar1, uVar3)
@@ -30,17 +29,17 @@ export async function runAddrFlow(file: string, fl: FunctionInfo[], c: AutotestC
   let glob: { f: FunctionInfo; t: Token; text: string; refs: number } | null = null, temp: { f: FunctionInfo; t: Token; text: string; uses: { from: string; kind: string }[] } | null = null;
   for (const f of [...fl].sort((a, b) => b.size - a.size).slice(0, 120)) {
     if (glob && temp) break;
-    const d = await rpc.call("decompile", { entry: f.entry }).catch(() => null);
+    const d = await c.program().decompiler.decompile({ entry: f.entry }).result.catch(() => null);
     if (!d) continue;
     if (!glob) {
       const t = d.tokens.find((t) => t.varAddress);
-      const refs = t ? await rpc.call("xrefs_to", { address: t.varAddress!, limit: 500 }) : [];
+      const refs = t ? await c.program().references.xrefsTo({ address: t.varAddress!, limit: 500 }) : [];
       if (t && refs.length) glob = { f, t, text: d.text, refs: refs.length };
     }
     if (!temp) {
       for (const name of new Set(d.tokens.filter((t) => t.varName && TEMP.test(t.varName) && !t.varAddress).map((t) => t.varName!))) {
-        if ((await rpc.call("xrefs_to_variable", { entry: f.entry, name })).length) continue; // a program variable: the other path
-        const uses = await rpc.call("variable_uses", { entry: f.entry, name });
+        if ((await c.program().references.xrefsToVariable({ entry: f.entry, name })).length) continue; // a program variable: the other path
+        const uses = await c.program().references.variableUses({ entry: f.entry, name }).result;
         const t = d.tokens.find((t) => t.varName === name && uses.some((u) => u.from === t.address));
         if (t && uses.some((u) => u.kind === "write") && uses.some((u) => u.kind === "read")) { temp = { f, t, text: d.text, uses }; break; }
       }
@@ -89,7 +88,7 @@ export async function runAddrFlow(file: string, fl: FunctionInfo[], c: AutotestC
     setSelect(d.querySelector<HTMLSelectElement>('select[aria-label="Analysis profile"]')!, "fast");
     press(bi, "Enter");
     await waitFor(() => !dlg("Import binary") && c.status().opened && !c.status().opening, 300000, "raw import");
-    const info = await rpc.call("listing_info", {});
+    const info = await c.program().listing.info();
     need(info.ranges[0].start === "0xffffffff80000000", "raw blob range " + JSON.stringify(info.ranges[0]));
     const target = "0xffffffff80000100";
     c.command({ type: "goto" });

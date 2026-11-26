@@ -1,18 +1,15 @@
-import type { Methods } from "../../../protocol";
-import { rpc } from "./client";
-import { RpcError } from "./backend";
+import { isFailure, isObsolete, type Job } from "./backend";
 
-/** Scan requests (list_symbols, list_strings, search_memory) that can be cancelled together: the panel cancels its stale ones when its query changes. */
+/** Cancel the jobs owned by a view when its query changes or it unmounts. */
 export function scanner() {
   const live = new Set<() => void>();
   return {
-    call<M extends keyof Methods>(method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
-      const { result, cancel } = rpc.callCancellable(method, params);
+    run<T>({ result, cancel }: Job<T>): Promise<T> {
       live.add(cancel);
       return result.finally(() => live.delete(cancel));
     },
-    cancelAll() { for (const c of live) c(); live.clear(); },
+    cancelAll() { for (const cancel of live) cancel(); live.clear(); },
   };
 }
-export const isCancelled = (e: unknown) => e instanceof RpcError && e.code === -32002;
-export const isNoProgram = (e: unknown) => e instanceof RpcError && e.code === -32001;
+export const isCancelled = (e: unknown) => isFailure(e, "cancelled");
+export const isNoProgram = isObsolete;

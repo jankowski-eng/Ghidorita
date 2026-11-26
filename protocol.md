@@ -1,21 +1,61 @@
-# Protocol (spike)
+# Provider protocol
 
 JSON-RPC 2.0 over WebSocket, text frames, one JSON object per frame. Types: `protocol.ts` (authoritative for shapes).
 
 ## Process contract
-- Electron spawns `python sidecar/main.py`; the sidecar binds `127.0.0.1` on an ephemeral port and prints the port as the **first stdout line** (just the integer). Everything else goes to stderr.
-- The sidecar exits when stdin closes (Electron died) or on SIGTERM. **Before exiting it saves unsaved edits** and closes the program and project. Exit 0 means the close completed; a save failure exits 1 and a queued close that has not started within 45 seconds exits 2. One client at a time. One sidecar per projects dir: a second one answers project-touching requests with `ProjectLocked` (see Errors).
-- Shutdown contract for clients: call `save` first (to show progress), then close stdin (or SIGTERM), and give the process a long grace (tens of seconds) before SIGKILL: a SIGKILL loses everything not yet saved (see Persistence and crash safety).
-- Addresses are **unsigned** hex strings (up to 64 bit; the sidecar never sends a negative offset). Default space: `"0x401000"` (lowercase, no padding). Other spaces are space-qualified: `"<space>:<hex>"`, overlay spaces `"<space>::<hex>"` (Ghidra's spelling): `"code:1000"`, `"OVL1::1000"`. Split at the last `:`, a trailing `:` belongs to the space name. Input also takes `"ram:401000"` (qualified default space) and, when the default space is segmented (x86 real mode), Ghidra's `"1000:0042"`; such addresses are sent back as the linear `"0x10042"`; an unknown space or an offset beyond 2^64-1 is `InvalidArgument`. There are no row indexes: the listing is addressed by address only. Every method that takes or returns an address uses this form, including `list_functions` entries and function-based panels (functions inside overlay or other spaces have qualified `entry` values).
 
-## Requests (client → server; replies are standard JSON-RPC results)
-Params/results are in `protocol.ts`; all addresses are lowercase hex strings. Missing or malformed params fail with `InvalidArgument` (-32602). Every method except `open_binary`, `cancel_open`, `cancel_decompile`, `import_candidates`, `list_languages`, `list_programs`, `delete_program` and `close_program` fails with `NoProgram` until a program is open (and while an open is in progress).
+Electron launches the selected provider as a child process. Bind only to `127.0.0.1` on an ephemeral port and print that port as the first stdout line. Send diagnostics to stderr. Reject WebSocket upgrades unless the path is exactly `/<SIDECAR_TOKEN>`, and allow one client at a time. Electron keeps stdin open for the life of the process. Exit cleanly on EOF or SIGTERM after releasing resources and finishing any required saves. Use a nonzero exit status if shutdown loses work.
+
+## Discovery and sessions
+
+The client first sends `provider_info {}`. The result is `{version: 1, provider, capabilities, recovery?}`. A client must reject an unsupported major version before opening a file. It can ignore additive fields and capabilities it does not recognize. Provider IDs must be stable for the provider's lifetime and across launches. When available, recovery includes `snapshotIntervalSeconds`.
+
+Version 1 requires these operations:
+
+| Method | Params | Result |
+|---|---|---|
+| `active_session` | `{}` | `{sessionId, programId, name}` or `null`. Read-only and callable during an open. |
+| `open_binary` | `{path}` with optional advertised import options | `{sessionId, programId, name, persisted}`. A successful open publishes a new session. |
+| `cancel_open` | `{id}` | `{cancelled}`. The ID is the JSON-RPC ID of the matching open. |
+| `close_program` | `{}` | `{}`. On success there is no active session. |
+| `list_functions` | `{}` | Function summaries in traversal order. `[]` is valid. |
+| `get_function_at` | `{address}` | A function containing the address or `null`. |
+| `listing_info` | `{}` | Ordered, non-overlapping ranges and their summed byte length, using safe integers for sizes. An empty listing has no ranges and zero bytes. |
+| `listing_rows` | `{address, count, direction?}` | A page in traversal order. See [Listing rows](#listing-pages). |
+
+`programId` is an opaque provider key. Scope stored keys to the provider and give each provider its own storage. `sessionId` identifies one active open, including when the same stored program is reopened. Every program-scoped request, including `close_program`, must put that ID on the JSON-RPC envelope alongside `id` and `method`. Discovery, open, active-session queries, import choices, project catalog requests, and cancellation requests are unscoped. Reject a missing or stale session with `StaleSession` (-32007) and recheck ownership before committing queued or prepared writes. Clients must discard results, notifications, and cached data from obsolete sessions.
+
+Only one open can run at once. When an open reports progress, include its JSON-RPC request ID in `progress.openId`. A successful cancellation makes that open fail with `Cancelled` (-32002). Return `cancelled: false` for an unmatched, finished, or non-cancellable open. On replacement failure, `active_session` tells the client whether the previous session survived. A failed autosave must retain that session and its dirty edits. A successful open remains committed if a subsequent listing read fails, so the client can retry the read on the same session.
+
+Addresses are canonical unsigned hex strings, up to 64 bits. Use lowercase offsets without padding, for example `0x401000` in the default space, `code:1000` in another space, or `OVL1::1000` for an overlay. The last colon separates the offset, and the full prefix identifies the space. Keep spaces grouped in the provider's order and ranges ascending within each space. Pages follow that order in either direction, skip gaps, and return rows in traversal order even for backward reads. For a forward page, include a row containing the anchor, or start at the next row. For a backward page, exclude the anchor row. A short page marks the corresponding end. Providers accept counts through 1000. PyGhidra also accepts Ghidra-specific address aliases.
+
+### Optional capabilities
+
+Advertise only implemented groups. Operations in the following reference belong to PyGhidra unless listed in the browsing minimum. Providers choose their own scheduling and keep batch reads responsive during slow optional work.
+
+| Capability | Operations |
+|---|---|
+| `importOptions` | `import_candidates`, `list_languages`. Return supported choices, the preferred candidate, and any profiles and default profile. |
+| `decompile` | `decompile`, `cancel_decompile`. Token columns use UTF-16 code units. |
+| `references`, `variableReferences` | `xrefs_to`, `xrefs_from`. Variable references also need `xrefs_to_variable`, `variable_uses` and `cancel_decompile`. |
+| `symbolSearch`, `symbolTable`, `strings`, `memorySearch` | `search_symbols`, `list_symbols`, `list_strings`, `search_memory` respectively, with `cancel_search`. |
+| `editing` | `get_comments`, `rename_symbol`, `create_label`, `set_comment`, `create_function`, `set_function_signature`, `clear_code`. |
+| `variableEditing` | `rename_variable`, `retype_variable`, `auto_create_structure`. Requires decompilation. |
+| `undo`, `save` | `undo_state`, `undo`, `redo` and `save` respectively. Save reports whether it ended the undo history. |
+| `dataTypes`, `typeEditing` | Type reads including `list_data_types` with `cancel_search`, detail and category reads. Editing includes type mutations, `define_data` and `create_struct_from_data`. |
+| `projects`, `recovery`, `coverage` | Project listing and removal, recovery snapshots, and coverage parsing respectively. |
+
+### PyGhidra compatibility
+
+The existing unversioned PyGhidra client tools continue to work. Sending discovery opts a connection into version 1, including required session IDs and an explicit open ID for cancellation. The desktop app requires version 1 discovery. PyGhidra's project paths, persistence keys, and recovery format remain compatible.
+
+## PyGhidra method reference
 
 ### Open / decompile / listing
 | method | params | result | semantics / errors |
 |---|---|---|---|
-| `open_binary` | `{path, loader?, language?, compilerSpec?, baseAddress?, profile?}` | `{programId, name, persisted}` | Options: see *Import options* below. `programId` is the file's sha256 (default import) or `sha256-<12 hex>` (explicit options). `persisted` is true when loaded from the project. Otherwise the sidecar imports, analyzes, and saves. It emits `progress` and replies after the swap. Validation, cancellation, and load or import failures preserve the current session and its undo history. Saving the current program is part of the swap. If that save fails, the current program stays open and the staged replacement may already be stored. An unreadable stored program is preserved and reported as `Internal` with its ID. `Busy` if another open is running. |
-| `cancel_open` | `{}` | `{cancelled}` | Cancels the running `open_binary` (it fails with `Cancelled`, nothing is saved). `false` if no open is running. |
+| `open_binary` | `{path, loader?, language?, compilerSpec?, baseAddress?, profile?}` | `{sessionId, programId, name, persisted}` | Options: see *Import options* below. `programId` is the file's sha256 (default import) or `sha256-<12 hex>` (explicit options). `persisted` is true when loaded from the project. Otherwise the sidecar imports, analyzes, and saves. It emits `progress` and replies after the swap. Validation, cancellation, and load or import failures preserve the current session and its undo history. Saving the current program is part of the swap. If that save fails, the current program stays open and the staged replacement may already be stored. An unreadable stored program is preserved and reported as `Internal` with its ID. `Busy` if another open is running. |
+| `cancel_open` | `{id}` | `{cancelled}` | Cancels the running `open_binary` (it fails with `Cancelled`, nothing is saved). `false` if no open is running. |
 | `list_functions` | `{}` | `[{name, entry, size, source}]` | Every non-external function of every space, in Ghidra's address order (spaces in space order, ascending inside a space). `entry` is a protocol address. `source` = where the name came from: `user`, `analysis`, `imported`, `default`. |
 | `decompile` | `{entry, timeoutSecs?=30}` | `{text, tokens[], cached}` | `NotFound` if no function at `entry`; `Timeout` after `timeoutSecs` (the client may retry with a long one, "decompile anyway"); `Cancelled`. A function body over ~30 KB (`size` from `list_functions`) can take a minute or more: clients warn first. |
 | `cancel_decompile` | `{id}` | `{cancelled}` | Cancels the `decompile`, `variable_uses`, `rename_variable` or `retype_variable` request with that JSON-RPC id, queued or running; that request fails with `Cancelled` (a cancelled variable edit writes nothing). `false` if unknown or finished. |
@@ -25,9 +65,9 @@ Params/results are in `protocol.ts`; all addresses are lowercase hex strings. Mi
 ### Import, save, close, project
 | method | params | result | semantics / errors |
 |---|---|---|---|
-| `import_candidates` | `{path}` | `{candidates:[{loader, language, compilerSpec, preferred, acceptsBaseAddress}], sizeBytes, entropy}` | The LoadSpecs Ghidra offers for the file (from PyGhidra's `ProgramLoader`/loader `findSupportedLoadSpecs`, not reimplemented). Exactly one `preferred` when non-empty (Ghidra's preferred spec). `language`/`compilerSpec` are `null` when the loader needs the user to choose (Raw Binary). Empty list = nothing recognises the file (only Raw Binary would; `loader: "Raw Binary"` is always valid in `open_binary`). "Raw Binary" appears once (language/compilerSpec `null`, `acceptsBaseAddress` true, never preferred) next to the recognising loaders. `entropy` = Shannon entropy (bits/byte, 0-8) of up to 48 evenly spaced slices, sampled (16 KiB read at each slice start), so the cost does not grow with the file; 7.5+ looks packed or encrypted. `sizeBytes` is the file size (the UI defaults to the fast profile above ~20 MB). Needs no program, fails `Busy` while an open runs, `NotFound` if the file is missing. |
+| `import_candidates` | `{path}` | `{candidates:[{loader, language, compilerSpec, preferred, acceptsBaseAddress}], sizeBytes, entropy, profiles?, defaultProfile?, note?}` | The LoadSpecs Ghidra offers for the file (from PyGhidra's `ProgramLoader`/loader `findSupportedLoadSpecs`, not reimplemented). Return the preferred spec with `preferred: true`. Version 1 includes a preferred raw import choice if no loader recognizes the file. `language`/`compilerSpec` are `null` when the loader needs the user to choose (Raw Binary). "Raw Binary" appears once (language/compilerSpec `null`, `acceptsBaseAddress` true, never preferred) next to the recognising loaders. `entropy` = Shannon entropy (bits/byte, 0-8) of up to 48 evenly spaced slices, sampled (16 KiB read at each slice start), so the cost does not grow with the file; 7.5+ looks packed or encrypted. `sizeBytes` is the file size (the UI defaults to the fast profile above ~20 MB). Needs no program, fails `Busy` while an open runs, `NotFound` if the file is missing. |
 | `list_languages` | `{}` | `[{id, description, compilerSpecs:[{id,name}]}]` | All installed Ghidra languages; feeds the language picker for `language: null` candidates. Needs no program. |
-| `close_program` | `{}` | `{}` | Saves unsaved changes (autosave, see Persistence), then releases the program. In-flight and queued `decompile`s fail with `Cancelled`; later program requests fail `NoProgram`. Idempotent: succeeds with no program. `Busy` while an open is in progress (use `cancel_open`). |
+| `close_program` | `{}` | `{}` | Saves unsaved changes (autosave, see Persistence), then releases the program. In-flight and queued `decompile`s fail with `Cancelled`; later requests using that ID fail `StaleSession`. For legacy clients it is idempotent and later operations fail `NoProgram`. `Busy` while an open is in progress (use `cancel_open`). |
 | `list_programs` | `{}` | `[{programId, name, sourcePath?, sizeBytes, analyzed, lastOpened?, options}]` | Programs stored in the project, newest `lastOpened` first. `options` is `{}` for default imports. Needs no program (works while one is open); `Busy` while an open runs. |
 | `delete_program` | `{programId}` | `{}` | Removes the program from the project. `Busy` if it is the open program (or an open is running), `NotFound` if unknown. |
 
@@ -83,9 +123,11 @@ Each edit is one Ghidra transaction, named as the undo label (e.g. "Rename symbo
 | `retype_variable` | `{entry, name, dataType, timeoutSecs?=30}` | `{}` | Retypes a decompiler local/param. Timeout and cancel as `rename_variable`. Only fixed-length types are accepted; `InvalidArgument` for an unknown, unparsable or dynamic-size type. |
 | `define_data` | `{address, dataType}` | `{}` | One transaction "Define data": Ghidra `CreateDataCmd` with force (clears conflicting *data*, never instructions). `dataType` is a name or path as in `retype_variable` plus arrays/pointers (`int`, `char[4]`, `char *`, `dword`, `/dword`). `InvalidArgument`: unknown/unparsable type, dynamic or zero-size type (e.g. `string`, `void`), address not in memory, an instruction in the way, no room. A failure rolls back (nothing on the undo stack). Fires `program_changed` kinds `data`, `code` with the data's range. |
 | `clear_code` | `{address, length?}` | `{}` | One transaction "Clear code": Ghidra `ClearCmd` (instructions and data; not symbols/comments) over `[address, address+length-1]`, default the code unit containing `address`. Like the listing's "Clear Code Bytes", units overlapping the range are cleared whole (so a range inside one defined unit clears that unit). `InvalidArgument`: address not in memory, `length` < 1, or nothing but undefined bytes in the range (nothing would change). Fires `program_changed` kinds `code`, `data`. |
-| `save` | `{}` | `{saved}` | Writes the program to the project. `saved=false` if nothing had changed. Runs on thread R; safe while decompiles run. **Ghidra drops the undo/redo history on save**; a saving call also fires `program_changed {ranges: [], kinds: [], undo}` (nothing to refetch, `undo` is the new state with `dirty=false`). |
+| `save` | `{}` | `{saved, undoHistoryCleared}` | Writes the program to the project. `saved=false` if nothing had changed. Runs on thread R; safe while decompiles run. **Ghidra drops the undo/redo history on save**; a saving call also fires `program_changed {ranges: [], kinds: [], undo}` (nothing to refetch, `undo` is the new state with `dirty=false`). |
 | `undo` | `{}` | `UndoState` | Undoes the last edit. `InvalidArgument` if nothing to undo. |
 | `redo` | `{}` | `UndoState` | Redoes the last undone edit. `InvalidArgument` if nothing to redo. |
+
+### Listing pages
 
 `listing_rows` walks code units from an anchor, no index. `forward`: starts at the code unit containing `address` (or the next one if `address` is in a gap) and goes up. `backward`: the `count` code units strictly before the one containing `address`, returned in ascending order. Both are restricted to the loaded+initialized set; fewer than `count` rows means the end (or start) was reached. `count` is capped at 1000. The walk continues across address spaces in the order of `listing_info`. A row is one code unit (instruction, defined data, or one undefined byte); `bytes` shows at most 16 bytes and `bytesMore` says how many more the unit has (shortcut: no way to fetch them, upgrade with a `get_bytes` RPC). Row fields (`ListingRow` in `protocol.ts`):
 - `label` the primary symbol; `labels` all symbols at the address, primary first, only when there is more than one.
@@ -99,12 +141,12 @@ Row building stays on thread R and costs a few Ghidra calls per row; bench numbe
 `line` is 0-based into `text.split("\n")`. `colStart/colEnd` index into that line (indent included). `kind` follows Clang syntax types. `targetFunction` is set on call-target name tokens when the callee entry is known (thunks are followed to the entry of the called function symbol itself, not resolved).
 
 ## Notifications (server → client, no id)
-- `progress {phase, pct, message, analyzer?, done?, total?}` — phase order: `import` → `analysis` → `saving` → `ready` (only while `open_binary` runs; a persisted program goes straight to `ready`). `pct` is 0–100 or -1 (indeterminate). During `analysis` `pct` is -1 because Ghidra's AutoAnalysisManager has no global total; `analyzer` is the current analyzer name; `pct` is the per-analyzer progress/max when that analyzer reports a maximum (else -1); `done` is the number of analyzer runs finished so far; `total` is omitted.
-- `program_changed {ranges, kinds, undo}` — the program was modified. `ranges` is `[{start,end}]` (Ghidra address ranges, space-qualified, `end` inclusive, both ends in one space) or `null` = unknown/broad, refetch everything. Type changes (`kinds` has `type`) always carry `null`: Ghidra's type events have no address. A client refetches only the listing rows that intersect `ranges`. `kinds` ⊆ symbol|comment|function|data|code|type|other tells the client what to refetch. `undo` is the new `UndoState` (including `dirty`). Events from edits and `undo`/`redo` are coalesced over ~50 ms. A save sends `ranges: []`, `kinds: []` with the new undo state. Events already queued for the active program can arrive while `open_binary` stages a replacement. Closing or replacing that program drops its remaining pending events.
+- `progress {openId, phase, pct, message, analyzer?, done?, total?}` — phase order: `import` → `analysis` → `saving` → `ready` (only while `open_binary` runs; a persisted program goes straight to `ready`). `pct` is 0–100 or -1 (indeterminate). During `analysis` `pct` is -1 because Ghidra's AutoAnalysisManager has no global total; `analyzer` is the current analyzer name; `pct` is the per-analyzer progress/max when that analyzer reports a maximum (else -1); `done` is the number of analyzer runs finished so far; `total` is omitted.
+- `program_changed {sessionId, ranges, kinds, undo}` — the program was modified. `ranges` is `[{start,end}]` (Ghidra address ranges, space-qualified, `end` inclusive, both ends in one space) or `null` = unknown/broad, refetch everything. Type changes (`kinds` has `type`) always carry `null`: Ghidra's type events have no address. A client refetches only the listing rows that intersect `ranges`. `kinds` ⊆ symbol|comment|function|data|code|type|other tells the client what to refetch. `undo` is the new `UndoState` (including `dirty`). Events from edits and `undo`/`redo` are coalesced over ~50 ms. A save sends `ranges: []`, `kinds: []` with the new undo state. Events already queued for the active program can arrive while `open_binary` stages a replacement. Closing or replacing that program drops its remaining pending events.
 - `error {message}` — non-fatal, out-of-band.
 
 ## Errors
-Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -32001, Cancelled -32002, Timeout -32003, NotFound -32004, Busy -32005 (open in progress / second `open_binary`), ProjectLocked -32006, InvalidArgument -32602, MethodNotFound -32601, Internal -32603.
+Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -32001, Cancelled -32002, Timeout -32003, NotFound -32004, Busy -32005 (open in progress / second `open_binary`), ProjectLocked -32006, StaleSession -32007, InvalidArgument -32602, MethodNotFound -32601, Internal -32603.
 
 `ProjectLocked` (-32006): another sidecar (another Ghidrette) holds the projects dir; message `projects dir in use by another Ghidrette (<dir>)`. Returned by every request that touches the project (`open_binary`, `import_candidates`, `list_programs`, `delete_program`); the sidecar stays up and the next call retries, so it works once the other instance has quit. `list_languages` and the rest are unaffected.
 

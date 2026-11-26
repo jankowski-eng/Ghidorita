@@ -1,39 +1,37 @@
+import { isFailure, type ImportSelection } from "./backend";
 import { useEffect, useMemo, useState } from "react";
 import type { AnalysisProfile, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
-import { rpc } from "./client";
-import { RpcError } from "./backend";
 import { trapTab, useRestoreFocus } from "./hooks";
-import { PROFILE_LABEL, RAW_CANDIDATE, buildOptions, choiceError, defaultProfile, entropyHint, parseBase } from "./openOptions";
+import { buildOptions, choiceError, entropyHint, parseBase } from "./openOptions";
 
-const label = (c: ImportCandidate) => `${c.loader}${c.language ? ` — ${c.language} / ${c.compilerSpec}` : " — choose language"}${c.preferred ? " (preferred)" : ""}`;
+const label = (c: ImportCandidate) => `${c.loader}${c.language ? ` — ${c.language} / ${c.compilerSpec}` : c.requiresLanguage === false ? "" : " — choose language"}${c.preferred ? " (preferred)" : ""}`;
 const mb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-const errText = (e: unknown) => e instanceof RpcError ? (e.code === -32005 ? "The sidecar is busy, try again in a moment." : e.code === -32004 ? "File not found." : e.message) : e instanceof Error ? e.message : String(e);
+const errText = (e: unknown) => isFailure(e, "busy") ? "The backend is busy. Try again in a moment." : isFailure(e, "notFound") ? "File not found." : e instanceof Error ? e.message : String(e);
 
-/** Asks Ghidra which loaders/languages fit the file. Enter = open with the preselected (default) choice. */
-export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen: (o: ImportOptions | undefined) => void; onCancel: () => void }) {
+/** Shows the provider’s import choices. Enter = open with the preselected (default) choice. */
+export function ImportDialog({ imports, path, onOpen, onCancel }: { imports: ImportSelection; path: string; onOpen: (o: ImportOptions | undefined) => void; onCancel: () => void }) {
   useRestoreFocus();
-  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note: string; entropy: number[]; sizeBytes: number } | { error: string } | null>(null);
+  const [state, setState] = useState<{ cands: ImportCandidate[]; langs: LanguageInfo[]; note?: string; entropy: number[]; sizeBytes: number; profiles?: { id: AnalysisProfile; label: string }[] } | { error: string } | null>(null);
   const [idx, setIdx] = useState(0);
   const [language, setLanguage] = useState<string | null>(null);
   const [spec, setSpec] = useState<string | null>(null);
   const [base, setBase] = useState("");
   const [filter, setFilter] = useState("");
-  const [profile, setProfile] = useState<AnalysisProfile>("full");
+  const [profile, setProfile] = useState<AnalysisProfile>();
   const [adv, setAdv] = useState(false);
 
   useEffect(() => {
     let live = true;
     (async () => {
-      const { candidates, sizeBytes, entropy } = await rpc.call("import_candidates", { path });
-      const langs = await rpc.call("list_languages", {}).catch(() => [] as LanguageInfo[]); // optional unless the user must choose
-      const cands = candidates.length ? candidates : [RAW_CANDIDATE];
+      const { candidates: cands, sizeBytes, entropy, profiles, defaultProfile, note } = await imports.choices({ path });
+      const langs = await imports.languages().catch(() => [] as LanguageInfo[]); // optional unless the user must choose
       if (!live) return;
       const pre = Math.max(0, cands.findIndex((c) => c.preferred));
-      setProfile(defaultProfile(sizeBytes)); setIdx(pre); setLanguage(cands[pre].language); setSpec(cands[pre].compilerSpec);
-      setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary.", entropy, sizeBytes });
+      setProfile(defaultProfile ?? profiles?.[0]?.id); setIdx(pre); setLanguage(cands[pre]?.language ?? null); setSpec(cands[pre]?.compilerSpec ?? null);
+      setState({ cands, langs, note, entropy, sizeBytes, profiles });
     })().catch((e) => { if (live) setState({ error: errText(e) }); });
     return () => { live = false; };
-  }, [path]);
+  }, [imports, path]);
 
   const ready = state && "cands" in state ? state : null;
   const cand = ready?.cands[idx];
@@ -58,8 +56,8 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
         <div className="title">Import {path.split("/").pop()}</div>
         {!state && <div role="status">Checking file formats…</div>}
         {state && "error" in state && <div className="err" role="alert">{state.error}</div>}
+        {ready?.note && <div role="status">{ready.note}</div>}
         {ready && cand && <>
-          {ready.note && <div role="status">{ready.note}</div>}
           {ready.entropy.length > 0 && <div className="triage" role="img" aria-label={`Entropy by file position. ${entropyHint(ready.entropy)}`}>
             <div className="ebars">{ready.entropy.map((x, i) => <span key={i} title={`${x} bits/byte`} style={{ height: `${Math.round((x / 8) * 100)}%`, background: x >= 7.5 ? "#e0a93b" : "#5a8f6a" }} />)}</div>
             <span className="meta">{mb(ready.sizeBytes)} · {entropyHint(ready.entropy)}</span>
@@ -68,7 +66,7 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
             <dt>Format</dt><dd>{cand.loader}{cand.preferred ? "" : " (not the preferred loader)"}</dd>
             <dt>Architecture</dt><dd>{language ? `${language}${spec ? ` / ${spec}` : ""}` : "not chosen yet"}</dd>
             <dt>Size</dt><dd>{mb(ready.sizeBytes)}</dd>
-            <dt>Analysis</dt><dd>{PROFILE_LABEL[profile]}</dd>
+            {profile && <><dt>Analysis</dt><dd>{state && "profiles" in state ? state.profiles?.find((p) => p.id === profile)?.label ?? profile : profile}</dd></>}
           </dl>
           {!language && <div className="err" role="status">This format needs a language: open Advanced options and choose one.</div>}
           <button type="button" aria-expanded={adv || !language} onClick={() => setAdv(!adv)}>{adv || !language ? "Hide advanced options" : "Advanced options…"}</button>
@@ -78,7 +76,7 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
               {ready.cands.map((c, i) => <option key={i} value={i}>{label(c)}</option>)}
             </select>
           </label>
-          <label>Language
+          {cand.requiresLanguage !== false && <><label>Language
             <input aria-label="Filter languages" placeholder="filter, e.g. arm or x86" value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
           {ready.langs.length > 0
@@ -86,7 +84,7 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
                 {!language && <option value="" disabled>(choose a language)</option>}
                 {langs.map((l) => <option key={l.id} value={l.id}>{l.id} — {l.description}</option>)}
               </select>
-            : <div className="msg">{language ? `Language: ${language}` : "The language list is unavailable."}</div>}
+            : <div className="msg">{language ? `Language: ${language}` : "The language list is unavailable."}</div>}</>}
           {specs.length > 0 && <label>Compiler
             <select aria-label="Compiler spec" value={spec ?? ""} onChange={(e) => setSpec(e.target.value || null)}>
               <option value="">(default)</option>
@@ -97,11 +95,11 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
             <input aria-label="Base address" aria-invalid={!!baseErr} placeholder="0x00400000" value={base} onChange={(e) => setBase(e.target.value)} />
           </label>}
           {baseErr && <div className="err" role="alert">{baseErr}</div>}
-          <label>Analysis
-            <select aria-label="Analysis profile" value={profile} onChange={(e) => setProfile(e.target.value as AnalysisProfile)}>
-              {(["full", "fast"] as const).map((p) => <option key={p} value={p}>{PROFILE_LABEL[p]}</option>)}
+          {!!ready.profiles?.length && <label>Analysis
+            <select aria-label="Analysis profile" value={profile ?? ""} onChange={(e) => setProfile(e.target.value as AnalysisProfile)}>
+              {ready.profiles.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
-          </label>
+          </label>}
           </div>
         </>}
         <div className="row">

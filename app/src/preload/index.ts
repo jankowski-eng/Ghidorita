@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { Capability } from "../../../protocol";
 
 // ---- IPC contract (main <-> renderer). Main must validate every payload it receives. ----
 export type Pane = "functions" | "listing" | "decompiler";
@@ -11,6 +12,7 @@ export type MenuCommand =
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {
+  capabilities: Capability[]; hasProgram: boolean; recovery?: { snapshotIntervalSeconds: number };
   canBack: boolean; canForward: boolean; canOpen: boolean;
   canEdit: boolean;                 // an open program and no open in progress
   undoLabel: string | null;         // "Undo Rename symbol"; null = nothing to undo
@@ -35,7 +37,7 @@ export interface Host {
   /** autotest only: end the run through the real before-quit path. */
   autotestQuit(result: unknown): Promise<void>;
   /** autotest only: click an application-menu item by id (save, undo, redo). */
-  autotestMenu(id: string): Promise<void>;
+  autotestMenu(id: string): Promise<boolean>;
 }
 
 const host: Host = {

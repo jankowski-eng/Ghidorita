@@ -21,6 +21,8 @@ Needs JDK 25, Python 3.10+, Node LTS and a Ghidra build. Full steps in [docs/DEV
 cd app && npm install && npm start
 ```
 
+`npm start` launches PyGhidra by default; the same build can launch the independent read-only fixture provider. See [provider launch commands and implementation guide](PROVIDERS.md).
+
 ## Repository layout
 
 | Path | Contents |

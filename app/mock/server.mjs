@@ -1,4 +1,5 @@
 // Mock sidecar: same protocol as ../../protocol.md with deterministic fake data.
+import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
 
 const NFUNC = 5000, ROWS_PER_FUNC = 400, ROWS = NFUNC * ROWS_PER_FUNC; // 2,000,000
@@ -203,6 +204,11 @@ const parseEnumValue = (v) => { let b; try { b = typeof v === "string" ? BigInt(
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false, opening = false, openCancelled = false, openId = null;
+let activeSession = null, openingRequest = null;
+let failedAutosave = false, failedListing = false;
+const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
+  "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -234,23 +240,27 @@ const resetProgram = () => { autosave(); S = freshS(); undoStack.length = 0; red
 const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
+  provider_info: () => providerInfo,
+  active_session: () => activeSession,
   import_candidates({ path }) {
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
     if (/missing/.test(path)) throw { code: -32004, message: "NotFound" }; // mock: paths containing "missing"
     const sizeBytes = /big/.test(path) ? 30 * 1048576 : 4096; // mock: paths containing "big" are 30 MB (the UI defaults those to the fast profile)
     const entropy = Array.from({ length: 24 }, (_, i) => (i < 6 ? 5.8 : i < 18 ? 6.4 : 7.9)); // mock: some code, data, then a packed tail
-    if (/\.(bin|rom|img)$/i.test(path)) return { sizeBytes, entropy, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
-    return { sizeBytes, entropy, candidates: [
+    const profiles = [{ id: "full", label: "Full" }, { id: "fast", label: "Fast" }];
+    const defaults = { sizeBytes, entropy, profiles, defaultProfile: sizeBytes > 20 * 1048576 ? "fast" : "full" };
+    if (/\.(bin|rom|img)$/i.test(path)) return { ...defaults, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
+    return { ...defaults, candidates: [
       { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", preferred: true, acceptsBaseAddress: true },
       { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", preferred: false, acceptsBaseAddress: true },
       { loader: "Raw Binary", language: null, compilerSpec: null, preferred: false, acceptsBaseAddress: true }] };
   },
-  list_languages() { if (opening) throw { code: -32005, message: "Busy" }; return LANGS; },
+  list_languages() { return LANGS; },
   close_program() {
     if (opening) throw { code: -32005, message: "Busy" };
     for (const c of [...cancels.values()]) c(); // in-flight decompiles fail Cancelled
-    resetProgram(); opened = false; openId = null;
+    resetProgram(); opened = false; openId = null; activeSession = null;
     return {};
   },
   list_programs() {
@@ -265,12 +275,16 @@ const handlers = {
     stored.delete(programId);
     return {};
   },
-  async open_binary(p, notify) {
+  async open_binary(p, notify, rid) {
     const { path } = p;
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
     const opts = optsOf(p);
-    opening = true; openCancelled = false;
+    if (process.env.MOCK_SWITCH_FAILURES === "1" && dirty && !failedAutosave) {
+      failedAutosave = true;
+      throw { code: -32603, message: "Failed to flush pending changes" };
+    }
+    opening = true; openingRequest = rid; openCancelled = false;
     const an = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
     const steps = [
       { phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" },
@@ -279,7 +293,7 @@ const handlers = {
       { phase: "saving", pct: -1, message: "saving to project" }, { phase: "ready", pct: 100, message: "ready" }];
     try {
       for (const p of steps) {
-        notify("progress", p); await sleep(200);
+        notify("progress", { ...p, openId: rid }); await sleep(200);
         if (openCancelled) throw { code: -32002, message: "Cancelled" };
       }
       const programId = idFor(path, opts);
@@ -289,10 +303,11 @@ const handlers = {
       programs.set(programId, { programId, name, sourcePath: path, sizeBytes: 4096, analyzed: true, lastOpened: new Date().toISOString(), options: opts });
       if (stored.has(programId)) S = structuredClone(stored.get(programId));
       opened = true; openId = programId;
-      return { programId, name, persisted };
-    } finally { opening = false; }
+      activeSession = { programId, name, sessionId: randomUUID() };
+      return { ...activeSession, persisted };
+    } finally { opening = false; openingRequest = null; }
   },
-  cancel_open() { const c = opening && !openCancelled; if (c) openCancelled = true; return { cancelled: c }; },
+  cancel_open({ id } = {}) { const c = opening && !openCancelled && (id === undefined || id === openingRequest); if (c) openCancelled = true; return { cancelled: c }; },
   list_functions() {
     // fn_4000 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
     // get_function_at keeps the real STEP so address-to-function lookups stay consistent
@@ -318,6 +333,10 @@ const handlers = {
   },
   listing_info: () => ({ ranges: SEGS.map((g) => ({ start: segAddr(g, 0), size: g.n * STRIDE })), totalBytes: SEGS.reduce((a, g) => a + g.n * STRIDE, 0) }),
   async listing_rows({ address, count, direction = "forward" }) {
+    if (process.env.MOCK_SWITCH_FAILURES === "1" && activeSession?.name === "program-b" && !failedListing) {
+      failedListing = true;
+      throw { code: -32603, message: "Listing is temporarily unavailable" };
+    }
     await sleep(20);
     const total = SEGS.reduce((a, g) => a + g.n, 0), idx = gIndex(address);
     const [from, to] = direction === "backward" ? [idx - count, idx] : [idx, idx + count];
@@ -658,10 +677,10 @@ const handlers = {
     return edit("Clear code", notify, [{ start: hex(n), end: hex(n + len - 1) }], ["code", "data"], () => { for (let a = n; a < n + len; a += STRIDE) S.data.set(a, { mnemonic: "??", length: STRIDE }); });
   },
   save(_, notify) { // like Ghidra: history is dropped, dirty cleared
-    if (!dirty) return { saved: false };
+    if (!dirty) return { saved: false, undoHistoryCleared: false };
     autosave(); dirty = false; undoStack.length = 0; redoStack.length = 0;
     notify("program_changed", { ranges: [], kinds: [], undo: undoState() });
-    return { saved: true };
+    return { saved: true, undoHistoryCleared: true };
   },
   undo(_, notify) { return step(undoStack, redoStack, "before", notify); },
   redo(_, notify) { return step(redoStack, undoStack, "after", notify); },
@@ -674,20 +693,30 @@ function step(from, to, side, notify) {
   return undoState();
 }
 
-const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 }, () => console.log(wss.address().port));
+const unscoped = new Set(["provider_info", "active_session", "open_binary", "import_candidates", "list_languages", "list_programs", "delete_program"]);
+const token = process.env.SIDECAR_TOKEN;
+const wss = new WebSocketServer({ host: "127.0.0.1", port: 0, verifyClient: ({ req }) => !token || req.url === "/" + token }, () => console.log(wss.address().port));
 wss.on("connection", (ws) => {
-  const notify = (method, params) => ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  let versioned = false;
   ws.on("message", async (data) => {
     const req = JSON.parse(data.toString());
-    if (req.method === "cancel_open") return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: handlers.cancel_open() }));
+    if (req.method === "cancel_open") return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: handlers.cancel_open(req.params) }));
     if (req.method === "cancel_decompile" || req.method === "cancel_search") { // bypasses the queue
       const c = cancels.get(req.params?.id); if (c) c();
       return ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { cancelled: !!c } }));
     }
     try {
-      const h = handlers[req.method];
+      if (req.method === "provider_info") versioned = true;
+      const id = activeSession?.sessionId;
+      const notify = (method, params) => ws.send(JSON.stringify({
+        jsonrpc: "2.0", method, params: method === "program_changed" ? { ...params, sessionId: id } : params,
+      }));
+      const h = Object.hasOwn(handlers, req.method) && handlers[req.method];
       if (!h) throw { code: -32601, message: "MethodNotFound" };
-      if (!["open_binary", "import_candidates", "list_languages", "close_program", "list_programs", "delete_program"].includes(req.method) && (!opened || opening)) throw { code: -32001, message: "NoProgram" };
+      if (!unscoped.has(req.method) && (versioned || req.sessionId !== undefined) && (!id || req.sessionId !== id)) {
+        throw { code: -32007, message: "Stale program session" };
+      }
+      if (!unscoped.has(req.method) && req.method !== "close_program" && (!opened || opening)) throw { code: -32001, message: "NoProgram" };
       const result = await h(req.params ?? {}, notify, req.id);
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }));
     } catch (e) {

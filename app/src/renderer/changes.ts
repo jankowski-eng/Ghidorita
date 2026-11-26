@@ -1,7 +1,7 @@
-import type { Address, FunctionInfo, Notifications } from "../../../protocol";
+import type { Address, FunctionInfo } from "../../../protocol";
 import { offIn, parseAddr } from "./address";
 
-type Params = Notifications["program_changed"];
+import type { ProgramChange as Params } from "./backend";
 
 /** Ids of tabs whose function [entry, entry+size) overlaps a changed range (end inclusive); all tabs when ranges is null. */
 export function affectedTabs(ranges: Params["ranges"], tabs: { id: number; entry: Address }[], funcs: FunctionInfo[]): number[] {

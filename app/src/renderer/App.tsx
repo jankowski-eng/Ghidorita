@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FunctionInfo, Address, ImportOptions, ProgramEntry } from "../../../protocol";
-import { rpc, ws } from "./client";
+import type { ActiveSession, FunctionInfo, Address, ImportOptions, ListingRow, ProgramEntry, SymbolHit } from "../../../protocol";
 import { AddrMap } from "./addrmap";
 import { Listing } from "./Listing";
 import { FunctionList } from "./FunctionList";
@@ -11,8 +10,8 @@ import { OpenDialog, type Progress } from "./OpenDialog";
 import { Confirm } from "./Confirm";
 import { ImportDialog } from "./ImportDialog";
 import { Welcome } from "./Welcome";
-import { windowTitle } from "./session";
-import { reopenParams } from "./openOptions";
+import { readBrowsing, resolveOpen, windowTitle, type BrowsingData } from "./session";
+import { allowsCommand, allowsEdit } from "../capabilities";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { coverage, Coverage } from "./coverage";
@@ -20,25 +19,41 @@ import { coverageSpans } from "./binmap";
 import type { Layer } from "./BinaryMap";
 import { XrefPanel } from "./XrefPanel";
 import { Dock, type DockId } from "./Dock";
-import { RpcError } from "./backend";
+import { isFailure, isObsolete, type ApplicationBackend, type OpenJob, type OpenProgress, type ProgramOperations } from "./backend";
 import { onProgramChanged } from "./changes";
 import { latest } from "./latest";
 import { StatusBar, type Stats } from "./StatusBar";
 import { TabStrip } from "./TabStrip";
 import { GoTo } from "./GoTo";
 import { Panes, type PaneId } from "./Layout";
-import { runAutotest, runBench } from "./autotest";
+import type { AutotestCtx, AutotestControls } from "./autotest";
 import { emptyNav, push, goBack, goForward, type Nav, type Loc, type Source } from "./nav";
-import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } from "./symbols";
+import { functionLookup, type FuncAt } from "./symbols";
 import { useTabs, canForce } from "./useTabs";
-import { testTimeout } from "./tabs";
 import { EditDialog, type EditSpec } from "./EditDialog";
 import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus, type XrefTarget } from "./editActions";
 import { FormDialog, type FormField } from "./FormDialog";
 import { DataTypes } from "./DataTypes";
 import type { CommentKind, UndoState } from "../../../protocol";
 
-export function App() {
+type TestDriver = Omit<AutotestCtx, "cancelFile" | "only" | "flow" | "expect" | keyof AutotestControls>;
+type Program = { session: ActiveSession; api: ProgramOperations; lookup: ReturnType<typeof functionLookup> };
+const cleanUndo = { canUndo: false, canRedo: false, dirty: false };
+
+export function App({ backend, onReady }: { backend: ApplicationBackend; onReady?: (driver: TestDriver) => void }) {
+  const { capabilities: caps, lifecycle } = backend;
+  const [program, setProgram] = useState<Program | null>(null);
+  const programRef = useRef<Program | null>(null);
+  const openJob = useRef<OpenJob | null>(null);
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const unavailableRef = useRef(false);
+  const [reading, setReading] = useState(false);
+  const [browseError, setBrowseError] = useState("");
+  const [initialRows, setInitialRows] = useState<ListingRow[]>([]);
+  const listingRow = useRef<(() => ListingRow | undefined) | null>(null);
+  const ops = program?.api;
   const [progress, setProgress] = useState<Progress | null>(null);
   const [opened, setOpened] = useState(false);
   const [funcs, setFuncs] = useState<FunctionInfo[]>([]);
@@ -51,10 +66,8 @@ export function App() {
   const [gotoOpen, setGotoOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [opening, setOpening] = useState<{ path: string; startedAt: number; cancelling: boolean } | null>(null);
-  const [programName, setProgramName] = useState<string | null>(null);
   const [importFor, setImportFor] = useState<string | null>(null);
   const importRef = useRef(false);
-  const [connected, setConnected] = useState(false);
   const [progs, setProgs] = useState<{ list: ProgramEntry[]; loading: boolean; error: string }>({ list: [], loading: false, error: "" });
   const [progsVersion, setProgsVersion] = useState(0);
   const [deleting, setDeleting] = useState<{ entry: ProgramEntry; error: string; busy: boolean } | null>(null);
@@ -72,7 +85,7 @@ export function App() {
   const [visible, setVisible] = useState<Record<PaneId, boolean>>({ functions: true, listing: true, decompiler: true });
   const navRef = useRef(nav);
   const openingRef = useRef(false);
-  const changeDuringOpen = useRef<Parameters<typeof onProgramChanged>[0] | null>(null);
+  const changeDuringOpen = useRef<{ sessionId: string; p: Parameters<typeof onProgramChanged>[0] } | null>(null);
   const openedRef = useRef(false);
   const cancellingRef = useRef(false);
   const funcsCountRef = useRef(0);
@@ -81,7 +94,6 @@ export function App() {
   const refetch = useRef(latest()).current;
   const topAddrRef = useRef<Address>("");
   const errors = useRef<string[]>([]);
-  const autotestRef = useRef(false);
   const editorRef = useRef<any>(null);
   const cursorRef = useRef<Address>("");
   const [undo, setUndo] = useState<UndoState>({ canUndo: false, canRedo: false, dirty: false });
@@ -98,10 +110,12 @@ export function App() {
   const [typesVersion, setTypesVersion] = useState(0);
   const lastPane = useRef<"listing" | "decompiler">("listing");
 
-  const fail = (e: unknown) => { const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
-  const tabs = useTabs(fail, (ms) => setStats((s) => ({ ...s, decompileMs: ms })), (entry) => funcsRef.current.find((f) => f.entry === entry)?.size ?? 0);
+  const fail = (e: unknown) => { if (isObsolete(e)) return; const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
+  const tabs = useTabs(caps.has("decompile") ? ops?.decompiler : undefined, fail, (ms) => setStats((s) => ({ ...s, decompileMs: ms })), (entry) => funcsRef.current.find((f) => f.entry === entry)?.size ?? 0);
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
 
+  const containingFunction = (address: Address) => program?.lookup.containing(address) ?? Promise.resolve(null);
+  const blocked = () => openingRef.current || closingRef.current || unavailableRef.current;
   const setNav = (n: Nav) => { navRef.current = n; setNavState(n); };
   // Every navigation ends here: scroll the listing (except for a click inside it) and show the containing function.
   // Only the newest navigation may open a tab (goSeq), so a slow get_function_at can't override a later click.
@@ -111,12 +125,12 @@ export function App() {
     let err: unknown = null;
     try { f = await containingFunction(loc.address); } catch (e) { err = e; }
     if (seq !== goSeq.current) return;
-    if (err && !(err instanceof RpcError && err.code === -32001)) fail(err);
+    if (err) fail(err);
     setFn(f);
-    if (f) await tabs.show(f.entry);
+    if (f && caps.has("decompile")) await tabs.show(f.entry);
   };
   const go = async (address: Address, source: Source) => {
-    if (openingRef.current || !openedRef.current) return;
+    if (blocked() || !openedRef.current) return;
     const seq = ++goSeq.current;
     const loc: Loc = { address, source }, cur = navRef.current.current;
     // reading in the listing must not flood the history: clicks within one function replace the current entry
@@ -129,100 +143,145 @@ export function App() {
     await applyLoc(loc, false, seq);
   };
   const goTab = (entry: Address | null) => { if (entry) void go(entry, "functions"); }; // keep list/status/listing in step with the visible tab
-  const back = () => { const n = goBack(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
-  const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
+  const back = () => { const n = goBack(navRef.current); if (n !== navRef.current && !blocked()) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
+  const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current && !blocked()) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
 
-  // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
   const clearProgram = () => {
-    coverage.clear(); openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
-    tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
-    clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
+    coverage.clear(); openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false);
+    setDock(null); setXrefTarget(null); setUseHl(null); setUndo(cleanUndo); setDlg(null); setFormDlg(null); setTypesOpen(false);
+    tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0);
+    setScrollReq((r) => ({ address: "", n: r.n + 1 })); setListingChange({ n: 0, ranges: null });
+    topAddrRef.current = cursorRef.current = ""; editorRef.current = null; lastPane.current = "listing";
+    setInitialRows([]); setBrowseError(""); setReading(false); funcsRef.current = []; funcsCountRef.current = 0;
+    ++goSeq.current; void refetch(Promise.resolve(null));
   };
-  const open = async (p: string, opts: ImportOptions = {}) => {
-    if (openingRef.current) return; // the sidecar would answer Busy
+
+  // A failed replacement that retains the same session leaves its entire view intact.
+  const selectSession = (session: ActiveSession | null) => {
+    if (session?.sessionId === programRef.current?.session.sessionId) return programRef.current;
+    clearProgram();
+    const api = session ? backend.program(session) : null;
+    const current = session && api ? { session, api, lookup: functionLookup(api.functions) } : null;
+    programRef.current = current;
+    setProgram(current);
+    openedRef.current = !!current;
+    setOpened(!!current);
+    if (current && caps.has("undo")) void current.api.history.state().then((value) => {
+      if (programRef.current === current) setUndo(value);
+    }, (e) => { if (programRef.current === current) fail(e); });
+    return current;
+  };
+
+  const loadBrowsing = async (current: Program) => {
+    setReading(true); setBrowseError("");
+    try {
+      const data: BrowsingData = await readBrowsing(current.api);
+      if (programRef.current !== current) return;
+      funcsCountRef.current = data.functions.length; funcsRef.current = data.functions; setFuncs(data.functions);
+      setMap(data.map); setInitialRows(data.rows);
+      return data.functions;
+    } catch (e) {
+      if (programRef.current === current) setBrowseError(e instanceof Error ? e.message : String(e));
+    } finally { if (programRef.current === current) setReading(false); }
+  };
+
+  const open = async (p: string, opts: ImportOptions = {}, stored?: ProgramEntry) => {
+    if (blocked()) return;
     openingRef.current = true; cancellingRef.current = false;
     setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
-    let swapped = false;
+    const previous = programRef.current;
     try {
-      const r = await rpc.call("open_binary", { path: p, ...opts });
-      swapped = true;
-      clearProgram();
-      const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
-      funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); rpc.call("undo_state", {}).then(setUndo, fail); setMap(new AddrMap(info.ranges)); setProgramName(r.name); setOpened(true); openedRef.current = true;
-      if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
-      return fl;
-    } catch (e) {
-      if (swapped) await rpc.call("close_program", {}).catch(() => {});
-      if (e instanceof RpcError && e.code === -32002) {
-        setNotice("Open cancelled.");
-        if (openedRef.current) setFlash("Open cancelled.");
-      } else {
-        fail(e); setNotice("Could not open " + p);
+      const onProgress = (progress: OpenProgress) => {
+        if (openingRef.current && !cancellingRef.current) setProgress(progress);
+      };
+      const job = openJob.current = stored ? backend.projects.reopen(stored, onProgress) : lifecycle.open(p, opts, onProgress);
+      const outcome = await resolveOpen(job, lifecycle);
+      if (outcome.kind === "unknown") {
+        unavailableRef.current = true; setUnavailable(true);
+        setNotice("Could not confirm the active program. Restart Ghidrette to reconnect.");
+        fail(outcome.reconciliationError);
+        return;
       }
+
+      const current = selectSession(outcome.session);
+      if (outcome.kind === "failed") {
+        if (isFailure(outcome.error, "cancelled")) setNotice("Open cancelled.");
+        else { fail(outcome.error); setNotice("Could not open " + p); }
+        return;
+      }
+      if (!onReady) window.host.recentAdd(p).catch(() => {});
+      return await loadBrowsing(current!);
     } finally {
-      openingRef.current = false; setOpening(null); setProgress(null);
+      openJob.current = null; openingRef.current = false; setOpening(null); setProgress(null);
       const change = changeDuringOpen.current;
       changeDuringOpen.current = null;
-      if (!swapped && change) api.current.programChanged(change);
+      if (change && programRef.current?.session.sessionId === change.sessionId) api.current.programChanged(change.sessionId, change.p);
     }
   };
 
-  // Open entry point for Open, Open Recent and the path box: pick import options first. Unsaved edits of the open program are autosaved by the sidecar when it is replaced.
   const requestOpen = (p: string) => {
-    if (openingRef.current || importRef.current) return;
+    if (blocked() || importRef.current) return;
+    if (!caps.has("importOptions")) { void open(p); return; }
     importRef.current = true; setImportFor(p);
   };
-  const confirmImport = async (p: string, opts: ImportOptions | undefined) => {
+  const confirmImport = (p: string, opts: ImportOptions | undefined) => {
     importRef.current = false; setImportFor(null);
     void open(p, opts);
   };
   const cancelImport = () => { importRef.current = false; setImportFor(null); };
-  const openStored = (e: ProgramEntry) => {
-    const r = reopenParams(e);
-    if (!r) { setProgs((x) => ({ ...x, error: `${e.name} has no stored source path; open the file with File > Open.` })); return; }
-    const { path: p, ...o } = r;
-    void open(p, o);
-  };
+  const openStored = (entry: ProgramEntry) => { void open(entry.sourcePath ?? entry.name, {}, entry); };
   const closeProgram = async () => {
-    if (!openedRef.current || openingRef.current) return;
-    try { await rpc.call("close_program", {}); } catch (e) { fail(e); return; }
-    clearProgram(); setNotice("");
+    const current = programRef.current;
+    if (!current || blocked()) return;
+    closingRef.current = true; setClosing(true);
+    try {
+      await lifecycle.close(current.session);
+      selectSession(null); setNotice(""); setError("");
+    } catch (e) { fail(e); }
+    finally { closingRef.current = false; setClosing(false); }
   };
   const deleteStored = async () => {
     if (!deleting) return;
     setDeleting({ ...deleting, busy: true, error: "" });
-    try { await rpc.call("delete_program", { programId: deleting.entry.programId }); setDeleting(null); setProgsVersion((v) => v + 1); }
+    try { await backend.projects.remove({ programId: deleting.entry.programId }); setDeleting(null); setProgsVersion((v) => v + 1); }
     catch (e) {
-      if (e instanceof RpcError && e.code === -32004) { setDeleting(null); setProgsVersion((v) => v + 1); } // already gone
-      else setDeleting((d) => d && { ...d, busy: false, error: e instanceof RpcError && e.code === -32005 ? "The sidecar is busy; try again in a moment." : e instanceof Error ? e.message : String(e) });
+      if (isFailure(e, "notFound")) { setDeleting(null); setProgsVersion((v) => v + 1); } // already gone
+      else setDeleting((d) => d && { ...d, busy: false, error: isFailure(e, "busy") ? "The sidecar is busy; try again in a moment." : e instanceof Error ? e.message : String(e) });
     }
   };
   const cancelOpen = () => {
-    if (!openingRef.current) return;
-    cancellingRef.current = true;
-    setOpening((o) => (o ? { ...o, cancelling: true } : o));
-    rpc.call("cancel_open", {}).then((r) => { if (!r.cancelled) cancellingRef.current = false; if (!r.cancelled) setOpening((o) => (o ? { ...o, cancelling: false } : o)); }, fail); // false: open not cancellable yet, let the user retry
+    const job = openJob.current;
+    if (!job) return;
+    const setCancelling = (cancelling: boolean) => {
+      if (openJob.current !== job) return;
+      cancellingRef.current = cancelling;
+      setOpening((o) => o && { ...o, cancelling });
+    };
+    setCancelling(true);
+    job.cancel().then((cancelled) => { if (!cancelled) setCancelling(false); }, (e) => { setCancelling(false); fail(e); });
   };
 
   // program_changed: one subscription, all reactions in changes.ts
-  const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
-    if (!openedRef.current) return;
+  const programChanged = (sessionId: string, p: Parameters<typeof onProgramChanged>[0]) => {
+    const current = programRef.current;
+    if (current?.session.sessionId !== sessionId) return;
     if (openingRef.current) {
       // Program RPCs resume when the open finishes. Keep the last undo state and coalesce any required refresh.
-      const refresh = changeDuringOpen.current?.ranges === null || !p.ranges || p.ranges.length > 0 || p.kinds.length > 0;
-      changeDuringOpen.current = { ranges: refresh ? null : [], kinds: refresh ? ["other"] : [], undo: p.undo };
+      const refresh = changeDuringOpen.current?.p.ranges === null || !p.ranges || p.ranges.length > 0 || p.kinds.length > 0;
+      changeDuringOpen.current = { sessionId, p: { ranges: refresh ? null : [], kinds: refresh ? ["other"] : [], undo: p.undo } };
       return;
     }
+    const isCurrent = () => programRef.current === current;
     if (p.ranges && !p.ranges.length && !p.kinds.length) { setUndo(p.undo); return; } // save: only `dirty` changed
-    clearFunctionCache(); setDataVersion((v) => v + 1); setTypesVersion((v) => v + 1);
+    current.lookup.clear(); setDataVersion((v) => v + 1); setTypesVersion((v) => v + 1);
     onProgramChanged(p, {
-      refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
-      tabs: () => tabsRef.current().tabs,
-      reloadTab: (id) => tabs.reload(id),
-      refreshListing: (ranges) => setListingChange((c) => ({ n: c.n + 1, ranges })),
-      currentFunctions: () => funcsRef.current, setUndo,
-      refreshXrefs: () => setXrefVersion((v) => v + 1),
-    }).catch((e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); });
+      refetchFunctions: async () => { const fl = await refetch(current.api.functions.list()); if (fl && isCurrent()) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
+      tabs: () => isCurrent() ? tabsRef.current().tabs : [],
+      reloadTab: (id) => { if (isCurrent()) tabs.reload(id); },
+      refreshListing: (ranges) => isCurrent() && setListingChange((c) => ({ n: c.n + 1, ranges })),
+      currentFunctions: () => funcsRef.current, setUndo: (value) => { if (isCurrent()) setUndo(value); },
+      refreshXrefs: () => isCurrent() && setXrefVersion((v) => v + 1),
+    }).catch((e) => { if (isCurrent()) fail(e); });
   };
 
   // Monaco token click -> navigate
@@ -242,42 +301,47 @@ export function App() {
   };
   const activeTab = () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active) ?? null; };
   const send = async (f: () => Promise<unknown>) => { try { await f(); } catch (e) { fail(e); } };
-  const ask = (spec: EditSpec, submit: (v: string, k: CommentKind) => Promise<void>) => setDlg({ spec, submit });
-  const refreshUndo = () => rpc.call("undo_state", {}).then(setUndo, fail);
+  const ask = (spec: EditSpec, submit: (v: string, k: CommentKind) => Promise<void>) => {
+    if (programRef.current === program) setDlg({ spec, submit });
+  };
+  const refreshUndo = () => caps.has("undo") ? ops!.history.state().then((state) => {
+    if (programRef.current === program) setUndo(state);
+  }, fail) : Promise.resolve();
   const doSave = async () => {
     if (saving) return;
     setSaving(true);
-    try { await rpc.call("save", {}); await refreshUndo(); } catch (e) { fail(e); } finally { setSaving(false); }
+    try { await ops!.history.save(); await refreshUndo(); } catch (e) { fail(e); } finally { setSaving(false); }
   };
-  const doUndo = (kind: "undo" | "redo") => send(async () => { setUndo(await rpc.call(kind, {})); });
+  const doUndo = (kind: "undo" | "redo") => send(async () => {
+    const state = await ops!.history[kind]();
+    if (programRef.current === program) setUndo(state);
+  });
   const editSignature = async (entry: Address) => {
-    const f = await rpc.call("get_function_at", { address: entry });
+    const f = await ops!.functions.containing({ address: entry });
     if (!f) return setFlash("No function here.");
     ask({ title: "Edit function signature", label: "Signature", field: "text", initial: f.signature, submit: "Apply" },
-      async (v) => { await rpc.call("set_function_signature", { entry: f.entry, signature: v.trim() }); });
+      async (v) => { await ops!.edits.setFunctionSignature({ entry: f.entry, signature: v.trim() }); });
   };
   const listingEdit = async (a: EditAction) => {
-    const addr = cursorRef.current || topAddrRef.current;
-    if (!addr) return;
-    const row = (window as any).__listing?.rowAt(addr) as { address: Address; length: number; label?: string; comment?: string } | undefined;
+    const row = listingRow.current?.();
     if (!row) return setFlash("Cursor row not loaded.");
     const at = row.address;
     if (a === "rename") {
       const f = await containingFunction(at);
       if (row.label || (f && f.entry === at)) ask({ title: "Rename", label: "New name", field: "text", initial: row.label ?? f!.name, submit: "Rename" },
-        async (v) => { await rpc.call("rename_symbol", { address: at, newName: v.trim() }); });
+        async (v) => { await ops!.edits.renameSymbol({ address: at, newName: v.trim() }); });
       else ask({ title: "Create label", label: "Label name", field: "text", initial: "", submit: "Create label" }, // nothing to rename here: L creates the label
-        async (v) => { await rpc.call("create_label", { address: at, name: v.trim() }); });
+        async (v) => { await ops!.edits.createLabel({ address: at, name: v.trim() }); });
     } else if (a === "comment") {
-      const comments = await rpc.call("get_comments", { address: at });
+      const comments = await ops!.edits.getComments({ address: at });
       ask({ title: "Set comment", label: "Comment", field: "comment", initial: comments.eol ?? "", submit: "Set comment", kind: "eol", comments },
-        async (v, kind) => { await rpc.call("set_comment", { address: at, kind, text: v }); });
-    } else if (a === "createFunction") await rpc.call("create_function", { address: at });
-    else if (a === "clear") await rpc.call("clear_code", { address: at });
+        async (v, kind) => { await ops!.edits.setComment({ address: at, kind, text: v }); });
+    } else if (a === "createFunction") await ops!.edits.createFunction({ address: at });
+    else if (a === "clear") await ops!.edits.clearCode({ address: at });
     else if (a === "defineData") ask({ title: "Define data", label: "Data type", field: "datatype", initial: "", submit: "Define" },
-      async (v) => { await rpc.call("define_data", { address: at, dataType: v.trim() }); });
+      async (v) => { await ops!.edits.defineData({ address: at, dataType: v.trim() }); });
     else if (a === "createStruct") setFormDlg({ title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
-      go: async (v) => { await rpc.call("create_struct_from_data", { address: at, length: Number(v.length), name: v.name.trim() }); } });
+      go: async (v) => { await ops!.edits.createStructFromData({ address: at, length: Number(v.length), name: v.name.trim() }); } });
     else if (a === "signature") { const f = await containingFunction(at); if (f) await editSignature(f.entry); else setFlash("No function here."); }
     else if (a === "retype") setFlash("Retype works on a variable in the decompiler.");
   };
@@ -292,31 +356,31 @@ export function App() {
       const t = renameTarget(tok, text, { entry, name: fnName });
       if (!t) return setFlash("Nothing to rename at the cursor.");
       if (t.kind === "variable") ask({ title: "Rename variable", label: "New name", field: "text", initial: t.name, submit: "Rename" },
-        async (v) => { await rpc.call("rename_variable", { entry, name: t.name, newName: v.trim() }); });
+        async (v) => { await ops!.edits.renameVariable({ entry, name: t.name, newName: v.trim() }); });
       else ask({ title: "Rename function", label: "New name", field: "text", initial: t.current, submit: "Rename" },
-        async (v) => { await rpc.call("rename_symbol", { address: t.address, newName: v.trim() }); });
+        async (v) => { await ops!.edits.renameSymbol({ address: t.address, newName: v.trim() }); });
     } else if (a === "retype") {
       const name = retypeTarget(tok);
       if (!name) return setFlash("Put the cursor on a variable to retype it.");
       ask({ title: "Retype variable", label: "Data type", field: "datatype", initial: "", submit: "Retype" },
-        async (v) => { await rpc.call("retype_variable", { entry, name, dataType: v.trim() }); });
+        async (v) => { await ops!.edits.retypeVariable({ entry, name, dataType: v.trim() }); });
     } else if (a === "autoStruct") {
       const name = retypeTarget(tok);
       if (!name) return setFlash("Put the cursor on a variable to auto create a structure for it.");
       setFormDlg({ title: "Auto create structure", submit: "Create", fields: [{ key: "name", label: "Structure name (empty = automatic)" }],
-        go: async (v) => { await rpc.call("auto_create_structure", { entry, name, structName: v.name.trim() || undefined }); } });
+        go: async (v) => { await ops!.edits.autoCreateStructure({ entry, name, structName: v.name.trim() || undefined }); } });
     } else if (a === "signature") await editSignature(entry);
     else if (a === "comment") {
       const line0 = (pos?.lineNumber ?? 1) - 1;
       const at = d.tokens.find((t) => t.line === line0 && t.address)?.address;
       if (!at) return setFlash("No address on this line.");
-      const comments = await rpc.call("get_comments", { address: at });
+      const comments = await ops!.edits.getComments({ address: at });
       ask({ title: "Set comment", label: "Comment", field: "comment", initial: comments.pre ?? "", submit: "Set comment", kind: "pre", comments },
-        async (v, kind) => { await rpc.call("set_comment", { address: at, kind, text: v }); });
+        async (v, kind) => { await ops!.edits.setComment({ address: at, kind, text: v }); });
     } else setFlash("Use the listing for this action.");
   };
   const edit = async (a: EditAction) => {
-    if (!openedRef.current || openingRef.current) return;
+    if (!openedRef.current || blocked() || importRef.current || !allowsEdit(caps, a)) return;
     const kind = focusKind(document.activeElement);
     if (a === "undo" || a === "redo") {
       if (undoRoute(kind) === "text") { document.execCommand(a); return; } // a text input keeps its own undo
@@ -329,7 +393,7 @@ export function App() {
   };
   // X: references to the listing cursor row, or to the decompiler token under the cursor (pinned in the xref panel)
   const showXrefs = () => {
-    if (!openedRef.current || openingRef.current) return;
+    if (!openedRef.current || blocked() || !caps.has("references")) return;
     const kind = focusKind(document.activeElement);
     if (kind === "decompiler" || (kind !== "listing" && lastPane.current === "decompiler")) {
       const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined, pos = editorRef.current?.getPosition();
@@ -337,10 +401,10 @@ export function App() {
       const tok = tokenAt(d.tokens, pos.lineNumber, pos.column);
       const text = tok ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
       const t = xrefTargetOf(tok, text, { entry: tab.entry, name: names.get(tab.entry) ?? "" });
-      if (t) { setXrefTarget(t); setUseHl(null); } else setFlash("No references for the token at the cursor.");
+      if (t && (t.type !== "variable" || caps.has("variableReferences"))) { setXrefTarget(t); setUseHl(null); } else setFlash("No references for the token at the cursor.");
     } else {
       const a = cursorRef.current || topAddrRef.current;
-      if (a) { const at = ((window as any).__listing?.rowAt(a)?.address as Address | undefined) ?? a; setXrefTarget({ type: "address", address: at, label: at }); }
+      if (a) { const at = listingRow.current?.()?.address ?? a; setXrefTarget({ type: "address", address: at, label: at }); }
     }
   };
   const canAt = (line1: number, col1: number) => {
@@ -348,16 +412,18 @@ export function App() {
     const tok = d ? tokenAt(d.tokens, line1, col1) : undefined;
     const text = tok && d ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
     const fn = tab ? { entry: tab.entry, name: names.get(tab.entry) ?? "" } : null;
-    return { rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!xrefTargetOf(tok, text, fn) };
+    const reference = xrefTargetOf(tok, text, fn);
+    return { rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
   const apiNow_refresh = () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1, refresh: true })); };
   const covChanged = () => { setCovVersion((v) => v + 1); apiNow_refresh(); };
   const loadCoverage = async (path: string) => {
-    if (!openedRef.current || openingRef.current) return;
+    if (!openedRef.current || blocked()) return;
     try {
-      const { ranges } = await rpc.call("load_coverage", { path });
+      const { ranges } = await ops!.coverage.load({ path });
+      if (programRef.current !== program) return;
       const run = coverage.add(path.split(/[\\/]/).pop() || path, new Coverage(ranges));
       setFlash(`Coverage "${run.name}" loaded: ${run.cov.size} range${run.cov.size === 1 ? "" : "s"} (green bar in the listing; Coverage window to name and compare runs)`);
       covChanged();
@@ -365,6 +431,7 @@ export function App() {
   };
   const pickCoverage = async () => { const p = await window.host.pickFile(); if (p) void loadCoverage(p); };
   const handleMenu = (c: MenuCommand) => {
+    if (!allowsCommand(caps, c) || blocked() || importRef.current) return;
     if (c.type === "open-path") requestOpen(c.path);
     else if (c.type === "coverage-path") void loadCoverage(c.path);
     else if (c.type === "coverage-clear") { coverage.clear(); covChanged(); }
@@ -386,27 +453,25 @@ export function App() {
   api.current = apiNow;
 
   useEffect(() => {
-    (async () => {
-      const cfg = await window.host.getConfig();
-      await ws.connect(cfg.port, cfg.token);
-      setConnected(true);
-      rpc.onNotification = (m, p) => {
-        if (m === "progress") { if (openingRef.current && !cancellingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped
-        else if (m === "program_changed") api.current.programChanged(p as Parameters<typeof onProgramChanged>[0]);
-        else if (m === "error") fail((p as { message: string }).message);
-      };
-      autotestRef.current = !!cfg.autotest;
-      if (cfg.autotest && cfg.decompileTimeout) testTimeout.secs = cfg.decompileTimeout;
-      window.addEventListener("securitypolicyviolation", (e) => (window as any).__expectCsp || fail("CSP blocked " + e.violatedDirective + ": " + e.blockedURI)); // the policy in index.html must stay as tight as Monaco allows
-      if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile, only: cfg.only, flow: cfg.flow,
-        status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
-        select: async (e) => { await api.current.go(e, "functions"); }, goAddr: async (a) => { await api.current.go(a, "goto"); }, clickAt: (l, c) => api.current.clickAt(l, c),
-        back: () => api.current.back(), forward: () => api.current.forward(), fail, errors: errors.current,
-        selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
-        editor: () => editorRef.current, menu: (id) => window.host.autotestMenu(id), expect: cfg.expect, funcCount: () => funcsCountRef.current, topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
-      });
-    })().catch(fail);
+    const offChanged = backend.events.onChange((id, p) => api.current.programChanged(id, p));
+    const offError = backend.events.onError(fail);
+    const policyViolation = (e: SecurityPolicyViolationEvent) => {
+      if (!(window as any).__expectCsp) fail("CSP blocked " + e.violatedDirective + ": " + e.blockedURI);
+    };
+    window.addEventListener("securitypolicyviolation", policyViolation);
+    onReady?.({
+      backend, program: () => {
+        const current = programRef.current;
+        if (!current) throw new Error("No program open");
+        return current.api;
+      },
+      open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title,
+      status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
+      select: (e) => api.current.go(e, "functions"), goAddr: (a) => api.current.go(a, "goto"), clickAt: (l, c) => api.current.clickAt(l, c),
+      back: () => api.current.back(), forward: () => api.current.forward(), fail, errors: errors.current,
+      selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
+      editor: () => editorRef.current, menu: (id) => window.host.autotestMenu(id), funcCount: () => funcsCountRef.current, topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
+    });
     const off = window.host.onMenu((c) => api.current.handleMenu(c));
     const mouse = (e: MouseEvent) => { // buttons 4/5 = back/forward
       if (e.button === 3) { e.preventDefault(); api.current.back(); } else if (e.button === 4) { e.preventDefault(); api.current.forward(); }
@@ -414,7 +479,7 @@ export function App() {
     window.addEventListener("mouseup", mouse);
     // Cmd+Z: the menu shows the accelerator without registering it, so the key arrives here. Text inputs keep their own undo.
     const undoKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "z") return;
+      if (!caps.has("undo") || !(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "z") return;
       if (undoRoute(focusKind(document.activeElement)) === "text") return;
       e.preventDefault(); e.stopPropagation();
       void api.current.edit(e.shiftKey ? "redo" : "undo");
@@ -424,37 +489,45 @@ export function App() {
     window.addEventListener("focusin", pane);
     // quit: save first (the status bar shows "Saving…"), then main stops the sidecar
     const offQuit = window.host.onQuitRequested(() => {
+      const current = programRef.current;
+      if (!caps.has("save") || !current) { void window.host.quitReady({ ok: true }); return; }
       setSaving(true);
-      (openedRef.current ? rpc.call("save", {}) : Promise.resolve({ saved: false })).then(
+      current.api.history.save().then(
         () => window.host.quitReady({ ok: true }),
         (e) => {
-          if (e instanceof RpcError && e.code === -32001) return window.host.quitReady({ ok: true });
+          if (isObsolete(e)) return window.host.quitReady({ ok: true });
           setSaving(false); // the user may cancel the quit in main's "Saving failed" dialog; the app must stay usable
           fail(e);
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("focusin", pane); };
   }, []);
 
   const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
-  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0, busy = !!opening || !!importFor;
+  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0, busy = !!opening || !!importFor || closing || unavailable;
   useEffect(() => {
     const s: MenuState = {
-      canBack: canBack && !busy, canForward: canForward && !busy, canOpen: !busy, canEdit: opened && !busy && !saving,
+      canBack: canBack && !busy, canForward: canForward && !busy, canOpen: !busy, canEdit: opened && !busy && !saving && caps.has("editing"),
+      hasProgram: opened && !busy && !saving, capabilities: [...caps], recovery: backend.recovery,
       undoLabel: undo.canUndo ? "Undo " + (undo.undoName ?? "") : null, redoLabel: undo.canRedo ? "Redo " + (undo.redoName ?? "") : null, dirty: undo.dirty, canClose: opened && !busy && !saving,
     };
     menuRef.current = s; window.host.setMenuState(s).catch(() => {});
   }, [canBack, canForward, busy, opened, saving, undo.canUndo, undo.canRedo, undo.undoName, undo.redoName, undo.dirty]);
-  useEffect(() => { document.title = windowTitle(opened ? programName : null, opened && undo.dirty); }, [opened, programName, undo.dirty]);
+  useEffect(() => { document.title = windowTitle(program?.session.name ?? null, opened && undo.dirty); }, [opened, program, undo.dirty]);
   // program browser: refresh whenever the welcome state is (re)entered (start, after close, after a failed open)
   useEffect(() => {
-    if (opened || opening || !connected) return;
+    if (opened || opening || !caps.has("projects")) return;
     setProgs((x) => ({ ...x, loading: true, error: "" }));
-    progsRun(rpc.call("list_programs", {})).then((l) => { if (l) setProgs({ list: l, loading: false, error: "" }); }, (e) => setProgs({ list: [], loading: false, error: e instanceof Error ? e.message : String(e) }));
-  }, [opened, !!opening, connected, progsVersion]); // eslint-disable-line
+    progsRun(backend.projects.list()).then((l) => { if (l) setProgs({ list: l, loading: false, error: "" }); }, (e) => setProgs({ list: [], loading: false, error: e instanceof Error ? e.message : String(e) }));
+  }, [opened, !!opening, caps, progsVersion]); // eslint-disable-line
 
   const progressRef = useRef(progress); progressRef.current = progress;
+  const symbolSearch = caps.has("symbolSearch") ? ops?.searches.searchSymbols : undefined;
+  const searchLocation = (q: string): Promise<SymbolHit[]> => symbolSearch
+    ? symbolSearch({ query: q, limit: 100 }).result
+    : Promise.resolve(funcs.filter((f) => f.name.toLowerCase().startsWith(q.toLowerCase()))
+        .map((f) => ({ name: f.name, address: f.entry, kind: "function" })));
   const here = nav.current?.address ?? null;
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
@@ -468,27 +541,27 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar canCommand={opened} busy={busy} onCommand={() => setSearchOpen(true)}
+      <Toolbar canCommand={!!map} busy={busy} onCommand={() => setSearchOpen(true)}
         onPick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(p); }} />
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
-      {importFor && !opening && <ImportDialog key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
+      {importFor && !opening && <ImportDialog imports={backend.imports} key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
       {deleting && <Confirm title="Delete program?" message={`Remove ${deleting.entry.name} from the project? Its analysis is deleted; the original file is not touched.`} error={deleting.error} busy={deleting.busy}
         actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
-      {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onRun={(c) => api.current.handleMenu(c)} onClose={() => setSearchOpen(false)} />}
-      {gotoOpen && opened && <GoTo onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
-      {opened ? (
-        <Panes visible={visible}>{{
+      {searchOpen && opened && <SearchPanel capabilities={caps} searchSymbols={symbolSearch} listStrings={caps.has("strings") ? ops?.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={(c) => api.current.handleMenu(c)} onClose={() => setSearchOpen(false)} />}
+      {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
+      {opened ? (map ? (
+        <Panes key={program!.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && caps.has("decompile") }}>{{
           functions: (
             <div className="funcs-col">
               <div className="funcs-row">
-                <BinaryMap map={map!} funcs={funcs} here={here} layers={covLayers} onGo={(a) => go(a, "goto")} />
-                <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
+                <BinaryMap map={map} funcs={funcs} here={here} layers={covLayers} onGo={(a) => go(a, "goto")} />
+                <FunctionList searchSymbols={symbolSearch} funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={caps.has("decompile") ? (e) => { void go(e, "functions"); void tabs.show(e, true); } : undefined} />
               </div>
-              <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />
+              {caps.has("references") && <XrefPanel references={ops!.references} variableReferences={caps.has("variableReferences")} address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />}
             </div>
           ),
-          listing: <Listing map={map!} scrollReq={scrollReq} change={listingChange} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={(a) => setXrefTarget({ type: "address", address: a, label: a })} />,
-          decompiler: (
+          listing: <Listing reader={ops!.listing} initialRows={initialRows} testMode={!!onReady} rowRef={listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={fail} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => setXrefTarget({ type: "address", address: a, label: a }) : undefined} />,
+          decompiler: caps.has("decompile") && (
             <div className="dec">
               <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
               {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
@@ -497,19 +570,26 @@ export function App() {
                 <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
               <div className="editor" style={{ display: active ? undefined : "none" }}>
-                <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
+                <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>
             </div>
           ),
         }}</Panes>
-      ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
-        <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
-      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
+      ) : <div className="notice">
+        {reading && <p role="status">Reading program…</p>}
+        {browseError && <><p role="alert">Could not read the listing for {program?.session.name}. {browseError}</p>
+          <button disabled={busy || reading} onClick={() => { if (program) void loadBrowsing(program); }}>Retry listing</button></>}
+      </div>) : <div className="notice">
+        <p>{caps.has("projects") ? "Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below." : "Open a file to browse its listing."}</p>
+        {caps.has("projects") && <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} />}
+      </div>}
+      {notice && <div className="flash" role="status">{notice}</div>}
+      {opened && dock && <Dock searches={ops!.searches} capabilities={caps} active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash}
         back={[...nav.back].reverse().map((l) => l.address)} forward={[...nav.forward].reverse().map((l) => l.address)} onBack={back} onForward={forward} />
-      {typesOpen && opened && <DataTypes version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}
-      {dlg && <EditDialog spec={dlg.spec} onSubmit={dlg.submit} onClose={() => setDlg(null)} />}
-      {formDlg && <FormDialog title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} onSubmit={formDlg.go} onClose={() => setFormDlg(null)} />}
+      {typesOpen && opened && <DataTypes types={ops!.types} edits={caps.has("typeEditing") ? ops!.typeEdits : undefined} defineData={caps.has("typeEditing") ? ops!.edits.defineData : undefined} version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}
+      {dlg && <EditDialog typeSearch={caps.has("dataTypes") ? ops?.types.listDataTypes : undefined} spec={dlg.spec} onSubmit={dlg.submit} onClose={() => { if (programRef.current === program) setDlg(null); }} />}
+      {formDlg && <FormDialog typeSearch={caps.has("dataTypes") ? ops?.types.listDataTypes : undefined} title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} onSubmit={formDlg.go} onClose={() => { if (programRef.current === program) setFormDlg(null); }} />}
     </div>
   );
 }

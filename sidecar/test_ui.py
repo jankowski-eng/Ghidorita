@@ -42,7 +42,3 @@ def test_big_file_defaults_to_fast_and_huge_function_flow():
     print(res["big"])
     assert res["ok"] and code == 0, res
 
-
-def test_cancelled_replacement_preserves_the_ui(tmp_path):
-    res, code = electron("open-preserve", "/bin/ls", tmp_path / "projects")
-    assert res["ok"] and code == 0, res

@@ -1,3 +1,4 @@
+import type { Searches } from "./backend";
 import { useRef, useState } from "react";
 import type { Address, StringItem } from "../../../protocol";
 import { useDebounced } from "./hooks";
@@ -12,13 +13,13 @@ const usedBy = (go: (a: Address) => void) => (r: StringItem) => {
 };
 
 /** Defined strings: server-paged (list_strings), text filter and minimum length; click or Enter navigates. */
-export function StringsPanel({ version, onGo, onError }: { version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
+export function StringsPanel({ listStrings, version, onGo, onError }: { listStrings: Searches["listStrings"]; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const [q, setQ] = useState("");
   const [min, setMin] = useState("4");
   const [refOnly, setRefOnly] = useState(false);
   const dq = useDebounced(q.trim(), 250), dmin = useDebounced(Math.max(1, Math.floor(Number(min)) || 1), 250);
   const sc = useRef(scanner()).current;
-  const t = usePaged<StringItem>((offset, limit) => sc.call("list_strings", { offset, limit, minLength: dmin, query: dq, referencedOnly: refOnly }), JSON.stringify([dq, dmin, refOnly, version]), onError, sc.cancelAll);
+  const t = usePaged<StringItem>((offset, limit) => sc.run(listStrings({ offset, limit, minLength: dmin, query: dq, referencedOnly: refOnly })), JSON.stringify([dq, dmin, refOnly, version]), onError, sc.cancelAll);
   const cols: Col<StringItem>[] = [
     { key: "address", label: "Address", width: 130, render: (r) => r.address },
     { key: "refs", label: "Used by", width: 260, render: usedBy(onGo) },

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { Address, SymbolKind } from "../../../protocol";
-import { rpc } from "./client";
+import type { Address, Capability, SymbolKind } from "../../../protocol";
+import type { Searches } from "./backend";
+import { allowsCommand } from "../capabilities";
 import { addressOf } from "./parseGoto";
-import { searchSymbols } from "./symbols";
 import { latest } from "./latest";
 import { matchActions, type CommandAction } from "./commandActions";
 import type { MenuCommand } from "../preload";
@@ -12,8 +12,8 @@ import { useDebounced, useRestoreFocus } from "./hooks";
 type Hit = { kind: SymbolKind | "string" | "address"; name: string; address: Address };
 const short = (v: string) => (v.length > 80 ? v.slice(0, 80) + "…" : v).replace(/\s+/g, " ");
 
-/** Command bar (Cmd+K): symbols, defined strings and typed addresses; ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
-export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
+/** Command bar (Cmd+K): symbols, defined strings and typed addresses (each when the provider offers it); ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
+export function SearchPanel({ capabilities, searchSymbols, listStrings, onGo, onRun, onClose }: { capabilities: ReadonlySet<Capability>; searchSymbols?: Searches["searchSymbols"]; listStrings?: Searches["listStrings"]; onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
   useRestoreFocus();
   const [q, setQ] = useState("");
   const [syms, setSyms] = useState<Hit[]>([]);
@@ -21,10 +21,10 @@ export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => vo
   const [cur, setCur] = useState(0);
   const [msg, setMsg] = useState("");
   const dq = useDebounced(q, 150);
-  const actionMode = q.startsWith(">");
-  const acts: CommandAction[] = actionMode ? matchActions(q.slice(1)) : [];
-  const addr = actionMode ? null : addressOf(q);
-  const hits: Hit[] = [...(addr ? [{ kind: "address" as const, name: "Go to address", address: addr }] : []), ...syms, ...strs];
+  const addr = q.startsWith(">") ? null : addressOf(q);
+  const actionMode = q.startsWith(">") || (!searchSymbols && !addr);
+  const acts: CommandAction[] = actionMode ? matchActions(q.replace(/^>/, "")).filter(({ cmd }) => allowsCommand(capabilities, cmd)) : [];
+  const hits: Hit[] = actionMode ? [] : [...(addr ? [{ kind: "address" as const, name: "Go to address", address: addr }] : []), ...syms, ...strs];
   const n = actionMode ? acts.length : hits.length;
   const runSyms = useRef(latest()).current, runStrs = useRef(latest()).current;
   const input = useRef<HTMLInputElement>(null);
@@ -33,11 +33,14 @@ export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => vo
     const t = dq.trim();
     if (!t || t.startsWith(">")) { runSyms(Promise.resolve(null)); runStrs(Promise.resolve(null)); setSyms([]); setStrs([]); setMsg(""); return; }
     const fail = (e: unknown) => setMsg(e instanceof Error ? e.message : String(e));
-    runSyms(searchSymbols(t, 100)).then((r) => { if (r) { setSyms(r.map((h) => ({ kind: h.kind, name: h.name, address: h.address }))); setCur(0); setMsg(""); } }, (e) => { setSyms([]); fail(e); });
+    const symJob = searchSymbols?.({ query: t, limit: 100 });
+    if (symJob) runSyms(symJob.result).then((r) => { if (r) { setSyms(r.map((h) => ({ kind: h.kind, name: h.name, address: h.address }))); setCur(0); setMsg(""); } }, (e) => { setSyms([]); fail(e); });
     // strings need a few characters to be useful; a scan that fails (no program yet) just shows no strings
-    if (t.length >= 3) runStrs(rpc.call("list_strings", { query: t, limit: 20, minLength: 3 })).then((r) => { if (r) setStrs(r.items.map((s) => ({ kind: "string" as const, name: short(s.value), address: s.address }))); }, () => setStrs([]));
+    const strJob = t.length >= 3 ? listStrings?.({ query: t, limit: 20, minLength: 3 }) : undefined;
+    if (strJob) runStrs(strJob.result).then((r) => { if (r) setStrs(r.items.map((s) => ({ kind: "string" as const, name: short(s.value), address: s.address }))); }, () => setStrs([]));
     else { runStrs(Promise.resolve(null)); setStrs([]); }
-  }, [dq]); // eslint-disable-line
+    return () => { void runSyms(Promise.resolve(null)); void runStrs(Promise.resolve(null)); symJob?.cancel(); strJob?.cancel(); };
+  }, [dq, searchSymbols, listStrings]); // eslint-disable-line
   const go = (h?: Hit) => { if (h) { onGo(h.address); onClose(); } };
   const runAct = (a?: CommandAction) => { if (a) { onClose(); setTimeout(() => onRun(a.cmd), 0); } }; // after the bar unmounts and focus is back in the code pane, which edit actions read
   const enter = () => (actionMode ? runAct(acts[cur]) : go(hits[cur]));
@@ -50,9 +53,9 @@ export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => vo
   useEffect(() => { document.getElementById(`sym-${cur}`)?.scrollIntoView({ block: "nearest" }); }, [cur]);
   const empty = !actionMode && q.trim() && !hits.length && !msg;
   return (
-    <div className="search" role="dialog" aria-label="Search symbols" onKeyDown={onKey}>
+    <div className="search" role="dialog" aria-label={searchSymbols ? "Search symbols" : "Command bar"} onKeyDown={onKey}>
       <input ref={input} role="combobox" aria-expanded={n > 0} aria-controls="sym-list" aria-activedescendant={n > cur ? `sym-${cur}` : undefined}
-        aria-label="Symbol or action" placeholder="Search symbols, strings or an address; > for actions" value={q} onChange={(e) => { setQ(e.target.value); setSyms([]); setStrs([]); setCur(0); }} />
+        aria-label="Symbol or action" placeholder={searchSymbols ? "Search symbols, strings or an address; > for actions" : "Go to an address; > for actions"} value={q} onChange={(e) => { setQ(e.target.value); setSyms([]); setStrs([]); setCur(0); }} />
       <div id="sym-list" role="listbox" aria-label="Symbols">
         {acts.map((a, i) => (
           <div key={a.label} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}

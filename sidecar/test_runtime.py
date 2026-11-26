@@ -225,7 +225,7 @@ def test_disconnected_open_keeps_opening_until_worker_stops(tmp_path):
 
     async def go():
         lanes = SimpleNamespace(opening=None, settle=Lanes.settle)
-        ctx = SimpleNamespace(loop=asyncio.get_running_loop(), session=Session(), lanes=lanes)
+        ctx = SimpleNamespace(loop=asyncio.get_running_loop(), session=Session(), lanes=lanes, progress=lambda *_a, **_k: None)
         domain = Program(ctx)
         domain._check_options = lambda *_: {}
         domain._do_open = lambda *_: (release.wait(2), {})[1]

@@ -63,7 +63,8 @@ class Scan:
 
 class Opening:
     """The open_binary in progress. cancel() is called from the loop thread, mon is swapped by thread O."""
-    def __init__(self):
+    def __init__(self, request_id=None):
+        self.request_id = request_id
         self.cancelled, self.mon, self.saving, self.finished = False, None, False, False
         self.lock = threading.Lock()
 

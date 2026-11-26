@@ -1,4 +1,3 @@
-import { rpc } from "./client";
 import { byLabel, press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Round 5 flow of the autotest, all through the UI: comment prefill per kind, a label on an
@@ -6,19 +5,19 @@ import { byLabel, press, setSelect, sleep, typeInto, waitFor, type AutotestCtx }
 // made and ends with the default import open.
 export async function runR5Flow(file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const R: Record<string, any> = (result.r5 = {});
-  const fl = await rpc.call("list_functions", {});
+  const fl = await c.program().functions.list();
   const lb = () => document.querySelector<HTMLElement>(".lbox")!;
   const dialog = (t: string) => waitFor(() => byLabel("dialog", t), 5000, `dialog "${t}"`);
   const closed = (t: string) => waitFor(() => !byLabel("dialog", t), 8000, `dialog "${t}" to close`);
   const hasLabel = (n: string) => [...document.querySelectorAll(".lrow.lbl .l")].some((x) => x.textContent === n + ":");
-  const undoN = async (n: number) => { for (let i = 0; i < n; i++) await rpc.call("undo", {}); await sleep(300); };
+  const undoN = async (n: number) => { for (let i = 0; i < n; i++) await c.program().history.undo(); await sleep(300); };
   const goTop = async (a: string) => { await c.goAddr(a); await waitFor(() => { const r = (window as any).__listing.rowAt(a); return !!r && c.topAddr() === r.address; }, 8000, "listing at " + a); };
 
   // 3. Comment dialog: prefill per kind from get_comments, text follows the kind selector, drafts survive switching
   const entry = fl[Math.min(3, fl.length - 1)].entry;
-  const before = await rpc.call("get_comments", { address: entry });
+  const before = await c.program().edits.getComments({ address: entry });
   const texts = { eol: "r5 eol", pre: "r5 pre", plate: "r5 plate" } as const;
-  for (const [k, t] of Object.entries(texts)) await rpc.call("set_comment", { address: entry, kind: k as "eol", text: t });
+  for (const [k, t] of Object.entries(texts)) await c.program().edits.setComment({ address: entry, kind: k as "eol", text: t });
   await goTop(entry);
   lb().focus(); press(lb(), ";");
   const d = await dialog("Set comment");
@@ -32,16 +31,16 @@ export async function runR5Flow(file: string, c: AutotestCtx, result: Record<str
   setSelect(sel, "post"); await sleep(60); cm.draftKept = plateBack && area().value === "r5 post draft";
   setSelect(sel, "pre"); await sleep(60); typeInto(area(), "r5 pre edited"); press(area(), "Enter"); await closed("Set comment");
   await sleep(300);
-  const after = await rpc.call("get_comments", { address: entry });
+  const after = await c.program().edits.getComments({ address: entry });
   cm.saved = after.pre === "r5 pre edited" && after.eol === texts.eol && after.plate === texts.plate && !after.post && !after.repeatable;
   await undoN(4);
-  cm.restored = JSON.stringify(await rpc.call("get_comments", { address: entry })) === JSON.stringify(before);
+  cm.restored = JSON.stringify(await c.program().edits.getComments({ address: entry })) === JSON.stringify(before);
   R.commentOk = Object.values(cm).every((v) => v === true);
   if (!R.commentOk) return false;
 
   // 4. L on an unlabeled address creates the label (Rename is for existing ones)
   const big = [...fl].sort((a, b) => b.size - a.size)[0];
-  const unl = (await rpc.call("listing_rows", { address: big.entry, count: 12 })).slice(1).find((r) => !r.label);
+  const unl = (await c.program().listing.rows({ address: big.entry, count: 12 })).slice(1).find((r) => !r.label);
   if (!unl) throw new Error("no unlabeled row");
   await goTop(unl.address);
   lb().focus(); press(lb(), "l");
@@ -90,7 +89,7 @@ export async function runR5Flow(file: string, c: AutotestCtx, result: Record<str
   // 5. Import dialog: profile choice; Fast is sent as profile "fast", a real fast open shows in the program browser
   const importDlg = async (path: string) => { c.command({ type: "open-path", path }); return waitFor(() => byLabel("dialog", "Import binary"), 10000, "import dialog"); };
   const pr = (dd: Element) => dd.querySelector<HTMLSelectElement>('select[aria-label="Analysis profile"]')!;
-  const progs = await rpc.call("list_programs", {});
+  const progs = await c.backend.projects.list();
   if (progs.some((p) => p.sourcePath?.startsWith("/mock/"))) { // mock only: a 30 MB file defaults to Fast (the real default needs a real >20 MB file; npm test covers the rule)
     const dd = await importDlg("/mock/big.bin");
     await waitFor(() => pr(dd), 10000, "big dialog ready"); // a .bin file is Raw Binary: no language yet, so Open stays disabled
@@ -105,7 +104,7 @@ export async function runR5Flow(file: string, c: AutotestCtx, result: Record<str
   press(dd.querySelector<HTMLElement>('[aria-label="Loader"]')!, "Enter");
   await waitFor(() => c.status().opening, 10000, "fast open to start");
   await waitFor(() => !c.status().opening && c.status().opened, 600000, "fast open to finish");
-  const fastId = (await rpc.call("list_programs", {})).find((p) => p.options.profile === "fast")?.programId;
+  const fastId = (await c.backend.projects.list()).find((p) => p.options.profile === "fast")?.programId;
   R.fastOpenStored = !!fastId;
   c.command({ type: "close-program" });
   await waitFor(() => !c.status().opened && !document.querySelector(".main"), 10000, "welcome after close");

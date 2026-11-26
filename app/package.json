@@ -4,11 +4,12 @@
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
-    "build": "electron-vite build",
-    "start": "electron-vite build && electron .",
+    "build": "electron-vite build && node scripts/build-fixture.mjs",
+    "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "dist": "../packaging/prepare.sh && electron-vite build && electron-builder --mac dmg --arm64"
+    "dist": "../packaging/prepare.sh && npm run build && electron-builder --mac dmg --arm64",
+    "dist:fixture": "npm run build && electron-builder --config fixture.builder.cjs --mac dir --arm64"
   },
   "devDependencies": {
     "@types/node": "^26.6.10",
@@ -39,6 +40,7 @@
     },
     "files": [
       "out/**",
+      "!out/providers/**",
       "build/icon.png",
       "package.json",
       "!node_modules/{monaco-editor,@monaco-editor,react,react-dom,@tanstack}/**"
@@ -59,6 +61,10 @@
       {
         "from": "bundle/sidecar",
         "to": "sidecar"
+      },
+      {
+        "from": "out/providers/fixture.cjs",
+        "to": "providers/fixture.cjs"
       }
     ],
     "mac": {

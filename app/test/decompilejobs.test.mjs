@@ -7,7 +7,7 @@ const { decompileJobs } = await import("data:text/javascript," + encodeURICompon
 
 const fake = () => {
   const calls = [];
-  return { calls, callCancellable: (m, p) => { const c = { m, p, cancelled: false }; c.result = new Promise((res) => { c.resolve = res; }); c.cancel = () => { c.cancelled = true; }; calls.push(c); return c; } };
+  return { calls, decompile: (p) => { const c = { p, cancelled: false }; c.result = new Promise((res) => { c.resolve = res; }); c.cancel = () => { c.cancelled = true; }; calls.push(c); return c; } };
 };
 
 test("superseding cancels the previous request; its late result is not current", async () => {

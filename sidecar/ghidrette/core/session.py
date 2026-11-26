@@ -1,5 +1,5 @@
 """The open program and what every domain needs to touch it: need(), addr(), edit() (one transaction), the undo snapshot."""
-import re, threading
+import re, threading, uuid
 
 from .args import MASK64
 from .errors import INVALID, NO_PROGRAM, NOT_FOUND, RpcError, java_error
@@ -21,12 +21,26 @@ def clean_undo():
 class Session:
     def __init__(self):
         self.program = self.results = self.consumer = None
-        self.program_id = None
+        self.program_id = self.session_id = self.name = None
         self.epoch = 0                    # bumped whenever the program changes (open/close); guarded by lock
         self.revision = 0                 # bumped after every write; protects prepared variable edits
         self.lock = threading.Lock()      # the program swap: program + epoch (+ lanes.running/active)
         self.undo_snap = clean_undo()
         self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
+
+    def publish(self, program, key, name):
+        with self.lock:
+            self.epoch += 1
+            self.program, self.program_id, self.name = program, key, name
+            self.session_id = uuid.uuid4().hex
+            return self._descriptor()
+
+    def _descriptor(self):
+        return {"sessionId": self.session_id, "programId": self.program_id, "name": self.name} if self.program is not None else None
+
+    def active(self):
+        with self.lock:
+            return self._descriptor()
 
     def need(self):
         if self.program is None:
