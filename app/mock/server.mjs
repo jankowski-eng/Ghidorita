@@ -133,7 +133,7 @@ const handlers = {
   },
   list_languages() { if (opening) throw { code: -32005, message: "Busy" }; return LANGS; },
   save(_, notify) {
-    if (dirty) { dirty = false; notify("program_changed", { ranges: [], kinds: [], undo: undoState() }); }
+    if (dirty) { dirty = false; undoStack.length = 0; redoStack.length = 0; notify("program_changed", { ranges: [], kinds: [], undo: undoState() }); }
     return {};
   },
   close_program() {

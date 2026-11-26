@@ -165,7 +165,11 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const defaultSent = JSON.stringify(sent[0]);
       d = await importDlg(file);
       await waitFor(() => !openBtn(d).disabled, 10000, "import dialog ready 2");
-      const langSel = d.querySelector<HTMLSelectElement>('select[aria-label="Language"]')!;
+      // Raw Binary is the one stock loader with a base address and a free language choice (real sidecar: Mach-O has neither)
+      const loader2 = d.querySelector<HTMLSelectElement>('select[aria-label="Loader"]')!;
+      setSelect(loader2, [...loader2.options].find((o) => /Raw Binary/.test(o.textContent!))!.value);
+      const langSel = await waitFor(() => d.querySelector<HTMLSelectElement>('select[aria-label="Language"]'), 5000, "language select");
+      await waitFor(() => langSel.options.length > 5 || (langSel.options.length > 2), 5000, "language list");
       const other = [...langSel.options].find((o) => o.value && o.value !== langSel.value)!;
       setSelect(langSel, other.value);
       const bi = d.querySelector<HTMLInputElement>('input[aria-label="Base address"]')!;
