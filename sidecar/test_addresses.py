@@ -154,8 +154,51 @@ def test_raw_blob_above_2_63_over_the_wire(tmp_path):
                 temp = next(t["varName"] for t in r["tokens"] if t.get("varName", "").endswith("Var1"))
                 uses = await c.ok("variable_uses", entry=H(0), name=temp)
                 assert {u["kind"] for u in uses} == {"write", "read"} and all(u["from"].startswith("0xffffffff8000") for u in uses)
+                # cancel right after sending: either the cancel won (Cancelled, nothing cached) or the answer was already on its way; never a hang, and a later call is right
+                await c.ok("undo_state")
+                rid = await c.send("variable_uses", entry=H(0x40), name="x")
+                cancelled = await c.ok("cancel_decompile", id=rid)
+                r2 = await c.reply(rid)
+                assert ("error" in r2 and r2["error"]["code"] == -32002 and cancelled["cancelled"]) or "result" in r2, r2
+                assert await c.ok("variable_uses", entry=H(0), name=temp) == uses
                 await c.err("variable_uses", -32004, entry=H(5), name=temp)  # NotFound: not a function entry
                 await c.err("listing_rows", -32602, address="0x10000000000000000", count=1)  # 2^64: out of range
         run(go())
     finally:
         proc.stop()
+
+
+def test_segmented_real_mode(sc):
+    """x86 16-bit real mode (segmented default space): linear and seg:off forms name the same byte; a function and its xrefs round-trip."""
+    from inproc import INVALID
+    from ghidrette.core.errors import RpcError
+    code = bytes.fromhex("e80300c3") + bytes([0x90] * 2) + bytes.fromhex("b80100c3")  # call +3 (-> 0x6); ret; 2 nops; mov ax,1; ret
+    p = build(sc, "t_seg", [("code", 0x10000, code, False)], lang="x86:LE:16:Real Mode")
+    f = sc.fmtr(p)
+    assert f(sc.addr("1000:0004")) == f(sc.addr("0x10004")) == "0x10004"
+    assert f(sc.addr("0x10004")) == "0x10004"
+    for bad in ("zz:0004", "1000:", "12345:0004"):
+        with pytest.raises(RpcError) as e:
+            sc.addr(bad)
+        assert e.value.code == INVALID
+    sc.create_function("1000:0000", "seg_main")
+    fn = sc.list_functions()
+    assert [x["name"] for x in fn] == ["seg_main"] and fn[0]["entry"] == "0x10000"
+    assert sc.get_function_at("1000:0002")["entry"] == "0x10000"
+    assert sc.listing_rows("1000:0000", 1)[0]["address"] == "0x10000"
+    assert any(r["to"] == "0x10006" for r in sc.xrefs_from("0x10000")), sc.xrefs_from("0x10000")
+    assert [x["from"] for x in sc.xrefs_to("1000:0006")] == ["0x10000"]
+
+
+def test_aarch64_blob_above_2_63(sc):
+    """AArch64 code at 0xffffffff80000000: bl +0x10; ret; ... ; mov w0,#1; ret. Function, xrefs, decompile addresses."""
+    code = bytes.fromhex("04000094c0035fd6") + bytes(8) + bytes.fromhex("20008052c0035fd6") + bytes(0x30)
+    p = build(sc, "t_a64", [("hi", HI, code, False)], lang="AARCH64:LE:64:v8A")
+    sc.create_function(H(0), "a64_main")
+    sc.create_function(H(0x10), "a64_leaf")
+    assert [f["entry"] for f in sc.list_functions()] == [H(0), H(0x10)]
+    assert [x["from"] for x in sc.xrefs_to(H(0x10))] == [H(0)] and sc.xrefs_to(H(0x10))[0]["kind"] == "call"
+    assert sc.get_function_at(H(0x14))["entry"] == H(0x10)
+    r = sc.decompile(H(0), job=jobs(sc)[0])
+    assert r["tokens"] and not any(t.get("address", "").startswith("-") for t in r["tokens"])
+    assert any(t.get("targetFunction") == H(0x10) for t in r["tokens"]), r["text"]

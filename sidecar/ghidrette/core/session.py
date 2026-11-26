@@ -34,13 +34,19 @@ class Session:
 
     def addr(self, s, prog=None):
         """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1.
-        shortcut: segmented addresses (real-mode "1000:0042", Ghidra's SegmentedAddress) are not parsed (the prefix is read as a space name,
-        so they are InvalidArgument), untested on a DOS/MZ program; upgrade by taking AddressFactory.getAddress(s) for segmented spaces."""
+        A program whose default space is segmented (x86 real mode) also takes Ghidra's "1000:0042" (segment:offset); it is sent back as the
+        linear "0x10042" (the flat offset round-trips: the same byte, the canonical segment is Ghidra's choice)."""
         prog = prog or self.need()
         try:
             f = prog.getAddressFactory()
             name, _, h = s.rpartition(":") if ":" in s else ("", "", s)
             sp = f.getAddressSpace(name[:-1] if name.endswith(":") else name) if name else f.getDefaultAddressSpace()
+            if sp is None and re.fullmatch(r"[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}", s):
+                from ghidra.program.model.address import SegmentedAddressSpace
+                if isinstance(f.getDefaultAddressSpace(), SegmentedAddressSpace):
+                    a = f.getAddress(s)
+                    if a is not None:
+                        return a
             if sp is None or not re.fullmatch(r"(0[xX])?[0-9a-fA-F]{1,16}", h):
                 raise ValueError(s)
             off = int(h, 16)

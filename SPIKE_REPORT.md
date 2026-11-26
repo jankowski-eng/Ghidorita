@@ -384,11 +384,18 @@ Branch `claude/round8-addresses-xrefs-ee9989` (asked for as `round8/addresses-xr
 | 100 backward fetches | median 4.43 ms, p95 7.78, max 15.5 | median 4.55 ms, p95 7.78, max 16.5 |
 Within noise. I did **not** measure decompile latency: `_tokens` now calls `getHighSymbol` for every variable token (one more JNI call per token).
 
-**Not tested**
-- Segmented addresses (16-bit MZ/DOS): no fixture; `Session.addr` does not parse `1000:0042` (it reads `1000` as a space name and answers `InvalidArgument`). Marked `shortcut:` in `session.py`.
-- AArch64 blob: x86-64 only. Overlay functions in the UI: only in-process (the real-sidecar UI has no overlay program; the mock has an overlay listing range but no functions in it).
-- The raw-blob autotest step imports `/bin/ls` bytes as x86-64 (only the address round trip and Go to Address are checked there, no code).
-- `variable_uses` on large functions and on many variables (timing), cancel of a running `variable_uses` in the UI (the cancel path is the decompile one, shared code; the panel cancels on target change, not exercised by a test).
+**Follow-up pass (the items the first pass left open)**
+- **Segmented addresses** (x86 real mode, `x86:LE:16:Real Mode`; built by hand, no DOS/MZ file): `Session.addr` now takes `1000:0042` when the default space is segmented (via `AddressFactory.getAddress`); output stays the linear `0x10042`, which round-trips. `test_segmented_real_mode`: both forms name the same byte, bad forms are `InvalidArgument`, function, `get_function_at`, `listing_rows`, `xrefs_from`/`xrefs_to`. The `shortcut:` comment is gone. A real MZ binary through the DOS loader is still untested.
+- **AArch64** blob at `0xffffffff80000000` (`test_aarch64_blob_above_2_63`): functions, `bl` xref kind `call`, `get_function_at`, decompile token addresses and call target.
+- **Decompile latency** (`bench_sidecar.py`, full, `/bin/ls`, same machine, `main` vs this branch, one run each): 50 cold decompiles while listing: median 5.9 -> 4.6 ms, p95 108 -> 90; 50 largest: median 3.9 -> 2.6, p95 144 -> 136; listing 100 rows random: median 6.0 -> 4.7, p95 19.2 -> 12.2 (the "before" run was noisier than the listing-only one above). No slowdown from `varAddress`; `/bin/ls` functions are small (largest 2.9 KB), so a very large function was not measured.
+- **Cancel of `variable_uses`**: wire test (send, `cancel_decompile` at once: `Cancelled` or the normal answer, then an identical later call returns the same uses). It does not prove a cancel of a long-running decompile.
+- **`AUTOTEST_PHASE=2`** on the full real run's projects dir: passed.
+- Pytest after the additions: `test_addresses.py` 7 tests, all pass.
+
+**Still not tested**
+- A real DOS/MZ binary; overlay functions in the UI against the real sidecar (the UI cannot create overlay blocks, only the mock and in-process tests have them).
+- The raw-blob autotest step imports `/bin/ls` bytes as x86-64 (address round trip and Go to Address only, no code).
+- `variable_uses` timing on very large functions; cancel of a long-running one.
 
 **Found, not fixed**
 - `variable_uses` lists the decompiler's view: a temporary that Ghidra merged or split differently than the C text suggests (8-byte locals splitting into several variables) shows only the uses of the variable whose name was clicked. Struct field uses ("find uses of field") are out of scope. Globals show only references Ghidra recorded (`xrefs_to`), not decompiler-only accesses.
