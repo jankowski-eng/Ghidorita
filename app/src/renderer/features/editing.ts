@@ -25,6 +25,7 @@ export function useEditing(tabs: TabsApi) {
   const define = async (ops: Program["api"], at: Address, dataType: string) => { await ops.edits.defineData({ address: at, dataType }); lastType.current = dataType; };
   const decompilerFocused = (kind: Focus) => kind === "decompiler" || (kind !== "listing" && refs.lastPane.current === "decompiler");
 
+  const dialogOpen = () => !!views.getState().dlg || !!views.getState().formDlg;
   const ask = (current: Program, spec: EditSpec, submit: (v: string, k: CommentKind) => Promise<void>) => {
     if (session.program() === current) views.dispatch({ type: "set", patch: { dlg: { spec, submit } } });
   };
@@ -61,6 +62,7 @@ export function useEditing(tabs: TabsApi) {
     else if (a === "defineArray") {
       const plan = arrayPlan(await ops.listing.rows({ address: at, count: 257 })); // shortcut: looks 256 rows ahead for the next defined item or label
       if (!plan) return session.flash("Define Array works on data, not on code.");
+      if (session.program() !== current || dialogOpen()) return; // the fetch was async: the program or a dialog may have changed meanwhile
       views.dispatch({ type: "set", patch: { formDlg: { title: `Define ${plan.elem}[]`, submit: "Define", fields: [{ key: "count", label: "Number of elements", initial: String(plan.count) }],
         go: async (v) => {
           const n = Number(v.count.trim());
@@ -117,7 +119,6 @@ export function useEditing(tabs: TabsApi) {
     const current = session.program();
     if (!current || session.blocked() || views.getState().importFor || !allowsEdit(caps, a)) return;
     const kind = focusKind(document.activeElement);
-    const dialogOpen = () => !!views.getState().dlg || !!views.getState().formDlg;
     if (a === "undo" || a === "redo") {
       if (undoRoute(kind) === "text") { document.execCommand(a); return; } // a text input keeps its own undo
       if (dialogOpen()) return; // no program undo under an open dialog
