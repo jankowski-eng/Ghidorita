@@ -210,7 +210,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -435,6 +435,14 @@ const handlers = {
     if (i % 5 === 0) out.push({ from: hex(BASE + ((i + 1) % NFUNC) * STEP + 11 * STRIDE), type: "DATA", kind: "data", function: nameOf((i + 1) % NFUNC) }); // a pointer to every 5th function
     out.sort((x, y) => parseInt(x.from, 16) - parseInt(y.from, 16));
     return out.slice(0, lim);
+  },
+  function_calls({ entry }) { // callers from xrefs_to (calls only), callees by CALLS; every 4th callee is a thunk to an external function
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0) nf();
+    const mk = (j) => ({ name: nameOf(j), entry: entryOf(j), external: false, thunk: j % 4 === 0, ...(j % 4 === 0 ? { target: { name: `ext_${j}`, entry: null, external: true } } : {}) });
+    const callers = [...new Set(handlers.xrefs_to({ address: entry, limit: 1000 }).filter((x) => x.kind === "call").map((x) => (parseAddr(x.from) - BASE) / STEP | 0))].map(mk);
+    const callees = [...new Set(CALLS.map((c) => calleeOf(i, c)))].map(mk);
+    return { callers: callers.sort((a, b) => parseAddr(a.entry) - parseAddr(b.entry)), callees: callees.sort((a, b) => parseAddr(a.entry) - parseAddr(b.entry)) };
   },
   xrefs_to_variable({ entry, name }) { // param_1/param_2 (as named now) have references; iVar1 is a decompiler temporary: none, like the real sidecar
     const n = parseAddr(entry), i = idxOfEntry(n);

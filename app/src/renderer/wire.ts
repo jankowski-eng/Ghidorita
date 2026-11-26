@@ -24,6 +24,8 @@ const labelFields = { name: str, entry: address, size: count };
 const sessionFields = { sessionId: nonempty, programId: nonempty, name: nonempty };
 const undo = shape({ dirty: bool, canUndo: bool, canRedo: bool, undoName: optional(str), redoName: optional(str) });
 const xrefTo = array(shape({ from: address, type: str, kind, function: optional(str) }));
+const callRef = { name: str, entry: nullable(address), external: bool };
+const callEdge = shape({ ...callRef, thunk: bool, target: optional(shape(callRef)) });
 const symbolKind = oneOf("function", "label", "data", "external", "variable", "other");
 const source = oneOf("user", "analysis", "imported", "default", "other");
 const typeFields = { name: str, path: str, size: integer, kind: oneOf("struct", "union", "enum", "typedef", "pointer", "function", "array", "builtin") };
@@ -65,6 +67,7 @@ export const results = {
   })) }),
   xrefs_to: xrefTo,
   xrefs_from: array(shape({ to: nullable(address), type: str, kind, target: oneOf("memory", "stack", "register", "external"), label: optional(str) })),
+  function_calls: shape({ callers: array(callEdge), callees: array(callEdge) }),
   xrefs_to_variable: xrefTo,
   variable_uses: xrefTo,
   search_symbols: array(shape({ name: str, address, kind: symbolKind, refs: optional(count) })),

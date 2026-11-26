@@ -63,8 +63,31 @@ async function copyStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, an
   R.copy = { address: addr, bytes: hex, ok: true };
 }
 
+async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("calls"), "provider has no calls capability");
+  let pick: { f: FunctionInfo; r: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["references"]["calls"]>["result"]> } | null = null;
+  for (const f of fl.slice(0, 300)) {
+    const r = await c.program().references.calls({ entry: f.entry }).result;
+    if (r.callers.length && r.callees.some((e) => e.entry)) { pick = { f, r }; break; }
+  }
+  need(pick, "no function with callers and callees");
+  const { f, r } = pick!;
+  await c.select(f.entry);
+  c.command({ type: "dock", panel: "calls" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Calls"]'), 5000, "calls panel");
+  const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
+  await waitFor(() => rows().length === r.callers.length + r.callees.length, 10000, "calls rows");
+  need(region.textContent!.includes(`${r.callers.length} callers, ${r.callees.length} callees`), "counts in the header");
+  const target = [...r.callers, ...r.callees].find((e) => e.entry && e.entry !== f.entry)!;
+  const row = rows().find((x) => x.textContent!.includes(target.entry!))!;
+  row.click();
+  await waitFor(() => c.selected() === target.entry || c.topAddr() === target.entry, 20000, "navigation to the clicked call");
+  R.calls = { entry: f.entry, callers: r.callers.length, callees: r.callees.length, clicked: target.name, thunks: [...r.callers, ...r.callees].filter((e) => e.thunk).length };
+}
+
 export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const R: Record<string, any> = (result.quick = {});
   await copyStep(fl, c, R);
+  await callsStep(fl, c, R);
   return true;
 }

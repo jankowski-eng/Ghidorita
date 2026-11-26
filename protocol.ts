@@ -130,7 +130,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -184,6 +184,8 @@ export interface Methods {
   // Ghidra archive (.gzf) of the open program, written at an absolute `path`; exports the in-memory state, unsaved edits included. Lane R.
   export_gzf: { params: { path: string }; result: { path: string; bytes: number } };
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
+  // Callers and callees of one function (Ghidra's getCallingFunctions / getCalledFunctions). Scan lane, cancellable with cancel_search. Capability "calls".
+  function_calls: { params: { entry: Address }; result: FunctionCalls };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
   // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.
@@ -271,6 +273,10 @@ export interface TopSymbol extends SymbolHit { refs: number; group: "entry" | "i
 export interface SymbolRow { name: string; address: Address | null; kind: SymbolKind; namespace: string; source: SymbolSource } // address null: external or not in the default memory space (not navigable)
 /** Page of the symbol table in `sort` order (default address ascending), after the name substring `query` (case-insensitive, `*`/`?` wildcards) and `kinds` (any of; empty = all). limit <= 1000. */
 export interface ListSymbolsParams { offset?: number; limit?: number; query?: string; kinds?: SymbolKind[]; sort?: SymbolSort; desc?: boolean }
+/** A function in a call list. entry is null for an external function (not navigable). A thunk names the function it finally forwards to. */
+export interface CallRef { name: string; entry: Address | null; external: boolean }
+export interface CallEdge extends CallRef { thunk: boolean; target?: CallRef }
+export interface FunctionCalls { callers: CallEdge[]; callees: CallEdge[] }
 export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other";
 export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
 /** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */

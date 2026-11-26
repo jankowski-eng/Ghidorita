@@ -111,3 +111,33 @@ def test_xrefs_from_external_on_pe(tmp_path):
         run(go())
     finally:
         proc.stop()
+
+
+def test_function_calls_on_ls(env):
+    """/bin/ls: a function and the functions it calls agree with xrefs_to; thunks (import stubs) say what they forward to; sorted, entries unique."""
+    fns = env["fns"]
+    async def go():
+        async with Client(env["proc"].port) as c:
+            by = {f["entry"]: f for f in fns}
+            best = None
+            for f in fns[:400]:  # the first function with a call to something and a caller
+                r = await c.ok("function_calls", entry=f["entry"])
+                if r["callers"] and r["callees"]:
+                    best = (f, r)
+                    break
+            assert best, "no function with callers and callees among the first 400"
+            f, r = best
+            for side in ("callers", "callees"):
+                es = [e["entry"] for e in r[side] if e["entry"]]
+                assert es == sorted(es, key=lambda a: int(a, 16)) and len(set(es)) == len(es)
+            for caller in r["callers"]:
+                assert caller["entry"] in by, caller
+                callee_entries = [e["entry"] for e in (await c.ok("function_calls", entry=caller["entry"]))["callees"]]
+                assert f["entry"] in callee_entries, "a caller lists the function among its callees"
+                assert any(x["kind"] == "call" for x in await c.ok("xrefs_to", address=f["entry"])), "xrefs_to has the call too"
+            thunks = [e for e in r["callees"] if e["thunk"]]
+            for e in thunks:
+                assert e["target"]["name"]
+            await c.err("function_calls", NOT_FOUND, entry="0x10")
+            await c.err("function_calls", INVALID, entry="zz")
+    run(go())

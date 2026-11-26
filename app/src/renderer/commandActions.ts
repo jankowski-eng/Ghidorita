@@ -27,6 +27,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Symbol Table", cmd: { type: "dock", panel: "symbols" } },
   { label: "Defined Strings", cmd: { type: "dock", panel: "strings" } },
   { label: "Changes", cmd: { type: "dock", panel: "changes" } },
+  { label: "Show Calls (callers and callees)", cmd: { type: "dock", panel: "calls" } },
   { label: "Search Memory", cmd: { type: "dock", panel: "memsearch" } },
   { label: "Data Type Manager", cmd: { type: "datatypes" } },
   { label: "Coverage", cmd: { type: "dock", panel: "coverage" } },

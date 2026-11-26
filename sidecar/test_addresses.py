@@ -5,6 +5,7 @@ import re
 import pytest
 
 from inproc import build
+from ghidrette.core.errors import NOT_FOUND, RpcError
 
 HI = 0xFFFFFFFF80000000
 H = lambda o: "0x%x" % (HI + o)
@@ -83,6 +84,21 @@ def test_xrefs_symbols_strings_search(sc, prog):
     assert [i["address"] for i in m["items"]] == [ov(0x10)]
     m = sc.search_memory("48 8b 05", start=H(0x10), scan=jobs(sc)[1])  # resumes at an unsigned start above 2^63
     assert [i["address"] for i in m["items"]] == [H(0x40)]
+
+
+def test_function_calls_known_edges_and_overlay(sc, prog):
+    """f (0xffffffff80000000) calls g (+0x40); h in the overlay calls h2. Entries keep their space, nothing external or thunk."""
+    _, ovs, ov = prog
+    scan = lambda: jobs(sc)[1]
+    f = sc.function_calls(H(0), scan=scan())
+    assert f == {"callers": [], "callees": [{"name": "fn_g", "entry": H(0x40), "external": False, "thunk": False}]}, f
+    g = sc.function_calls(H(0x40), scan=scan())
+    assert [c["name"] for c in g["callers"]] == ["fn_f"] and g["callees"] == []
+    h = sc.function_calls(ov(0), scan=scan())
+    assert [c["entry"] for c in h["callees"]] == [ov(0x10)] and h["callers"] == []
+    with pytest.raises(RpcError) as e:
+        sc.function_calls(H(0x41), scan=scan())  # inside a function, not its entry
+    assert e.value.code == NOT_FOUND
 
 
 def test_decompiler_tokens_globals_and_temporaries(sc, prog):
@@ -202,3 +218,29 @@ def test_aarch64_blob_above_2_63(sc):
     r = sc.decompile(H(0), job=jobs(sc)[0])
     assert r["tokens"] and not any(t.get("address", "").startswith("-") for t in r["tokens"])
     assert any(t.get("targetFunction") == H(0x10) for t in r["tokens"]), r["text"]
+
+
+def test_function_calls_thunks_and_externals(sc):
+    """A calls thunk T (-> B in memory) and thunk T2 (-> an external function): both are marked, both names are given, the external has no entry."""
+    from ghidra.program.model.symbol import SourceType
+    code = bytearray(0x50)
+    code[0:5] = bytes([0xE8]) + (0x20 - 5).to_bytes(4, "little")    # call T  @0x20
+    code[5:10] = bytes([0xE8]) + (0x30 - 10).to_bytes(4, "little")  # call T2 @0x30
+    code[10] = 0xC3
+    for o in (0x20, 0x30, 0x40):
+        code[o] = 0xC3
+    p = build(sc, "t_thunk", [("code", 0x401000, bytes(code), False)])
+    for o, n in ((0, "caller_a"), (0x20, "stub_t"), (0x30, "stub_t2"), (0x40, "real_b")):
+        sc.create_function("0x%x" % (0x401000 + o), n)
+    fm = p.getFunctionManager()
+    def thunk(pr):
+        ext = pr.getExternalManager().addExtFunction("LIBC.DLL", "ext_printf", None, SourceType.USER_DEFINED).createFunction()
+        fm.getFunctionAt(sc.addr("0x401020")).setThunkedFunction(fm.getFunctionAt(sc.addr("0x401040")))
+        fm.getFunctionAt(sc.addr("0x401030")).setThunkedFunction(ext)
+    sc.edit("thunks", thunk)
+    r = sc.function_calls("0x401000", scan=jobs(sc)[1])
+    assert r["callers"] == []
+    t, t2 = r["callees"]
+    assert t == {"name": "stub_t", "entry": "0x401020", "external": False, "thunk": True, "target": {"name": "real_b", "entry": "0x401040", "external": False}}, t
+    assert t2["name"] == "stub_t2" and t2["thunk"] and t2["entry"] == "0x401030" and t2["target"] == {"name": "ext_printf", "entry": None, "external": True}, t2
+    assert [c["name"] for c in sc.function_calls("0x401040", scan=jobs(sc)[1])["callees"]] == []

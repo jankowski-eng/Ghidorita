@@ -74,6 +74,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: "CmdOrCtrl+Shift+Y", click: () => send({ type: "dock", panel: "symbols" }) },
         { id: "strings", label: "Defined Strings", enabled: state.hasProgram && caps.has(dockCapability.strings), accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
         { id: "changes", label: "Changes", enabled: state.hasProgram && caps.has(dockCapability.changes), accelerator: "CmdOrCtrl+Shift+H", click: () => send({ type: "dock", panel: "changes" }) },
+        { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: "CmdOrCtrl+Shift+J", click: () => send({ type: "dock", panel: "calls" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
         { id: "memsearch", label: "Search Memory…", enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },

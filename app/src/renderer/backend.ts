@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  CallGraph, ChangeKind, FunctionGraph, TopSymbol,
+  CallGraph, ChangeKind, FunctionCalls, FunctionGraph, TopSymbol,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "connection" | "protocol" | "internal";
@@ -55,6 +55,8 @@ export interface References {
   variableUses(params: { entry: Address; name: string; timeoutSecs?: number }): Job<XrefTo[]>;
   /** Callers and callees around `entry`, or every route to `to` (callGraph capability). */
   callGraph(params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }): Promise<CallGraph>;
+  /** callers and callees of a function; capability "calls" */
+  calls(params: { entry: Address }): Job<FunctionCalls>;
 }
 
 export interface Searches {

@@ -42,11 +42,11 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
 export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown }) {
   const s = useSession();
   const program = useProgram((p) => p.program), funcs = useProgram((p) => p.funcs);
-  const { dock, dataVersion, covVersion } = useViews((v) => v);
+  const { dock, dataVersion, covVersion, fn } = useViews((v) => v);
   const cov = useMemo(() => coverageActions(s), [s]);
   if (!program || !dock) return null;
   return <Dock searches={program.api.searches} capabilities={s.caps} active={dock} onActivate={(d) => s.views.dispatch({ type: "set", patch: { dock: d } })} onClose={() => s.views.dispatch({ type: "set", patch: { dock: null } })}
-    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
+    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
 }
 
 export function TypeManager() {

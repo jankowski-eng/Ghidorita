@@ -55,6 +55,35 @@ class Xrefs:
         out.sort(key=lambda o: akey(o["from"]))
         return out
 
+    @rpc(lane="scan")
+    def function_calls(self, entry, scan=None):
+        """Callers and callees of the function at `entry` (Function.getCallingFunctions / getCalledFunctions). Each is {name, entry, external, thunk, target?}:
+        `entry` is null for an external function (not navigable); a thunk carries `target`, the function it finally forwards to (the same fields
+        without `thunk`), so a client can show `_printf` and `printf` together. Memory entries ascending, externals last by name. NotFound if no
+        function at `entry`. Cancellable like the other scans.
+        shortcut: no cap on the lists and no call-site addresses (Ghidra's calls-API has none); upgrade with xrefs_to when a site list is needed."""
+        with self.ctx.lanes.scanning(scan) as prog:
+            f = prog.getFunctionManager().getFunctionAt(self.ses.addr(entry, prog))
+            if f is None:
+                raise RpcError(NOT_FOUND, "no function at %s" % entry)
+            fa = self.ses.fmtr(prog)
+
+            def ref(g):
+                ext = bool(g.isExternal())
+                return {"name": str(g.getName()), "entry": None if ext else fa(g.getEntryPoint()), "external": ext}
+
+            def item(g):
+                o = ref(g)
+                o["thunk"] = bool(g.isThunk())
+                if o["thunk"]:
+                    t = g.getThunkedFunction(True)
+                    if t is not None:
+                        o["target"] = ref(t)
+                return o
+            key = lambda o: (o["external"], akey(o["entry"]) if o["entry"] else 0, o["name"])
+            return {"callers": sorted((item(g) for g in scan.java(f.getCallingFunctions)), key=key),
+                    "callees": sorted((item(g) for g in scan.java(f.getCalledFunctions)), key=key)}
+
     @rpc(lane="R")
     def xrefs_from(self, address):
         prog = self.ses.need()

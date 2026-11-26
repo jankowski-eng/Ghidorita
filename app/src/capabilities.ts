@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls",
 } as const;
 
 export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCommand, { type: "edit" }>["action"]): boolean {
