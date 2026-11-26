@@ -14,6 +14,10 @@ class GdbError(Exception):
     """A plain-words problem with the target (connection refused, lost, did not answer)."""
 
 
+class GdbTimeout(GdbError):
+    """A resume that has not stopped yet: not a failure of the connection, the stop will go to on_stop."""
+
+
 def frame(payload):
     return b"$" + payload.encode("latin-1") + b"#%02x" % (sum(payload.encode("latin-1")) & 255)
 
@@ -79,18 +83,22 @@ class Gdb:
                 self.on_lost()
 
     def _packet(self, p):
-        if self.running and p[:1] in ("T", "S", "W", "X"):
-            with self.route:  # a waiter that times out takes the same lock: the stop is consumed by it or delivered to on_stop, never dropped
-                self.running = False
-                q = self.sync
-                if q is not None:
-                    q.put(p)
-            if q is None:
-                self.on_stop(p)
-        elif self.running and p[:1] == "O":  # console output while running: not a reply
-            pass
-        else:
-            self.replies.put(p)
+        if p[:1] in ("T", "S", "W", "X", "O"):
+            with self.ctl:  # the stop is classified and routed under the lock a resume's start and a pause's check take: a waiter armed under it sees it
+                running = self.running
+                if running and p[:1] != "O":
+                    with self.route:  # a waiter that times out takes this lock: the stop is consumed by it or delivered to on_stop, never dropped
+                        self.running = False
+                        q = self.sync
+                        if q is not None:
+                            q.put(p)
+            if running:
+                if p[:1] == "O":  # console output while running: not a reply
+                    return
+                if q is None:
+                    self.on_stop(p)
+                return
+        self.replies.put(p)
 
     # ---- commands ----
     def _send(self, raw):
@@ -156,7 +164,7 @@ class Gdb:
                 try:
                     return q.get_nowait()
                 except queue.Empty:
-                    raise GdbError("The target did not stop")
+                    raise GdbTimeout("The target did not stop")
         with self.route:
             self.sync = None
         return r

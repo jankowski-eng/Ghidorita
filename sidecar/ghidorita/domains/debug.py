@@ -12,7 +12,7 @@ import queue, threading, time
 
 from ..core.args import MASK64
 from ..core.errors import BUSY, CANCELLED, INVALID, NOT_FOUND, TARGET, RpcError, log
-from ..core.gdb import Gdb, GdbError
+from ..core.gdb import Gdb, GdbError, GdbTimeout
 from ..core.rpc import rpc
 
 # gdb architecture name -> Ghidra processor, for the "unknown architecture" check (an architecture missing here is only checked by its pc)
@@ -31,6 +31,7 @@ class Debug:
         self.sid = None
         self.state, self.target, self.error = "detached", "", ""
         self.offset = 0
+        self.mask = MASK64  # the program's address width: a stop outside the relocated image wraps to a valid address instead of a negative one
         self.cancel = threading.Event()  # pause during a statement step
         self.deferred = []  # breakpoint changes owed to a target that was still running when a step gave up waiting: done at its stop
         self.signal = None  # the signal of the last stop when it was neither the single-step trap nor our own interrupt
@@ -124,7 +125,7 @@ class Debug:
                 pc = next((int(r["value"], 16) for r in regs if r["name"] == self.pc), None)
                 if pc is None:
                     raise RpcError(TARGET, "The target did not report its program counter")
-                self.state, self.error, self.registers, self.address = "stopped", "", regs, pc - self.offset
+                self.state, self.error, self.registers, self.address = "stopped", "", regs, (pc - self.offset) & self.mask
                 self.stops += 1
             self.publish()
         except RpcError as e:
@@ -170,6 +171,7 @@ class Debug:
                 self.regs = [(name, num, bits) for name, num, bits in regs if num in known]
                 self.names = {num: known[num][0] for num in known}
                 self.pc, self.big = pc, bool(lang.isBigEndian())
+                self.mask = (1 << int(prog.getAddressFactory().getDefaultAddressSpace().getSize())) - 1
                 sp = prog.getCompilerSpec().getStackPointer()
                 self.sp = str(sp.getName()) if sp is not None else None
                 self.bp_kind = 2 if "Cortex" in str(lang.getLanguageID()) else 4
@@ -192,7 +194,7 @@ class Debug:
             self._drop("Lost the connection to the target")
 
     def _z(self, g, op, addr):
-        r = self._req(g, "%s0,%x,%d" % (op, addr + self.offset, self.bp_kind))
+        r = self._req(g, "%s0,%x,%d" % (op, (addr + self.offset) & MASK64, self.bp_kind))
         if r != "OK":
             raise RpcError(TARGET, "The target refused the breakpoint at 0x%x" % addr)
 
@@ -315,7 +317,7 @@ class Debug:
 
     def _pc_of(self, g):
         r = self._req(g, "p%x" % next(n for n, name in self.names.items() if name == self.pc))
-        return int.from_bytes(bytes.fromhex(r), "big" if self.big else "little") - self.offset
+        return (int.from_bytes(bytes.fromhex(r), "big" if self.big else "little") - self.offset) & self.mask
 
     @rpc(lane="R")
     def debug_step(self, mode="instruction", boundaries=None):
@@ -347,7 +349,7 @@ class Debug:
             try:
                 r = self._single_step(g, pc)
             except GdbError as e:
-                if g.running:  # no stop reply yet (an instruction that waits): it will arrive on its own
+                if isinstance(e, GdbTimeout):  # no stop reply yet (an instruction that waits): it will arrive on its own
                     self.state, self.address, self.registers = "running", None, []
                     self.publish()
                 raise RpcError(TARGET, str(e))
@@ -428,9 +430,9 @@ class Debug:
                 pc = npc
             self._release(token)  # before the stop is announced: the client's next step must find the target free
             self._stopped(g, r)
+        except GdbTimeout:
+            return  # the stop is on its way to on_stop (or has just gone there): its handler publishes it, this thread must not decide to detach
         except (GdbError, RpcError) as e:
-            if g.running:  # the stop will still arrive (on_stop) when the target stops
-                return
             if self.g is g:
                 self._drop(str(e))
         except Exception as e:  # noqa: a bug here must not leave the UI on "running"
@@ -454,7 +456,7 @@ class Debug:
                         return {}
                 g.resume("c")
             except GdbError as e:
-                if g.running:  # the step off the breakpoint has not stopped yet: the target is running, and pausable
+                if isinstance(e, GdbTimeout):  # the step off the breakpoint has not stopped yet: the target is running, and pausable
                     self.state, self.address, self.registers = "running", None, []
                     self.publish()
                 raise RpcError(TARGET, str(e))

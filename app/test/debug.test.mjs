@@ -32,6 +32,9 @@ test("parseTarget, debugLabel", () => {
   assert.deepEqual(parseTarget("localhost:1234"), { host: "localhost", port: 1234 });
   assert.deepEqual(parseTarget(" 10.0.0.2 "), { host: "10.0.0.2", port: 1234 });
   assert.deepEqual(parseTarget(":4321"), { host: "localhost", port: 4321 });
+  assert.deepEqual(parseTarget("[::1]:4321"), { host: "::1", port: 4321 });
+  assert.deepEqual(parseTarget("[fe80::1]"), { host: "fe80::1", port: 1234 });
+  assert.deepEqual(parseTarget("::1"), { host: "::1", port: 1234 });
   assert.equal(debugLabel(null), ""); assert.equal(debugLabel({ state: "stopped", address: "0x28" }), "stopped at 0x28");
   assert.equal(debugLabel({ state: "detached", error: "The target exited with status 0" }), "detached (The target exited with status 0)");
 });

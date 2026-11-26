@@ -57,8 +57,12 @@ export function bpLines(tokens: Token[], bps: Address[]): number[] {
 
 /** "host:port", "host" or ":port" -> the attach parameters (defaults: localhost, 1234). */
 export function parseTarget(text: string): { host: string; port: number } {
-  const m = /^\s*(.*?)(?::(\d+))?\s*$/.exec(text) ?? [];
-  return { host: m[1] || "localhost", port: m[2] ? Number(m[2]) : 1234 };
+  const t = text.trim(), port = (p?: string) => (p ? Number(p) : 1234);
+  const v6 = /^\[([^\]]*)\](?::(\d+))?$/.exec(t); // [::1]:1234
+  if (v6) return { host: v6[1] || "localhost", port: port(v6[2]) };
+  if ((t.match(/:/g) ?? []).length > 1) return { host: t, port: 1234 }; // a bare IPv6 address: no port can be told apart
+  const m = /^(.*?)(?::(\d+))?$/.exec(t) ?? [];
+  return { host: m[1] || "localhost", port: port(m[2]) };
 }
 
 /** The first (lowest) address of every decompiler line that maps one, sorted and unique: where a statement starts (what a statement step runs to). */

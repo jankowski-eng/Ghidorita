@@ -151,12 +151,12 @@ def test_a_live_breakpoint_toggle_applies_deferred_changes_first(sc, dbg):
 
 
 def test_continue_that_times_out_stepping_off_a_breakpoint_publishes_running(sc, dbg):
-    from ghidorita.core.gdb import GdbError
+    from ghidorita.core.gdb import GdbTimeout
     g = FakeG({}, [(HI, "T05")])
 
     def slow(payload, wait=False, timeout=5.0, before=None):
         g.running = True
-        raise GdbError("The target did not stop")
+        raise GdbTimeout("The target did not stop")
     g.resume = slow
     attach(dbg, sc, g, HI)
     dbg.bps = [HI]
@@ -250,3 +250,29 @@ def test_cancel_search_during_value_sampling(sc, dbg):
     with pytest.raises(RpcError) as e:
         dbg.debug_values(H(0), scan=scan)
     assert e.value.code == CANCELLED
+
+
+def test_a_timed_out_wait_never_detaches_a_healthy_connection(sc, dbg):
+    """The stop may already be on its way to on_stop when a step's wait times out: the worker must leave the decision to the stop's handler."""
+    from ghidorita.core.gdb import GdbTimeout
+    g = FakeG({}, [(HI, "T05")])
+    attach(dbg, sc, g, HI)
+    g.running = False  # the stop reply has just arrived (running cleared) while the wait timed out
+
+    def timeout(payload, wait=False, timeout=5.0, before=None):
+        raise GdbTimeout("The target did not stop")
+    g.resume = timeout
+    dbg.cancel.clear()
+    dbg.worker = tok = object()
+    dbg._statement(g, HI, {HI + 0x19}, "statement", tok)
+    assert dbg.g is g and not g.closed and dbg.state != "detached"
+
+
+def test_a_stop_below_the_relocated_image_keeps_a_valid_address(sc, dbg):
+    import re
+    attach(dbg, sc, FakeG({}, [(0x100, "T05")]), 0)
+    dbg.offset, dbg.mask = 0x1000, 0xFFFFFFFF  # an exception vector at runtime 0x100, under the image relocated to 0x1000
+    dbg._stopped(dbg.g, "T05")
+    assert dbg.state == "stopped" and dbg.address == 0xFFFFF100, hex(dbg.address or 0)
+    assert re.fullmatch(r"0x[0-9a-f]{1,16}", dbg.snapshot()["address"])  # what the client's wire check accepts
+    dbg.offset, dbg.mask = 0, (1 << 64) - 1

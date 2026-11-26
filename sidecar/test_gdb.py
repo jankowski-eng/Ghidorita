@@ -112,3 +112,21 @@ def test_a_stop_that_races_the_waiters_timeout_is_not_dropped():
         g.wait_stop(q2, 0.01)
     g._packet("T05")  # after the handover: on_stop gets it
     assert stops == ["T05"]
+
+
+def test_a_stop_is_routed_under_ctl_so_a_waiter_armed_there_gets_it():
+    """A stop that arrives while the toggle holds ctl (after its running check, before it armed) is routed after it: into the armed queue, not to on_stop."""
+    import time
+    port = serve(lambda read, send, c: read())
+    stops = []
+    g = Gdb("127.0.0.1", port, stops.append, print)
+    g.running = True
+    with g.ctl:
+        armed = g.running
+        q = g.arm()
+        th = threading.Thread(target=lambda: g._packet("T05"))
+        th.start()
+        time.sleep(0.15)
+        assert th.is_alive()  # blocked behind ctl
+    th.join(2)
+    assert armed and q.get(timeout=2) == "T05" and not stops

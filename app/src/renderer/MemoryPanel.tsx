@@ -7,7 +7,7 @@ import { useProgram, useSession } from "./store/session";
 /** Memory of the stopped target: a hexdump (bytes changed since the last read of the same range are marked), or through a Ghidra data type (a structure or array as one row per component). Re-read at every stop. */
 export function MemoryPanel() {
   const s = useSession(), d = useProgram(shownDebug), program = useProgram((p) => p.program), live = useProgram((p) => p.debug);
-  const [addr, setAddr] = useState("sp"), [len, setLen] = useState("64"), [type, setType] = useState("");
+  const [addr, setAddr] = useState("sp"), [len, setLen] = useState(""), [type, setType] = useState("");
   const [mem, setMem] = useState<DebugMemory | null>(null), [error, setError] = useState("");
   const prev = useRef<{ key: string; bytes: string } | null>(null);
   const stopped = live?.state === "stopped";
@@ -29,7 +29,7 @@ export function MemoryPanel() {
     <div className="regs mem" aria-label="Target memory">
       <div className="mem-bar">
         <label>address <input aria-label="Memory address" value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="0x20000000 or sp" size={14} /></label>
-        <label>bytes <input aria-label="Memory length" value={len} onChange={(e) => setLen(e.target.value)} size={5} /></label>
+        <label>bytes <input aria-label="Memory length" value={len} onChange={(e) => setLen(e.target.value)} placeholder="default" size={7} /></label>
         <label>as type <input aria-label="Memory data type" value={type} onChange={(e) => setType(e.target.value)} placeholder="uint[4], /MyStruct" size={16} /></label>
         <button onClick={() => void read()} disabled={!stopped} aria-label="Read memory">Read</button>
       </div>
