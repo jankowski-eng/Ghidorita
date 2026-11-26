@@ -10,12 +10,43 @@ Ghidrette is a fast desktop reverse-engineering workspace on top of [Ghidra](htt
 
 <sub>Function list, listing with cross-references and decompiler on `mysqldump` (arm64, 1,891 functions).</sub>
 
-## What it does
+## Features and how to use them
 
-- Address-based listing that stays fast on large binaries (no per-row index), with decompiler view, xrefs, strings, symbol/memory search
-- Editing with Ghidra's default keys: rename, retype, comments, create function, define data, undo/redo, save
-- Binary map, function coverage runs (A vs B), data type manager, import dialog with analysis profiles
-- Analysis persists in a Ghidra project per file (sha256), so reopening skips re-analysis
+Shortcuts are shown for macOS (use Ctrl on other platforms). Screenshots: `/bin/bash` and `/usr/bin/zip` (x86-64 Mach-O).
+
+### Open a binary
+File > Open Binary… (`Cmd+O`), or pick a program from the start screen's project list. Before anything is analysed, an import card shows what the file is: format, architecture, entry point, size, an entropy strip over the whole file and every section with its size and entropy, so packed or encrypted regions stand out. Loader, language, compiler, base address and the Full/Fast analysis profile sit behind **Advanced options…**. Analysis is stored per file (sha256), so reopening skips it.
+
+![Import card with entropy strip and section list](screenshots/import.png)
+
+### Command bar (`Cmd+K`)
+One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, …). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
+
+![Command bar with ranked leads](screenshots/command-bar.png)
+
+### Read: function list, binary map, listing, decompiler
+The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and toggle its layers with **R** (renamed functions) and **C** (coverage). The listing shows function headers, comments, `XREF[n]` annotations (click to follow) and folded structures; the decompiler follows the cursor and opens one tab per function. `X` on a listing row or decompiler token opens its references in the panel under the function list (screenshot at the top of this page).
+
+### Control-flow graph (`Space`)
+`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are blue (true), orange (false) and grey (jump). Wheel zooms, drag pans, a click on a block moves the cursor there.
+
+![Control-flow graph at C level](screenshots/graph.png)
+
+### Strings, symbols, memory search
+View > Defined Strings (`Cmd+Shift+E`) lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default. Symbol Table (`Cmd+Shift+Y`) filters by kind and shows each symbol's source. Search Memory (`Cmd+Shift+F`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text. All of them open in the dock under the panes.
+
+![Defined strings with their referencing functions](screenshots/strings.png)
+
+### Edit (Ghidra's default keys)
+In the listing: `L` rename, `;` comment, `F` create function, `T` define data, `C` clear code. In the decompiler: `L` rename variable/function, `Cmd+L` retype, `;` comment; Edit > Edit Function Signature… and Auto Create Structure work on the cursor. `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Cmd+S` saves. View > Changes (`Cmd+Shift+H`) lists every edit; View > Data Type Manager (`Cmd+Shift+T`) creates and edits structs, unions, enums and typedefs.
+
+### Coverage runs
+File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` or `0xADDR` per line (`#` comments allowed). Load several runs, then in View > Coverage pick run **A** and run **B**: the listing, decompiler and binary map tint code reached by both runs, only A (orange, `A` in the gutter) or only B (blue, `B`), and the tab lists the functions reached by only one run.
+
+![Two coverage runs compared in listing and decompiler](screenshots/coverage.png)
+
+### Export
+File > Export > Symbol Map (JSON)… or C Header… writes your names and types for reports or other tools.
 
 ## Getting started
 
