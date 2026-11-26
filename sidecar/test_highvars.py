@@ -65,7 +65,7 @@ def test_structure_inference_callees_and_cancellation(sc, tmp_path, monkeypatch)
             return await dispatcher._call(rid, method, params)
 
         try:
-            await call("open_binary", path=str(binary), loader="Raw Binary", language=X86, baseAddress=BASE)
+            await call("open_binary", path=str(binary), loader="Raw Binary", language=X86, baseAddress=BASE, analysis="blocking")
             entries = {f["entry"] for f in await call("list_functions")}
             for entry, name in (("0x8000020", "callee"), (BASE, "caller")):
                 if entry not in entries:

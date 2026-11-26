@@ -27,7 +27,7 @@ class Exited(Exception):
 def test_close_save_failure_keeps_program():
     ses = Session()
     prog = ses.program = object()
-    domain = Program(SimpleNamespace(session=ses))
+    domain = Program(SimpleNamespace(session=ses, analysis=SimpleNamespace(stop=lambda: True, reset=lambda *_: None)))
     domain._save_program = lambda *_: (_ for _ in ()).throw(OSError("disk full"))
     with pytest.raises(RuntimeError, match="disk full"):
         domain.close()
