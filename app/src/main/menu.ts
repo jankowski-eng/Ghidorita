@@ -5,7 +5,7 @@ import { addRecent, clearRecent, getRecent } from "./recent";
 type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null> };
 
 export function createMenu({ getWin, pick }: Deps) {
-  let state: MenuState = { canBack: false, canForward: false, canOpen: true, canEdit: false, undoLabel: null, redoLabel: null, dirty: false };
+  let state: MenuState = { canBack: false, canForward: false, canOpen: true, canEdit: false, undoLabel: null, redoLabel: null, dirty: false, canClose: false };
 
   const send = (cmd: MenuCommand) => {
     const w = getWin();
@@ -31,6 +31,7 @@ export function createMenu({ getWin, pick }: Deps) {
         } },
         { label: "Open Recent", enabled: state.canOpen, submenu: recentItems },
         { id: "save", label: "Save", accelerator: "CmdOrCtrl+S", enabled: state.canEdit && state.dirty, click: () => send({ type: "edit", action: "save" }) },
+        { id: "close-program", label: "Close Program", enabled: state.canClose, click: () => send({ type: "close-program" }) },
         { type: "separator" },
         { label: "Close Tab", accelerator: "CmdOrCtrl+W", click: () => send({ type: "close-tab" }) },
         ...(mac ? [] : [{ type: "separator" } as MenuItemConstructorOptions, { role: "quit" } as MenuItemConstructorOptions]),
@@ -49,7 +50,7 @@ export function createMenu({ getWin, pick }: Deps) {
       ] },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
-        { type: "separator" }, { role: "reload" }, { role: "toggleDevTools" },
+        { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [
         { label: "Back", accelerator: "CmdOrCtrl+[", enabled: state.canBack, click: () => send({ type: "nav-back" }) },

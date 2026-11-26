@@ -5,16 +5,17 @@ export type Pane = "functions" | "listing" | "decompiler";
 /** main -> renderer, channel "menu". "open-path": File > Open Binary… (main shows the dialog) or File > Open Recent. */
 export type MenuCommand =
   | { type: "open-path"; path: string }
-  | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
+  | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "clear" | "signature" | "undo" | "redo" | "save" };
-/** renderer -> main, "menu-state": enables/disables Go > Back / Forward and File > Open Binary / Open Recent (disabled while an open runs). */
+/** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {
   canBack: boolean; canForward: boolean; canOpen: boolean;
   canEdit: boolean;                 // an open program and no open in progress
   undoLabel: string | null;         // "Undo Rename symbol"; null = nothing to undo
   redoLabel: string | null;
   dirty: boolean;                   // unsaved edits: macOS document-edited dot
+  canClose: boolean;                // File > Close Program (the sidecar autosaves on close)
 }
 
 export interface Host {

@@ -54,3 +54,16 @@ Decompile cache: only comment/code changes are invalidated by range, any symbol/
 - JDK 25, not 21 (Ghidra master requirement). Ghidra checkout untouched except git-ignored build output.
 - Mid-size binary: the native `decompile` binary is 3.5 MB (below the 5-10 MB target), so I used `/opt/homebrew/Cellar/mysql-client/9.3.0/bin/mysqldump` (6.95 MB; first-open analysis 103 s).
 - Fling/sweep are scripted renderer drivers, not a person scrolling.
+
+## Round 3: #1/#2 gaps closed
+**Added** (contract in `protocol.md`/`protocol.ts`, mock in `app/mock`):
+- `save` + `dirty` in `UndoState` (carried by `program_changed`; save fires it with empty ranges/kinds). **Measured: saving a changed program clears both undo and redo stacks** (save is an undo barrier; edits after it are undoable). Undoing back to the saved state makes the program clean again; `dirty` is false right after open.
+- `close_program` (idempotent, cancels decompiles, `NoProgram` after).
+- `import_candidates`, `list_languages`, `open_binary {loader, language, compilerSpec, baseAddress}`. Key: no options = plain sha256 (old projects still load), any option = `sha256-<12 hex of options hash>`. Raw Binary is the only stock loader with a base address; `baseAddress` is rejected for other loaders.
+- `list_programs` (metadata in `programs.json` in the projects dir) and `delete_program` (`Busy` if open).
+- Mandatory `SIDECAR_TOKEN` (exit 2 unless `SIDECAR_ALLOW_NO_AUTH=1`).
+- UI: File > Save (Cmd+S) enabled when dirty, dirty marker in the title, Save / Don't Save / Cancel before quit, close, and open; File > Close Program; import dialog (Enter = defaults); welcome pane with the program browser and confirmed delete.
+
+**Tested:** pytest 16 passed (each new method, raw blob with explicit language + base address and a different key from the default import, save → reopen, delete-while-open `Busy`, close cancels decompile, auth refusal); `npm test` 14 passed; autotest passes on the mock and on the real sidecar with `/bin/ls` (dirty/save, close → welcome, import dialog defaults and explicit options, quit prompt through a real `win.close()` via the main-process handler, Cancel keeps the app alive). A fresh review found the sidecar commit had mangled two blocks (fixed), a UI/sidecar desync after a rejected open (fixed), and View > Reload bypassing the prompt (menu item removed).
+
+**Not tested / limits:** real Cmd+Q and the red button by hand (only `win.close()` and the shared handler); the raw import only with x86-32 and 6502 languages; the explicit-options open in the real autotest is answered locally, so no second analysis of `/bin/ls`; language picker with hundreds of entries is a filter plus a `size=6` select, not looked at by a person; explicit base `0` creates a second entry next to the default import (no collision, duplicate analysis); `_close()` leaves the coalescer's armed flag set (harmless today); no editing UI yet. Benchmark hunks in `sidecar/main.py`, `sidecar/timings.json`, `bench/` were left uncommitted throughout; pytest ran with them present.

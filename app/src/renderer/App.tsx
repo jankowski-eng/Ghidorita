@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FunctionInfo, Address } from "../../../protocol";
+import type { FunctionInfo, Address, ImportOptions, ProgramEntry } from "../../../protocol";
 import { rpc } from "./client";
 import { AddrMap } from "./addrmap";
 import { Listing } from "./Listing";
@@ -7,6 +7,12 @@ import { FunctionList } from "./FunctionList";
 import { Decompiler } from "./Decompiler";
 import { Toolbar } from "./Toolbar";
 import { OpenDialog, type Progress } from "./OpenDialog";
+import { Confirm } from "./Confirm";
+import { ImportDialog } from "./ImportDialog";
+import { Welcome } from "./Welcome";
+import { windowTitle } from "./session";
+import { reopenParams } from "./openOptions";
+import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { XrefPanel } from "./XrefPanel";
 import { RpcError } from "./rpc";
@@ -37,6 +43,15 @@ export function App() {
   const [gotoOpen, setGotoOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [opening, setOpening] = useState<{ path: string; startedAt: number; cancelling: boolean } | null>(null);
+  const [programName, setProgramName] = useState<string | null>(null);
+  const [importFor, setImportFor] = useState<string | null>(null);
+  const importRef = useRef(false);
+  const [connected, setConnected] = useState(false);
+  const [progs, setProgs] = useState<{ list: ProgramEntry[]; loading: boolean; error: string }>({ list: [], loading: false, error: "" });
+  const [progsVersion, setProgsVersion] = useState(0);
+  const [deleting, setDeleting] = useState<{ entry: ProgramEntry; error: string; busy: boolean } | null>(null);
+  const progsRun = useRef(latest()).current;
+  const menuRef = useRef<MenuState | null>(null);
   const [notice, setNoticeState] = useState("");
   const noticeRef = useRef("");
   const setNotice = (m: string) => { noticeRef.current = m; setNoticeState(m); };
@@ -99,18 +114,26 @@ export function App() {
   const back = () => { const n = goBack(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
   const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
 
-  const open = async (p: string) => {
+  // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
+  const clearProgram = () => {
+    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); funcsRef.current = [];
+    tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
+    clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
+  };
+  const open = async (p: string, opts: ImportOptions = {}) => {
     if (openingRef.current) return; // the sidecar would answer Busy
-    openingRef.current = true; openedRef.current = false; cancellingRef.current = false; setSearchOpen(false); setGotoOpen(false);
-    setOpened(false); setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
-    tabs.reset(); setNav(emptyNav); setFuncs([]); funcsRef.current = []; setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setMap(null); setFn(null); clearFunctionCache(); ++goSeq.current;
+    openingRef.current = true; cancellingRef.current = false;
+    setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
+    clearProgram();
     try {
-      await rpc.call("open_binary", { path: p });
+      const r = await rpc.call("open_binary", { path: p, ...opts });
       const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
-      funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); rpc.call("undo_state", {}).then(setUndo, fail); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
+      funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); rpc.call("undo_state", {}).then(setUndo, fail); setMap(new AddrMap(info.ranges)); setProgramName(r.name); setOpened(true); openedRef.current = true;
       if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
     } catch (e) {
+      // the UI already forgot the old program; a rejected open (NotFound/InvalidArgument/Busy) leaves it open in the sidecar. close_program is idempotent.
+      await rpc.call("close_program", {}).catch(() => {});
       if (e instanceof RpcError && e.code === -32002) setNotice("Open cancelled."); // not an error
       else {
         fail(e); setNotice("Could not open " + p);
@@ -124,6 +147,37 @@ export function App() {
       }
     } finally { openingRef.current = false; setOpening(null); setProgress(null); }
   };
+
+  // Open entry point for Open, Open Recent and the path box: pick import options first. Unsaved edits of the open program are autosaved by the sidecar when it is replaced.
+  const requestOpen = (p: string) => {
+    if (openingRef.current || importRef.current) return;
+    importRef.current = true; setPath(p); setImportFor(p);
+  };
+  const confirmImport = async (p: string, opts: ImportOptions | undefined) => {
+    importRef.current = false; setImportFor(null);
+    void open(p, opts);
+  };
+  const cancelImport = () => { importRef.current = false; setImportFor(null); };
+  const openStored = (e: ProgramEntry) => {
+    const r = reopenParams(e);
+    if (!r) { setProgs((x) => ({ ...x, error: `${e.name} has no stored source path; open the file with File > Open.` })); return; }
+    const { path: p, ...o } = r;
+    setPath(p); void open(p, o);
+  };
+  const closeProgram = async () => {
+    if (!openedRef.current || openingRef.current) return;
+    try { await rpc.call("close_program", {}); } catch (e) { fail(e); return; }
+    clearProgram(); setNotice("");
+  };
+  const deleteStored = async () => {
+    if (!deleting) return;
+    setDeleting({ ...deleting, busy: true, error: "" });
+    try { await rpc.call("delete_program", { programId: deleting.entry.programId }); setDeleting(null); setProgsVersion((v) => v + 1); }
+    catch (e) {
+      if (e instanceof RpcError && e.code === -32004) { setDeleting(null); setProgsVersion((v) => v + 1); } // already gone
+      else setDeleting((d) => d && { ...d, busy: false, error: e instanceof RpcError && e.code === -32005 ? "The sidecar is busy; try again in a moment." : e instanceof Error ? e.message : String(e) });
+    }
+  };
   const cancelOpen = () => {
     if (!openingRef.current) return;
     cancellingRef.current = true;
@@ -134,6 +188,7 @@ export function App() {
   // program_changed: one subscription, all reactions in changes.ts
   const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
     if (!openedRef.current) return;
+    if (p.ranges && !p.ranges.length && !p.kinds.length) { setUndo(p.undo); return; } // save: only `dirty` changed
     clearFunctionCache();
     onProgramChanged(p, {
       refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
@@ -245,7 +300,18 @@ export function App() {
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
-  const apiNow = { go, back, forward, clickAt, open, cancelOpen, programChanged, edit, closeTab: () => goTab(tabs.closeActive()) };
+  const handleMenu = (c: MenuCommand) => {
+    if (c.type === "open-path") requestOpen(c.path);
+    else if (c.type === "close-program") void closeProgram();
+    else if (c.type === "search") { if (openedRef.current) setSearchOpen(true); }
+    else if (c.type === "nav-back") back();
+    else if (c.type === "nav-forward") forward();
+    else if (c.type === "goto") { if (openedRef.current) setGotoOpen(true); }
+    else if (c.type === "close-tab") goTab(tabs.closeActive());
+    else if (c.type === "edit") void edit(c.action);
+    else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
+  };
+  const apiNow = { go, back, forward, clickAt, open, cancelOpen, programChanged, edit, handleMenu };
   const api = useRef(apiNow);
   api.current = apiNow;
 
@@ -253,6 +319,7 @@ export function App() {
     (async () => {
       const cfg = await window.host.getConfig();
       await rpc.connect(cfg.port, cfg.token);
+      setConnected(true);
       rpc.onNotification = (m, p) => {
         if (m === "progress") { if (openingRef.current && !cancellingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped
         else if (m === "program_changed") api.current.programChanged(p as Parameters<typeof onProgramChanged>[0]);
@@ -260,7 +327,7 @@ export function App() {
       };
       autotestRef.current = !!cfg.autotest;
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), cancelFile: cfg.cancelFile,
+        open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile,
         status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
         select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
@@ -268,16 +335,7 @@ export function App() {
         editor: () => editorRef.current, menu: (id) => window.host.autotestMenu(id), expect: cfg.expect, funcCount: () => funcsCountRef.current, topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
       });
     })().catch(fail);
-    const off = window.host.onMenu((c) => {
-      if (c.type === "open-path") { if (!openingRef.current) { setPath(c.path); api.current.open(c.path); } }
-      else if (c.type === "search") { if (openedRef.current) setSearchOpen(true); }
-      else if (c.type === "nav-back") api.current.back();
-      else if (c.type === "nav-forward") api.current.forward();
-      else if (c.type === "goto") { if (openedRef.current) setGotoOpen(true); }
-      else if (c.type === "close-tab") api.current.closeTab();
-      else if (c.type === "edit") void api.current.edit(c.action);
-      else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
-    });
+    const off = window.host.onMenu((c) => api.current.handleMenu(c));
     const mouse = (e: MouseEvent) => { // buttons 4/5 = back/forward
       if (e.button === 3) { e.preventDefault(); api.current.back(); } else if (e.button === 4) { e.preventDefault(); api.current.forward(); }
     };
@@ -308,14 +366,21 @@ export function App() {
   }, []);
 
   const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
-  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0, busy = !!opening;
+  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0, busy = !!opening || !!importFor;
   useEffect(() => {
-    window.host.setMenuState({
+    const s: MenuState = {
       canBack: canBack && !busy, canForward: canForward && !busy, canOpen: !busy, canEdit: opened && !busy && !saving,
-      undoLabel: undo.canUndo ? "Undo " + (undo.undoName ?? "") : null, redoLabel: undo.canRedo ? "Redo " + (undo.redoName ?? "") : null, dirty: undo.dirty,
-    }).catch(() => {});
+      undoLabel: undo.canUndo ? "Undo " + (undo.undoName ?? "") : null, redoLabel: undo.canRedo ? "Redo " + (undo.redoName ?? "") : null, dirty: undo.dirty, canClose: opened && !busy && !saving,
+    };
+    menuRef.current = s; window.host.setMenuState(s).catch(() => {});
   }, [canBack, canForward, busy, opened, saving, undo.canUndo, undo.canRedo, undo.undoName, undo.redoName, undo.dirty]);
-  useEffect(() => { document.title = (undo.dirty ? "● " : "") + "Ghidra desktop spike"; }, [undo.dirty]);
+  useEffect(() => { document.title = windowTitle(opened ? programName : null, opened && undo.dirty); }, [opened, programName, undo.dirty]);
+  // program browser: refresh whenever the welcome state is (re)entered (start, after close, after a failed open)
+  useEffect(() => {
+    if (opened || opening || !connected) return;
+    setProgs((x) => ({ ...x, loading: true, error: "" }));
+    progsRun(rpc.call("list_programs", {})).then((l) => { if (l) setProgs({ list: l, loading: false, error: "" }); }, (e) => setProgs({ list: [], loading: false, error: e instanceof Error ? e.message : String(e) }));
+  }, [opened, !!opening, connected, progsVersion]); // eslint-disable-line
 
   const progressRef = useRef(progress); progressRef.current = progress;
   const here = nav.current?.address ?? null;
@@ -324,10 +389,13 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={!!opening}
-        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onOpen={() => open(path)}
-        onPick={async () => { const p = await window.host.pickFile(); if (p) { setPath(p); open(p); } }} />
+      <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={busy}
+        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onOpen={() => requestOpen(path)}
+        onPick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(p); }} />
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
+      {importFor && !opening && <ImportDialog key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
+      {deleting && <Confirm title="Delete program?" message={`Remove ${deleting.entry.name} from the project? Its analysis is deleted; the original file is not touched.`} error={deleting.error} busy={deleting.busy}
+        actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
       {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onClose={() => setSearchOpen(false)} />}
       {gotoOpen && opened && <GoTo onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
       {opened ? (
@@ -351,7 +419,8 @@ export function App() {
             </div>
           ),
         }}</Panes>
-      ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O).</p></div>}
+      ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
+        <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash} />
       {dlg && <EditDialog spec={dlg.spec} onSubmit={dlg.submit} onClose={() => setDlg(null)} />}
     </div>

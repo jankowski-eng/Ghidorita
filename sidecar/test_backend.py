@@ -18,7 +18,7 @@ def ghidra_dir():
 
 class Proc:
     def __init__(self, projects, extra_env=None):
-        env = dict(os.environ, GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(projects), **(extra_env or {}))
+        env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(projects), **(extra_env or {}))
         self.p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
         self.port = int(self.p.stdout.readline())
 
@@ -446,3 +446,271 @@ def test_open_cancel_busy_failfast(tmp_path):
         run(go())
     finally:
         proc.stop()
+
+
+# ---- save / close / import options / program browser / auth ----
+import hashlib, re, struct
+
+X86 = "x86:LE:32:default"
+BASE = "0x8000000"  # as listing_info prints it (no leading zeros)
+
+
+def blob(tmp_path, name="blob.bin", pad=0):
+    """Two tiny x86-32 functions: f1 at +0 calls f2 at +0x10."""
+    code = bytes.fromhex("5589e5e808000000" "5dc3") + b"\x90" * 6 + bytes.fromhex("5589e5b801000000" "5dc3") + b"\x90" * pad
+    p = tmp_path / name
+    p.write_bytes(code)
+    return str(p)
+
+
+@pytest.fixture(scope="module")
+def bproc(tmp_path_factory):
+    d = tmp_path_factory.mktemp("bproj")
+    proc = Proc(d / "projects")
+    yield proc, d
+    proc.stop()
+
+
+def test_candidates_and_languages(bproc):
+    proc, d = bproc
+    raw = blob(d)
+
+    async def go():
+        async with Client(proc.port) as c:
+            assert (await c.ok("import_candidates", path=raw)) == {"candidates": []}  # nothing recognises a bare blob
+            await c.err("import_candidates", NOT_FOUND, path=str(d / "nope"))
+            await c.err("import_candidates", INVALID)
+            r = (await c.ok("import_candidates", path=BIN))["candidates"]
+            assert r and sum(x["preferred"] for x in r) == 1
+            assert all(set(x) == {"loader", "language", "compilerSpec", "preferred", "acceptsBaseAddress"} for x in r)
+            pref = next(x for x in r if x["preferred"])
+            assert pref["language"] and pref["compilerSpec"] and pref["acceptsBaseAddress"] is False
+            rb = [x for x in r if x["loader"] == "Raw Binary"]
+            assert rb and rb[0]["language"] is None and rb[0]["acceptsBaseAddress"] is True
+            langs = await c.ok("list_languages")
+            ent = next(l for l in langs if l["id"] == X86)
+            assert ent["description"] and ent["compilerSpecs"] and {"id", "name"} == set(ent["compilerSpecs"][0])
+            assert [l["id"] for l in langs] == sorted(l["id"] for l in langs)
+    run(go())
+
+
+def test_import_options_validation(bproc):
+    proc, d = bproc
+    raw = blob(d)
+
+    async def go():
+        async with Client(proc.port) as c:
+            for bad in ({"loader": "No Such Loader"}, {"language": "x86:LE:99:nope"},
+                        {"loader": "Raw Binary", "language": X86, "compilerSpec": "nope"},
+                        {"loader": "Raw Binary", "language": X86, "baseAddress": "zz"},
+                        {"loader": "Raw Binary", "language": X86, "baseAddress": "0x1ffffffff"},  # > 32-bit space
+                        {"loader": "Raw Binary", "language": X86, "baseAddress": 5}):
+                await c.err("open_binary", INVALID, path=raw, **bad)
+            await c.err("open_binary", INVALID, path=raw)  # default import: no loader recognises the blob
+            assert await c.ok("list_programs") == []
+    run(go())
+
+
+def test_raw_import_options_save_reopen_dirty_undo(bproc):
+    proc, d = bproc
+    raw = blob(d)
+    sha = hashlib.sha256(open(raw, "rb").read()).hexdigest()
+    opts = dict(path=raw, loader="Raw Binary", language=X86, baseAddress=BASE)
+
+    async def go():
+        async with Client(proc.port) as c:
+            r = await c.ok("open_binary", **opts)
+            assert r["persisted"] is False and r["name"] == "blob.bin"
+            pid = r["programId"]
+            assert re.fullmatch(sha + "-[0-9a-f]{12}", pid)
+            info = await c.ok("listing_info")
+            assert info["ranges"][0]["start"] == BASE and info["totalBytes"] == 26
+            first = (await c.ok("listing_rows", address=BASE, count=1))[0]
+            assert first["bytes"].startswith("55")  # raw bytes, nothing disassembled without an entry point
+            # not dirty after a fresh import, nor after reads/decompiles in the background
+            assert (await c.ok("undo_state"))["dirty"] is False
+            await c.ok("list_functions"), await c.ok("list_strings"), await c.ok("search_symbols", query="f")
+            await asyncio.sleep(0.5)
+            assert (await c.ok("undo_state")) == {"canUndo": False, "canRedo": False, "dirty": False}
+            # the key depends on the options
+            other = (await c.ok("open_binary", **{**opts, "baseAddress": "0x1000"}))
+            assert other["programId"] != pid and other["programId"].startswith(sha + "-")
+            assert (await c.ok("listing_info"))["ranges"][0]["start"] == "0x1000"
+            r = await c.ok("open_binary", **opts)
+            assert r["persisted"] is True and r["programId"] == pid
+            assert (await c.ok("undo_state"))["dirty"] is False  # persisted reopen is clean too
+
+            # edit -> dirty; save -> clean, notification, edit survives reopen
+            n = len(c.notes)
+            await c.ok("set_comment", address=BASE, kind="eol", text="kept")
+            u = await c.ok("undo_state")
+            assert u["dirty"] is True and u["canUndo"] is True
+            await c.ok("save")
+            pc = (await c.wait_note("program_changed", since=n))
+            save_note = [p for p in pc if p["ranges"] == []][-1]
+            assert save_note["kinds"] == [] and save_note["undo"]["dirty"] is False
+            after = await c.ok("undo_state")
+            assert after["dirty"] is False
+            print("undo state after save:", after)
+            await c.ok("save")  # unchanged: still a success
+            # MEASURED (protocol.md "Persistence and crash safety"): saving clears Ghidra's undo AND redo stacks
+            assert after == {"canUndo": False, "canRedo": False, "dirty": False}
+            await c.err("undo", INVALID)
+            await c.ok("set_comment", address=BASE, kind="eol", text="second")
+            u = await c.ok("undo")
+            assert u["dirty"] is False and u["canRedo"] is True  # back at the saved state: Ghidra tracks that, dirty clears
+            assert (await c.ok("redo"))["dirty"] is True
+            await c.ok("save")
+            assert (await c.ok("undo_state")) == {"canUndo": False, "canRedo": False, "dirty": False}
+
+            # an unsaved edit is autosaved when another open replaces the program (protocol.md, Persistence)
+            await c.ok("open_binary", **opts)
+            await c.ok("set_comment", address="0x8000010", kind="eol", text="autosaved")
+            assert (await c.ok("undo_state"))["dirty"] is True
+            await c.ok("open_binary", **opts)
+            assert (await c.ok("undo_state"))["dirty"] is False
+            rows = {x["address"]: x for x in await c.ok("listing_rows", address=BASE, count=26)}
+            assert rows[BASE].get("comment") == "second" and rows["0x8000010"].get("comment") == "autosaved"
+    run(go())
+
+
+
+def test_list_and_delete_programs(bproc):
+    proc, d = bproc
+    raw = blob(d)
+    sha = hashlib.sha256(open(raw, "rb").read()).hexdigest()
+    opts = dict(path=raw, loader="Raw Binary", language=X86, baseAddress=BASE)
+
+    async def go():
+        async with Client(proc.port) as c:
+            progs = await c.ok("list_programs")  # earlier tests left two imports of blob.bin
+            assert len(progs) == 2 and all(p["programId"].startswith(sha + "-") for p in progs)
+            p = progs[0]
+            assert p["name"] == "blob.bin" and p["sourcePath"] == raw and p["sizeBytes"] == 26 and p["analyzed"] is True
+            assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", p["lastOpened"])
+            assert progs[0]["lastOpened"] >= progs[1]["lastOpened"]
+            assert any(x["options"] == {"loader": "Raw Binary", "language": X86, "baseAddress": BASE} for x in progs)
+            assert any(x["options"] == {"loader": "Raw Binary", "language": X86, "baseAddress": "0x1000"} for x in progs)
+
+            r = await c.ok("open_binary", **opts)
+            pid = r["programId"]
+            await c.err("delete_program", BUSY, programId=pid)  # open
+            await c.err("delete_program", NOT_FOUND, programId="f" * 64)
+            await c.err("delete_program", NOT_FOUND, programId="../../etc")
+            await c.err("delete_program", INVALID)
+            assert len(await c.ok("list_programs")) == 2  # works with a program open
+            victim = next(x["programId"] for x in progs if x["programId"] != pid)
+            assert (await c.ok("delete_program", programId=victim)) == {}
+            assert [x["programId"] for x in await c.ok("list_programs")] == [pid]
+            await c.err("delete_program", NOT_FOUND, programId=victim)
+            assert (await c.ok("undo_state"))["dirty"] is False
+            # a deleted program is imported afresh
+            assert (await c.ok("open_binary", **{**opts, "baseAddress": "0x1000"}))["persisted"] is False
+    run(go())
+
+
+def test_list_programs_survives_restart_and_busy_during_open(tmp_path):
+    raw = blob(tmp_path)
+    opts = dict(path=raw, loader="Raw Binary", language=X86)
+    proc = Proc(tmp_path / "projects")
+    try:
+        async def first():
+            async with Client(proc.port) as c:
+                await c.ok("open_binary", **opts)
+        run(first())
+    finally:
+        proc.stop()
+    proc = Proc(tmp_path / "projects")
+    try:
+        async def second():
+            async with Client(proc.port) as c:
+                (p,) = await c.ok("list_programs")
+                assert p["sourcePath"] == raw and p["options"]["language"] == X86 and p["lastOpened"]
+                t0 = p["lastOpened"]
+                await asyncio.sleep(1.1)
+                assert (await c.ok("open_binary", **opts))["persisted"] is True
+                assert (await c.ok("list_programs"))[0]["lastOpened"] > t0
+                assert (await c.ok("undo_state"))["dirty"] is False  # writing lastOpened does not dirty the program
+        run(second())
+    finally:
+        proc.stop()
+
+
+def test_busy_during_open_for_project_methods(tmp_path):
+    proc = Proc(tmp_path / "projects")
+    try:
+        async def go():
+            async with Client(proc.port) as c:
+                oid = await c.send("open_binary", path=BIN)
+                end = time.monotonic() + 60
+                while time.monotonic() < end and not any(p["phase"] == "analysis" for p in c.take("progress")):
+                    await asyncio.sleep(0.02)
+                for m, kw in (("list_programs", {}), ("delete_program", {"programId": "0" * 64}), ("close_program", {}), ("import_candidates", {"path": BIN})):
+                    await c.err(m, BUSY, **kw)
+                assert isinstance(await c.ok("list_languages"), list)
+                await c.err("save", NO_PROGRAM)
+                await c.ok("cancel_open")
+                assert (await c.reply(oid))["error"]["code"] == CANCELLED
+                assert await c.ok("list_programs") == []
+        run(go())
+    finally:
+        proc.stop()
+
+
+def test_dirty_clean_on_ls_and_close_program(env):
+    """Reads and decompiles never dirty; close_program autosaves, cancels queued decompiles, later requests fail NoProgram."""
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            assert (await c.ok("undo_state"))["dirty"] is False
+            await c.ok("decompile", entry=max(fns, key=lambda f: f["size"])["entry"])
+            await asyncio.sleep(0.3)
+            assert (await c.ok("undo_state"))["dirty"] is False
+            progs = await c.ok("list_programs")
+            assert len(progs) == 1 and progs[0]["options"] == {} and progs[0]["programId"] == env["open"]["programId"]
+            assert progs[0]["name"] == os.path.basename(BIN) and progs[0]["sizeBytes"] == os.path.getsize(BIN)
+
+            ranked = sorted(fns, key=lambda f: -f["size"])[3:15]
+            await c.ok("rename_symbol", address=ranked[0]["entry"], newName="cache_clear_probe")  # empty the cache
+            ids = [await c.send("decompile", entry=f["entry"]) for f in ranked]
+            await asyncio.sleep(0.01)
+            assert (await c.ok("close_program")) == {}
+            codes = [(await c.reply(i)).get("error", {}).get("code") for i in ids]
+            assert CANCELLED in codes and set(codes) <= {None, CANCELLED}, codes
+            assert codes.count(CANCELLED) >= len(ids) - 3, codes  # at most the in-flight ones (2 workers) can win the race
+            for m, kw in (("list_functions", {}), ("decompile", {"entry": ranked[0]["entry"]}), ("save", {}), ("undo_state", {})):
+                await c.err(m, NO_PROGRAM, **kw)
+            assert (await c.ok("close_program")) == {}  # idempotent
+            await c.err("delete_program", NOT_FOUND, programId="a" * 64)
+            # close autosaved the rename; the reopened program is clean
+            assert (await c.ok("open_binary", path=BIN))["persisted"] is True
+            assert (await c.ok("undo_state"))["dirty"] is False
+            assert any(f["name"] == "cache_clear_probe" for f in await c.ok("list_functions"))
+            await c.ok("rename_symbol", address=ranked[0]["entry"], newName=ranked[0]["name"])  # leave the shared /bin/ls program as it was
+            await c.ok("save")
+    run(go())
+
+
+def test_auth_mandatory(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k not in ("SIDECAR_TOKEN", "SIDECAR_ALLOW_NO_AUTH")}
+    env.update(GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(tmp_path))
+    for extra in ({}, {"SIDECAR_TOKEN": ""}):
+        r = subprocess.run([sys.executable, os.path.join(HERE, "main.py")], env={**env, **extra}, stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+        assert r.returncode == 2 and b"SIDECAR_TOKEN" in r.stderr and r.stdout == b"", (extra, r)
+    # with a token the path must match
+    p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], env={**env, "SIDECAR_TOKEN": "s3cret"}, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        port = int(p.stdout.readline())
+
+        async def go():
+            async with websockets.connect("ws://127.0.0.1:%d/s3cret" % port) as ws:
+                await ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "list_languages"}))
+                assert "result" in json.loads(await ws.recv())
+            with pytest.raises(Exception):
+                async with websockets.connect("ws://127.0.0.1:%d/wrong" % port):
+                    pass
+        run(go())
+    finally:
+        p.stdin.close()
+        p.wait(timeout=15)

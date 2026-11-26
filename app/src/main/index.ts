@@ -53,7 +53,7 @@ app.on("before-quit", (e) => {
   if (quitSave) return; // a save is already in flight
   saveBeforeQuit().then((go) => {
     if (!go) return;
-    stopped = true;
+    stopped = true; quitting = true;
     return stopSidecar().then(() => (exitCode === null ? app.quit() : app.exit(exitCode)));
   });
 });
@@ -73,7 +73,10 @@ function startSidecar(): Promise<number> {
     cmd = path.join(repo, "sidecar/.venv/bin/python"); args = [path.join(repo, "sidecar/main.py")];
   }
   // stdin stays an open pipe: when Electron dies the sidecar sees EOF and exits.
-  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, SIDECAR_TOKEN: token, SIDECAR_PROJECTS_DIR: process.env.SIDECAR_PROJECTS_DIR ?? path.join(app.getPath("userData"), "projects") } });
+  // the sidecar requires a token: always a fresh random one, and never let the test-only no-auth escape hatch leak in from the shell
+  const env: NodeJS.ProcessEnv = { ...process.env, SIDECAR_TOKEN: token, SIDECAR_PROJECTS_DIR: process.env.SIDECAR_PROJECTS_DIR ?? path.join(app.getPath("userData"), "projects") };
+  delete env.SIDECAR_ALLOW_NO_AUTH;
+  sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env });
   return new Promise((resolve, reject) => {
     sidecar!.on("error", reject);
     sidecar!.on("exit", (code) => { reject(new Error(`sidecar exited early (${code})`)); if (!quitting) { console.error(`sidecar exited (${code})`); } });
@@ -84,7 +87,6 @@ function startSidecar(): Promise<number> {
   });
 }
 let quitting = false;
-app.on("before-quit", () => { quitting = true; });
 
 let win: BrowserWindow;
 const autotest = process.env.AUTOTEST;
@@ -103,7 +105,7 @@ ipcMain.handle("menu-state", (e, s: unknown) => {
   const o = s as Record<string, unknown> | null;
   if (!fromWin(e) || !o || typeof o !== "object" || typeof o.canBack !== "boolean" || typeof o.canForward !== "boolean" || typeof o.canOpen !== "boolean") return;
   const lbl = (v: unknown) => (typeof v === "string" ? v.slice(0, 120) : null);
-  const m = { canBack: o.canBack, canForward: o.canForward, canOpen: o.canOpen, canEdit: o.canEdit === true, undoLabel: lbl(o.undoLabel), redoLabel: lbl(o.redoLabel), dirty: o.dirty === true };
+  const m = { canBack: o.canBack, canForward: o.canForward, canOpen: o.canOpen, canEdit: o.canEdit === true, undoLabel: lbl(o.undoLabel), redoLabel: lbl(o.redoLabel), dirty: o.dirty === true, canClose: o.canClose === true };
   menu?.setState(m);
   if (process.platform === "darwin") win.setDocumentEdited(m.dirty);
 });
