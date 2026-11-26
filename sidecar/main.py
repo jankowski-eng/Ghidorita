@@ -1840,10 +1840,16 @@ class Sidecar:
             HighFunctionDBUtil.updateDBVariable(sym, newName, None, SourceType.USER_DEFINED)
         return self._high_edit("Rename variable in %s", entry, name, go, timeoutSecs, job)
 
-    def retype_variable(self, entry, name, dataType, timeoutSecs=30, job=None):
-        from ghidra.program.model.data import DataTypeConflictHandler
+    def _commit_type(self, prog, func, hf, sym, dt):
         from ghidra.program.model.pcode import HighFunctionDBUtil
         from ghidra.program.model.symbol import SourceType
+        if self._needs_full_commit(sym, hf):
+            HighFunctionDBUtil.commitParamsToDatabase(hf, func.getSignatureSource() != SourceType.DEFAULT,
+                                                      HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, SourceType.USER_DEFINED)
+        HighFunctionDBUtil.updateDBVariable(sym, None, dt, SourceType.USER_DEFINED)
+
+    def retype_variable(self, entry, name, dataType, timeoutSecs=30, job=None):
+        from ghidra.program.model.data import DataTypeConflictHandler
         from ghidra.util.data import DataTypeParser
         from ghidra.util.data.DataTypeParser import AllowedDataTypes
         text_arg(dataType, "dataType")
@@ -1854,11 +1860,46 @@ class Sidecar:
             if dt is None or dt.getLength() <= 0:
                 raise RpcError(INVALID, "type %r has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
-            if self._needs_full_commit(sym, hf):
-                HighFunctionDBUtil.commitParamsToDatabase(hf, func.getSignatureSource() != SourceType.DEFAULT,
-                                                          HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, SourceType.USER_DEFINED)
-            HighFunctionDBUtil.updateDBVariable(sym, None, dt, SourceType.USER_DEFINED)
+            self._commit_type(prog, func, hf, sym, dt)
         return self._high_edit("Retype variable in %s", entry, name, go, timeoutSecs, job)
+
+    def auto_create_structure(self, entry, name, structName=None, timeoutSecs=30, job=None):
+        """Ghidra's "Auto Create Structure" (FillOutStructureHelper, as FillOutStructureCmd uses it) on a decompiler variable:
+        infers fields from the load/store offsets through the variable (following it into callees), adds the struct, and
+        retypes the variable to a pointer to it, all in one transaction."""
+        from ghidra.app.decompiler import DecompileOptions
+        from ghidra.app.decompiler.util import FillOutStructureHelper
+        from ghidra.pyghidra import PyGhidraTaskMonitor
+        from ghidra.program.model.data import CategoryPath, DataTypeConflictHandler, PointerDataType
+        if structName is not None:
+            self._name_arg(structName, "structName")
+        out = {}
+
+        def go(prog, func, hf, sym):
+            dtm = prog.getDataTypeManager()
+            hv = sym.getHighVariable()
+            if hv is None:
+                raise RpcError(INVALID, "variable %r has no decompiler high variable" % name)
+            helper = FillOutStructureHelper(prog, PyGhidraTaskMonitor(None, None))
+            di = helper.setUpDecompiler(DecompileOptions())
+            if di is None:
+                raise RpcError(INTERNAL, "decompiler failed to open program")
+            try:
+                # with a name: always a new struct (extending an existing one would rename it); without: Ghidra's behavior, extend the struct the variable already points to
+                st = helper.processStructure(hv, func, structName is not None, False, di)
+            finally:
+                di.dispose()
+            if st is None:
+                raise RpcError(INVALID, "no field accesses found through %r: cannot infer a structure" % name)
+            if structName is not None:
+                if dtm.getDataType(st.getCategoryPath(), structName) is not None and str(st.getName()) != structName:
+                    raise RpcError(INVALID, "%s already exists" % structName)
+                st.setName(structName)
+            ptr = dtm.addDataType(PointerDataType(st), DataTypeConflictHandler.DEFAULT_HANDLER)
+            self._commit_type(prog, func, hf, sym, ptr)
+            out["path"] = str(ptr.getDataType().getPathName())
+        self._high_edit("Auto create structure in %s", entry, name, go, timeoutSecs, job)
+        return out
 
     def _undo_redo(self, undo):
         prog = self.need()
@@ -2002,9 +2043,9 @@ class Sidecar:
                  "xrefs_from", "list_data_types", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
                  "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
                  "define_data", "clear_code", "save", "dt_sources", "dt_children", "get_data_type", "create_data_type",
-                 "delete_data_type", "rename_data_type", "edit_struct", "edit_enum", "create_struct_from_data")
+                 "delete_data_type", "rename_data_type", "edit_struct", "edit_enum", "create_struct_from_data", "auto_create_structure")
     # on R, with a Job registered under the request id so cancel_decompile can reach the decompile inside (see _high_edit)
-    CANCELLABLE = ("rename_variable", "retype_variable")
+    CANCELLABLE = ("rename_variable", "retype_variable", "auto_create_structure")
     # run on R, but never behind/alongside an open: Busy instead of NoProgram
     P_METHODS = ("close_program", "import_candidates", "list_languages", "list_programs", "delete_program")
 

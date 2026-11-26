@@ -83,6 +83,11 @@ test("mock data types: struct editor, apply, undo/redo, enum, categories", async
   await err("dt_children", { path: "/Mine" }, -32004);
   const hits = await ok("list_data_types", { query: "s1", limit: 10 });
   assert.ok(hits.some((h) => h.path === "/S1" && h.kind === "struct"));
+  // auto create structure from a decompiler variable
+  await err("auto_create_structure", { entry: "0x401000", name: "nope" }, -32004);
+  assert.deepEqual(await ok("auto_create_structure", { entry: "0x401000", name: "param_1", structName: "AutoS" }), { path: "/auto_structs/AutoS" });
+  assert.ok((await ok("decompile", { entry: "0x401000" })).text.includes("AutoS *"));
+  assert.equal((await ok("undo_state")).undoName, "Auto create structure in entry");
   // from data: instructions refused, defined items become fields
   await err("create_struct_from_data", { address: "0x401200", length: 4, name: "X" });
   await ok("define_data", { address: "0x401200", dataType: "int" }); await ok("define_data", { address: "0x401204", dataType: "short" });

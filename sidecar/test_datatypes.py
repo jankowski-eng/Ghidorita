@@ -299,3 +299,39 @@ def test_create_struct_from_data(projects):
         assert (await c.ok("listing_rows", address=base_, count=1))[0]["mnemonic"] != "NoApply"
         await c.err("create_struct_from_data", INVALID, address=fns[5]["entry"], length=4, name="Code")
     run(with_prog(projects, go))
+
+
+def test_auto_create_structure(projects):
+    """FillOutStructureHelper on a decompiler variable: struct inferred from field accesses, variable retyped, one undo step."""
+    async def go(c):
+        fns = await c.ok("list_functions")
+        await c.err("auto_create_structure", NOT_FOUND, entry=fns[0]["entry"], name="no_such_var")
+        await c.err("auto_create_structure", INVALID, entry=fns[0]["entry"], name="x", structName="bad name")
+        found = None
+        for f in sorted(fns, key=lambda f: -f["size"])[:60]:
+            r = await c.ok("decompile", entry=f["entry"])
+            for v in sorted({k["varName"] for k in r["tokens"] if k["kind"] in ("param", "variable") and k.get("varName")}):
+                base = (await c.ok("undo_state")).get("undoName")
+                n = len(c.notes)
+                res = await c.call("auto_create_structure", entry=f["entry"], name=v, structName="AutoS")
+                if "result" in res:
+                    found = (f, v, res["result"], n, base)
+                    break
+            if found:
+                break
+        assert found, "no variable with inferable field accesses in the 60 largest functions"
+        f, v, res, n, base = found
+        assert res == {"path": "/auto_structs/AutoS"}, res
+        await c.wait_note("program_changed", since=n)  # (failed attempts fire their own rolled-back ones too)
+        assert (await c.ok("undo_state"))["undoName"].startswith("Auto create structure")
+        d = await c.ok("get_data_type", path=res["path"])
+        assert d["kind"] == "struct" and d["size"] > 0 and any(not x["undefined"] for x in d["components"]), d
+        t = await c.ok("decompile", entry=f["entry"])
+        assert t["cached"] is False and "AutoS" in t["text"], t["text"][:400]
+        await c.ok("undo")  # one transaction: struct, pointer and the variable's type go together
+        assert (await c.ok("undo_state")).get("undoName") == base
+        await c.err("get_data_type", NOT_FOUND, path=res["path"])
+        assert "AutoS" not in (await c.ok("decompile", entry=f["entry"]))["text"]
+        await c.ok("redo")
+        assert "AutoS" in (await c.ok("decompile", entry=f["entry"]))["text"]
+    run(with_prog(projects, go))

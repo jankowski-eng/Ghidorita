@@ -485,6 +485,18 @@ const handlers = {
       return {};
     });
   },
+  auto_create_structure({ entry, name, structName }, notify) {
+    const i = idxOfEntry(parseAddr(entry)), o = Object.keys(VARS).find((o) => i >= 0 && v(i, o) === name);
+    if (!o) nf();
+    if (structName !== undefined) reqName(structName);
+    const nm = structName ?? "auto_struct", path = "/auto_structs/" + nm;
+    if (S.dt.has(path)) bad("duplicate");
+    return edit(`Auto create structure in ${nameOf(i)}`, notify, [fnRange(i)], ["type", "function"], () => {
+      S.dt.set(path, { kind: "struct", name: nm, path, size: 0, comps: [{ len: 8, display: "long", typePath: "/long", name: "field0_0x0" }, ...fill(8)] });
+      S.cats.add("/auto_structs"); S.types.set(`${i}|${o}`, nm + " *");
+      return { path };
+    });
+  },
   create_struct_from_data({ address, length, name, category = "/", apply = true }, notify) {
     const n = parseAddr(address), cat = catOf(category);
     reqName(name);

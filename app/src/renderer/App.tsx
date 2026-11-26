@@ -285,6 +285,11 @@ export function App() {
       if (!name) return setFlash("Put the cursor on a variable to retype it.");
       ask({ title: "Retype variable", label: "Data type", field: "datatype", initial: "", submit: "Retype" },
         async (v) => { await rpc.call("retype_variable", { entry, name, dataType: v.trim() }); });
+    } else if (a === "autoStruct") {
+      const name = retypeTarget(tok);
+      if (!name) return setFlash("Put the cursor on a variable to auto create a structure for it.");
+      setFormDlg({ title: "Auto create structure", submit: "Create", fields: [{ key: "name", label: "Structure name (empty = automatic)" }],
+        go: async (v) => { await rpc.call("auto_create_structure", { entry, name, structName: v.name.trim() || undefined }); } });
     } else if (a === "signature") await editSignature(entry);
     else if (a === "comment") {
       const line0 = (pos?.lineNumber ?? 1) - 1;

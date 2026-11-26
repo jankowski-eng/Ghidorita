@@ -147,7 +147,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string } };
+  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; auto?: string } };
   c.setPath(file);
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
@@ -164,6 +164,11 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
     result.phase2.types = { size: st.size, fields: st.components!.filter((c) => !c.undefined).map((c) => c.name), row: row.mnemonic, fromRow: row2.mnemonic, fromFields: fd.components!.filter((c) => !c.undefined).length, inDecompiler: dec.text.includes(t.name) };
     typesOk = st.size === t.size && st.components!.filter((c) => !c.undefined).slice(0, 2).map((c) => c.name).join() === t.fields.join() && row.mnemonic === t.name
       && row2.mnemonic === t.from && fd.components!.filter((c) => !c.undefined).length === 2 && dec.text.includes(t.name);
+    if (t.auto) { // the auto-created struct and the variable's new type survived too
+      const as = await rpc.call("get_data_type", { path: "/auto_structs/AutotestAuto" }), ad = await rpc.call("decompile", { entry: t.auto });
+      result.phase2.types.auto = { size: as.size, inDecompiler: ad.text.includes("AutotestAuto") };
+      typesOk = typesOk && as.size > 0 && ad.text.includes("AutotestAuto");
+    }
   }
   result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty && typesOk;
 }
@@ -299,9 +304,38 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
   R.fromDataUndoRedo = true;
 
+  // 8b. Auto Create Structure on a decompiler variable (real sidecar only: the mock's decompiler has no variable tokens).
+  // Find a variable with inferable field accesses by trying the RPC (then undo it), then do it through the UI: cursor on the variable + Edit menu.
+  let auto: { entry: string; v: string } | undefined;
+  for (const f of [...fl].sort((x, y) => y.size - x.size).slice(0, 60)) {
+    if (f.entry === entry || f.entry === edit?.entry) continue;
+    const r = await rpc.call("decompile", { entry: f.entry });
+    const vars = [...new Set(r.tokens.filter((t) => (t.kind === "variable" || t.kind === "param") && t.varName).map((t) => t.varName!))];
+    for (const v of vars) {
+      const ok = await rpc.call("auto_create_structure", { entry: f.entry, name: v, structName: "AutotestProbe" }).then(() => true, () => false);
+      if (ok) { await rpc.call("undo", {}); auto = { entry: f.entry, v }; break; }
+    }
+    if (auto) break;
+  }
+  if (!auto) R.autoStruct = "skipped (no variable tokens or no inferable variable)";
+  else {
+    await goTo(auto.entry);
+    await waitFor(() => new RegExp(`\\b${escRe(auto!.v)}\\b`).test(c.editorText()), 15000, "decompiler text of the auto struct function");
+    const p = wordPos(c.editorText(), auto.v);
+    c.editor().setPosition({ lineNumber: p.line, column: p.col }); c.editor().focus(); document.querySelector<HTMLElement>(".monaco-editor textarea")!.focus();
+    c.command({ type: "edit", action: "autoStruct" });
+    await fillAll("Auto create structure", { "Structure name (empty = automatic)": "AutotestAuto" });
+    await waitFor(() => c.editorText().includes("AutotestAuto"), 15000, "decompiler to show AutotestAuto");
+    const ds = await get("/auto_structs/AutotestAuto").catch(async (e) => { throw new Error(`${e.message}; auto_structs: ${JSON.stringify(await rpc.call("dt_children", { path: "/auto_structs" }).catch(() => null))}; editor: ${c.editorText().split("\n").filter((l) => l.includes("AutotestAuto")).join(" / ")}`); });
+    R.autoStruct = { variable: auto.v, size: ds.size, fields: ds.components!.filter((x) => !x.undefined).length };
+    if (!ds.size || !R.autoStruct.fields) throw new Error("auto struct has no fields");
+    await undo(); await waitFor(() => !c.editorText().includes("AutotestAuto"), 15000, "undo auto struct");
+    await c.menu("redo"); await waitFor(() => c.editorText().includes("AutotestAuto"), 15000, "redo auto struct");
+  }
+
   // 9. save through File > Save; the dirty marker clears
   await c.menu("save");
   await until(async () => !(await rpc.call("undo_state", {})).dirty, "save");
   const ok = R.created && R.fillerFilled && R.listing && R.decompiler && R.undoAll && R.redoAll && R.fromDataUndoRedo;
-  return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b } };
+  return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b, ...(auto ? { auto: auto.entry } : {}) } };
 }

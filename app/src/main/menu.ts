@@ -44,7 +44,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
         { type: "separator" },
         ...(([["Rename…", "L", "rename"], ["Retype Variable…", "CmdOrCtrl+L", "retype"], ["Set Comment…", ";", "comment"], ["Create Function", "F", "createFunction"],
-          ["Define Data…", "T", "defineData"], ["Create Structure from Data…", "", "createStruct"], ["Clear Code Bytes", "C", "clear"], ["Edit Function Signature…", "", "signature"]] as const).map(([label, key, action]): MenuItemConstructorOptions =>
+          ["Define Data…", "T", "defineData"], ["Create Structure from Data…", "", "createStruct"], ["Auto Create Structure (variable)…", "", "autoStruct"], ["Clear Code Bytes", "C", "clear"], ["Edit Function Signature…", "", "signature"]] as const).map(([label, key, action]): MenuItemConstructorOptions =>
           // the key is only a hint in the label: a real accelerator could swallow plain letters typed into text inputs
           ({ label: key ? `${label}   (${key.replace("CmdOrCtrl", process.platform === "darwin" ? "Cmd" : "Ctrl")})` : label, enabled: state.canEdit, click: () => send({ type: "edit", action }) }))),
       ] },
