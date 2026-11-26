@@ -25,6 +25,8 @@ export const ACTIONS: CommandAction[] = [
   { label: "Changes", cmd: { type: "dock", panel: "changes" } },
   { label: "Search Memory", cmd: { type: "dock", panel: "memsearch" } },
   { label: "Data Type Manager", cmd: { type: "datatypes" } },
+  { label: "Coverage", cmd: { type: "dock", panel: "coverage" } },
+  { label: "Load Coverage…", cmd: { type: "coverage-load" } },
   { label: "Clear Coverage", cmd: { type: "coverage-clear" } },
   { label: "Close Tab", cmd: { type: "close-tab" } },
   { label: "Close Program", cmd: { type: "close-program" } },

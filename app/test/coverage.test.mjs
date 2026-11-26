@@ -17,3 +17,33 @@ test("merges ranges and answers overlap by code unit", () => {
   assert.equal(c.has("0x101", 1), false);
   assert.equal(new Coverage([]).has("0x1", 1), false);
 });
+
+const { CoverageRuns, sharedBytes } = await import("data:text/javascript," + encodeURIComponent(js));
+const cov = (...r) => new Coverage(r.map(([start, end]) => ({ start, end })));
+
+test("runs: one run tints green, two runs show only-A, only-B and both", () => {
+  const r = new CoverageRuns();
+  assert.equal(r.mark("0x10", 1), "");
+  const a = r.add("run a", cov(["0x10", "0x1f"], ["0x40", "0x4f"]));
+  assert.equal(r.a, a.id);
+  assert.equal(r.mark("0x10", 1), " cov");
+  const b = r.add("run b", cov(["0x18", "0x27"]));
+  r.select("b", b.id); r.select("a", a.id);
+  assert.equal(r.mark("0x10", 1), " cov-a");
+  assert.equal(r.mark("0x1c", 1), " cov");
+  assert.equal(r.mark("0x24", 1), " cov-b");
+  assert.equal(r.mark("0x40", 1), " cov-a");
+  assert.equal(r.mark("0x60", 1), "");
+  assert.deepEqual(r.diff(), { onlyA: 8n + 16n, onlyB: 8n, both: 8n }); // a = 0x10-0x1f + 0x40-0x4f, b = 0x18-0x27
+  r.select("a", b.id); // the same run is never both
+  assert.equal(r.b, null);
+  r.remove(b.id);
+  assert.equal(r.a, null);
+  r.clear();
+  assert.equal(r.runs.length, 0);
+});
+
+test("sharedBytes sweeps merged ranges", () => {
+  assert.equal(sharedBytes(cov(["0x0", "0x9"], ["0x20", "0x2f"]), cov(["0x5", "0x24"])), 5n + 5n);
+  assert.equal(sharedBytes(cov(), cov(["0x0", "0x1"])), 0n);
+});

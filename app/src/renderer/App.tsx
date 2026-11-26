@@ -16,6 +16,8 @@ import { reopenParams } from "./openOptions";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { coverage, Coverage } from "./coverage";
+import { coverageSpans } from "./binmap";
+import type { Layer } from "./BinaryMap";
 import { XrefPanel } from "./XrefPanel";
 import { Dock, type DockId } from "./Dock";
 import { RpcError } from "./backend";
@@ -91,6 +93,7 @@ export function App() {
   const dlgRef = useRef<unknown>(null); dlgRef.current = dlg;
   const [formDlg, setFormDlg] = useState<{ title: string; submit: string; fields: FormField[]; go: (v: Record<string, string>) => Promise<void> } | null>(null);
   const formRef = useRef(formDlg); formRef.current = formDlg;
+  const [covVersion, setCovVersion] = useState(0); // bumped whenever the coverage runs or their selection change
   const [typesOpen, setTypesOpen] = useState(false);
   const [typesVersion, setTypesVersion] = useState(0);
   const lastPane = useRef<"listing" | "decompiler">("listing");
@@ -131,7 +134,7 @@ export function App() {
 
   // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
   const clearProgram = () => {
-    coverage.current = null; openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
+    coverage.clear(); openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
     tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
     clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
   };
@@ -350,19 +353,22 @@ export function App() {
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
   const apiNow_refresh = () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1, refresh: true })); };
+  const covChanged = () => { setCovVersion((v) => v + 1); apiNow_refresh(); };
   const loadCoverage = async (path: string) => {
     if (!openedRef.current || openingRef.current) return;
     try {
       const { ranges } = await rpc.call("load_coverage", { path });
-      coverage.current = new Coverage(ranges);
-      setFlash(`Coverage loaded: ${coverage.current.size} range${coverage.current.size === 1 ? "" : "s"} (green bar in the listing)`);
-      apiNow_refresh();
+      const run = coverage.add(path.split(/[\\/]/).pop() || path, new Coverage(ranges));
+      setFlash(`Coverage "${run.name}" loaded: ${run.cov.size} range${run.cov.size === 1 ? "" : "s"} (green bar in the listing; Coverage window to name and compare runs)`);
+      covChanged();
     } catch (e) { fail(e); }
   };
+  const pickCoverage = async () => { const p = await window.host.pickFile(); if (p) void loadCoverage(p); };
   const handleMenu = (c: MenuCommand) => {
     if (c.type === "open-path") requestOpen(c.path);
     else if (c.type === "coverage-path") void loadCoverage(c.path);
-    else if (c.type === "coverage-clear") { coverage.current = null; apiNow_refresh(); }
+    else if (c.type === "coverage-clear") { coverage.clear(); covChanged(); }
+    else if (c.type === "coverage-load") { if (openedRef.current) void pickCoverage(); }
     else if (c.type === "close-program") void closeProgram();
     else if (c.type === "search") { if (openedRef.current) setSearchOpen(true); }
     else if (c.type === "nav-back") back();
@@ -452,6 +458,12 @@ export function App() {
   const here = nav.current?.address ?? null;
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
+  const covLayers = useMemo<Layer[]>(() => {
+    const out: Layer[] = [], a = coverage.get(coverage.a), b = coverage.get(coverage.b);
+    if (map && a) out.push({ name: `Coverage A (${a.name})`, color: [78, 195, 107], spans: coverageSpans(map, a.cov) });
+    if (map && b) out.push({ name: `Coverage B (${b.name})`, color: [90, 160, 224], spans: coverageSpans(map, b.cov) });
+    return out;
+  }, [map, covVersion]); // eslint-disable-line
   const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
 
   return (
@@ -469,7 +481,7 @@ export function App() {
           functions: (
             <div className="funcs-col">
               <div className="funcs-row">
-                <BinaryMap map={map!} funcs={funcs} here={here} onGo={(a) => go(a, "goto")} />
+                <BinaryMap map={map!} funcs={funcs} here={here} layers={covLayers} onGo={(a) => go(a, "goto")} />
                 <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
               </div>
               <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />
@@ -492,7 +504,7 @@ export function App() {
         }}</Panes>
       ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
         <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
-      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} />}
+      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash}
         back={[...nav.back].reverse().map((l) => l.address)} forward={[...nav.forward].reverse().map((l) => l.address)} onBack={back} onForward={forward} />
       {typesOpen && opened && <DataTypes version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}

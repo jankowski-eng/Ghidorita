@@ -33,7 +33,7 @@ export function createMenu({ getWin, pick }: Deps) {
           const p = await pick().catch(() => null);
           if (p) send({ type: "coverage-path", path: p });
         } },
-        { label: "Clear Coverage", enabled: state.canEdit, click: () => send({ type: "coverage-clear" }) },
+        { label: "Clear All Coverage", enabled: state.canEdit, click: () => send({ type: "coverage-clear" }) },
         { label: "Open Recent", enabled: state.canOpen, submenu: recentItems },
         { id: "save", label: "Save", accelerator: "CmdOrCtrl+S", enabled: state.canEdit && state.dirty, click: () => send({ type: "edit", action: "save" }) },
         { id: "close-program", label: "Close Program", enabled: state.canClose, click: () => send({ type: "close-program" }) },
@@ -59,6 +59,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { label: "Symbol Table", accelerator: "CmdOrCtrl+Shift+Y", click: () => send({ type: "dock", panel: "symbols" }) },
         { label: "Defined Strings", accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
         { label: "Changes", accelerator: "CmdOrCtrl+Shift+H", click: () => send({ type: "dock", panel: "changes" }) },
+        { label: "Coverage", click: () => send({ type: "dock", panel: "coverage" }) },
         { label: "Search Memory…", accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { label: "Data Type Manager", accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },

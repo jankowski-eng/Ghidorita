@@ -14,6 +14,9 @@ export class Coverage {
     }
   }
   get size() { return this.lo.length; }
+  /** The merged ranges, inclusive ends, sorted. */
+  spans(): [bigint, bigint][] { return this.lo.map((l, i) => [l, this.hi[i]]); }
+  bytes(): bigint { return this.lo.reduce((n, l, i) => n + (this.hi[i] - l + 1n), 0n); }
   has(address: Address, length: number): boolean {
     if (!address.startsWith("0x")) return false; // shortcut: coverage files name default-space addresses only (load_coverage), other spaces are never covered; upgrade with qualified ranges
     const a = BigInt(address), z = a + BigInt(Math.max(length, 1)) - 1n;
@@ -23,5 +26,59 @@ export class Coverage {
   }
 }
 
-/** The loaded coverage (one set per session; cleared when a program opens or closes). Listing reads it at render time. */
-export const coverage: { current: Coverage | null } = { current: null };
+/** Bytes in both sets, by a sweep over their merged ranges. */
+export function sharedBytes(a: Coverage, b: Coverage): bigint {
+  const x = a.spans(), y = b.spans();
+  let i = 0, j = 0, n = 0n;
+  while (i < x.length && j < y.length) {
+    const lo = x[i][0] > y[j][0] ? x[i][0] : y[j][0], hi = x[i][1] < y[j][1] ? x[i][1] : y[j][1];
+    if (hi >= lo) n += hi - lo + 1n;
+    if (x[i][1] < y[j][1]) i++; else j++;
+  }
+  return n;
+}
+
+export interface Run { id: number; name: string; cov: Coverage }
+
+/**
+ * Named coverage runs. Up to two are shown at once: A alone tints what A executed (green); A and B together tint what both executed (green),
+ * only A (orange) and only B (blue), which is the difference between two runs. One set per program; cleared when a program opens or closes.
+ */
+export class CoverageRuns {
+  runs: Run[] = [];
+  a: number | null = null;
+  b: number | null = null;
+  private next = 1;
+  add(name: string, cov: Coverage): Run {
+    const r = { id: this.next++, name, cov };
+    this.runs.push(r); this.a = r.id; // the run just loaded is the one shown
+    return r;
+  }
+  get(id: number | null): Run | undefined { return id === null ? undefined : this.runs.find((r) => r.id === id); }
+  remove(id: number) { this.runs = this.runs.filter((r) => r.id !== id); if (this.a === id) this.a = null; if (this.b === id) this.b = null; }
+  rename(id: number, name: string) { const r = this.get(id); if (r && name.trim()) r.name = name.trim(); }
+  /** Show run `id` (or none) as A or B; the same run is never both. */
+  select(slot: "a" | "b", id: number | null) {
+    this[slot] = id;
+    const other = slot === "a" ? "b" : "a";
+    if (id !== null && this[other] === id) this[other] = null;
+  }
+  clear() { this.runs = []; this.a = this.b = null; }
+  get shown(): boolean { return this.a !== null || this.b !== null; }
+  /** The listing's row class for a code unit: "" (nothing), " cov" (covered; with two runs: by both), " cov-a" (only A), " cov-b" (only B). */
+  mark(address: Address, length: number): string {
+    const ca = this.get(this.a), cb = this.get(this.b);
+    const ina = !!ca?.cov.has(address, length), inb = !!cb?.cov.has(address, length);
+    if (ca && cb) return ina && inb ? " cov" : ina ? " cov-a" : inb ? " cov-b" : "";
+    return ina || inb ? " cov" : "";
+  }
+  /** Bytes only in A, only in B and in both; null unless two runs are shown. */
+  diff(): { onlyA: bigint; onlyB: bigint; both: bigint } | null {
+    const ca = this.get(this.a), cb = this.get(this.b);
+    if (!ca || !cb) return null;
+    const both = sharedBytes(ca.cov, cb.cov);
+    return { onlyA: ca.cov.bytes() - both, onlyB: cb.cov.bytes() - both, both };
+  }
+}
+
+export const coverage = new CoverageRuns();

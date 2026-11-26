@@ -1,5 +1,6 @@
 import type { FunctionInfo } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
+import type { Coverage } from "./coverage";
 
 export interface Span { pos: number; len: number } // byte position in the AddrMap (gaps between ranges are not counted) and length
 
@@ -20,3 +21,7 @@ export function fill(total: number, spans: Span[], n: number): Float32Array {
   for (let i = 0; i < n; i++) if (out[i] > 1) out[i] = 1;
   return out;
 }
+
+/** Executed ranges as map spans. shortcut: default space only (coverage files name no other), a range across a gap between loaded ranges counts the gap too. */
+export const coverageSpans = (map: AddrMap, cov: Coverage): Span[] =>
+  cov.spans().map(([lo, hi]) => ({ pos: map.pos(lo), len: Number(hi - lo + 1n) })).filter((s) => s.pos < map.total);
