@@ -7,6 +7,7 @@ import { runEditFlow, runPhase2, runTypesFlow } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
 import { runR5Flow } from "./autotestR5";
 import { runListingFlow } from "./autotestListing";
+import { runFocusedFlow } from "./autotestFlows";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -18,6 +19,8 @@ export interface AutotestCtx {
   cancelFile: string | null;
   /** AUTOTEST_ONLY=listing: open the file and run just that flow (fast iteration) */
   only?: string | null;
+  /** AUTOTEST_FLOW: a focused scripted flow (see autotestFlows.ts) instead of the full run */
+  flow: string | null;
   status(): { funcs: number; opened: boolean; opening: boolean; phase: string; notice: string };
   back(): void;
   forward(): void;
@@ -58,6 +61,11 @@ export const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}
 
 export async function runAutotest(file: string, c: AutotestCtx) {
     const result: Record<string, unknown> = { ok: false };
+    if (c.flow) {
+      try { result.ok = await runFocusedFlow(c.flow, file, c, result); } catch (e) { c.fail(e); }
+      result.errors = c.errors; if (c.errors.length) result.ok = false;
+      return window.host.autotestDone(result);
+    }
     if (c.expect) { // second launch of the edit autotest: did the saved edit survive the quit?
       try { await runPhase2(file, c, result); } catch (e) { c.fail(e); }
       result.errors = c.errors; if (c.errors.length) result.ok = false;

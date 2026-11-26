@@ -164,7 +164,7 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
   try { port = await startSidecar(); ready = true; } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
-  ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null, only: process.env.AUTOTEST_ONLY ?? null }));
+  ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null, only: process.env.AUTOTEST_ONLY ?? null, flow: process.env.AUTOTEST_FLOW ?? null, decompileTimeout: Number(process.env.AUTOTEST_DECOMPILE_TIMEOUT) || null }));
   win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));

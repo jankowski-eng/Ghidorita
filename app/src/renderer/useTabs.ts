@@ -3,7 +3,7 @@ import { ErrorCode, type Address, type Token } from "../../../protocol";
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import { decompileJobs } from "./decompileJobs";
-import { emptyTabs, openFunction, pinTab, activateTab, closeTab, droppedIds, isLarge, LONG_TIMEOUT_SECS, type Tabs } from "./tabs";
+import { emptyTabs, openFunction, pinTab, activateTab, closeTab, droppedIds, isLarge, LONG_TIMEOUT_SECS, testTimeout, type Tabs } from "./tabs";
 
 /** "large": not started, waiting for "Decompile anyway" (size warning). error + code Timeout/Cancelled also offer "Decompile anyway". long: running with the long timeout (cancellable). */
 export interface TabData { status: "loading" | "ready" | "error" | "large"; text: string; tokens: Token[]; error?: string; code?: number; size?: number; long?: boolean }
@@ -41,7 +41,7 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
     // a forced reload keeps showing the old text until the new one arrives
     if (!(force && cur?.status === "ready")) setData(id, { status: "loading", text: "", tokens: [], long });
     const t0 = performance.now();
-    const job = jobs.current.start(id, entry, long ? LONG_TIMEOUT_SECS : undefined);
+    const job = jobs.current.start(id, entry, long ? LONG_TIMEOUT_SECS : testTimeout.secs);
     try {
       const r = await job.result;
       if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current()) return; // closed or superseded

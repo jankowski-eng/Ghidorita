@@ -369,7 +369,7 @@ const handlers = {
     if (query !== undefined && typeof query !== "string") bad("query");
     const q = (query ?? "").trim().toLowerCase();
     const all = Array.from({ length: 300 }, (_, k) => { const value = `mock string #${k}${"x".repeat(k % 20)}`; return { address: hex(BASE + (k * 6000 + 11) * STRIDE), value, length: value.length + 1 }; })
-      .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q));
+      .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q) && S.data.get(parseAddr(s.address))?.mnemonic !== "??"); // clear_code removes a string
     return { total: all.length, items: all.slice(off, off + lim) };
   },
   list_symbols({ offset, limit, query, kinds, sort, desc }) {

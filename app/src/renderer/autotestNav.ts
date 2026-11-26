@@ -83,6 +83,22 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 10000, "string count restored");
   R.strings = { total: sTotal, filter: word, filtered: sw.total, clicked: sAddr };
 
+  // the panel follows a real edit: clear a string with clear_code (through the RPC, as the listing's C key does), the panel must drop it without
+  // being touched, and show it again after undo. The string is picked so that its text matches exactly one string (the filter then reads 1 -> 0 -> 1).
+  const cands = (await rpc.call("list_strings", { minLength: 8, limit: 60 })).items.filter((i) => i.value.length >= 8 && i.value.length <= 40);
+  let pick: (typeof cands)[number] | undefined;
+  for (const i of cands) if ((await rpc.call("list_strings", { query: i.value, limit: 1 })).total === 1) { pick = i; break; }
+  need(pick, "a string that is unique by its text");
+  typeInto(field("Filter strings"), pick!.value);
+  await waitFor(() => status("String count").startsWith("1 strings"), 10000, "unique string filter");
+  await rpc.call("clear_code", { address: pick!.address });
+  await waitFor(() => status("String count").startsWith("0 strings"), 10000, "strings panel to drop the cleared string");
+  await rpc.call("undo", {});
+  await waitFor(() => status("String count").startsWith("1 strings"), 10000, "strings panel to show the string again after undo");
+  typeInto(field("Filter strings"), "");
+  await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 10000, "string count after the edit round trip");
+  R.strings.refreshAfterEdit = { address: pick!.address };
+
   // ---- Memory search ----
   open("memsearch");
   await waitFor(() => byLabel("region", "Memory search"), 5000, "memory search panel");

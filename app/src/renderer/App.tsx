@@ -28,6 +28,7 @@ import { runAutotest, runBench } from "./autotest";
 import { emptyNav, push, goBack, goForward, type Nav, type Loc, type Source } from "./nav";
 import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } from "./symbols";
 import { useTabs, canForce } from "./useTabs";
+import { testTimeout } from "./tabs";
 import { EditDialog, type EditSpec } from "./EditDialog";
 import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus, type XrefTarget } from "./editActions";
 import { FormDialog, type FormField } from "./FormDialog";
@@ -380,9 +381,10 @@ export function App() {
         else if (m === "error") fail((p as { message: string }).message);
       };
       autotestRef.current = !!cfg.autotest;
+      if (cfg.autotest && cfg.decompileTimeout) testTimeout.secs = cfg.decompileTimeout;
       window.addEventListener("securitypolicyviolation", (e) => (window as any).__expectCsp || fail("CSP blocked " + e.violatedDirective + ": " + e.blockedURI)); // the policy in index.html must stay as tight as Monaco allows
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile, only: cfg.only,
+        open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile, only: cfg.only, flow: cfg.flow,
         status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
         select: async (e) => { await api.current.go(e, "functions"); }, goAddr: async (a) => { await api.current.go(a, "goto"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,

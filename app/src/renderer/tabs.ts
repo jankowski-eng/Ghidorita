@@ -10,6 +10,8 @@ export const LARGE_FUNCTION = 30 * 1024;
 export const isLarge = (size: number) => size > LARGE_FUNCTION;
 /** "Decompile anyway" timeout; shortcut: 30 minutes, the user can cancel. */
 export const LONG_TIMEOUT_SECS = 1800;
+/** Test hook (AUTOTEST_DECOMPILE_TIMEOUT): the timeout of an ordinary decompile, so a real Timeout can be provoked without a 30 s wait. Unset = the sidecar default. */
+export const testTimeout: { secs?: number } = {};
 
 const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase();
 
