@@ -73,7 +73,8 @@ async def session(first):
                 x = random.randrange(info["totalBytes"])
                 for r in info["ranges"]:
                     if x < r["size"]:
-                        return hex(int(r["start"], 16) + x)
+                        pre, _, h = r["start"].rpartition(":")  # "0x..", "code:1000", "OVL::1000"
+                        return (pre + ":" if pre else "0x") + format(int(h, 16) + x, "x")
                     x -= r["size"]
 
             lat = []
@@ -89,41 +90,42 @@ async def session(first):
                 lat.append((time.monotonic() - t) * 1000)
             res["listing_100_rows_backward_100"] = summ(lat)
 
-            # 50 decompiles of random functions while another task keeps fetching random listing pages
-            sample = random.sample(fns, min(50, len(fns)))
-            stop = False; ll = []
+            if not os.environ.get("LISTING_ONLY"):
+                # 50 decompiles of random functions while another task keeps fetching random listing pages
+                sample = random.sample(fns, min(50, len(fns)))
+                stop = False; ll = []
 
-            async def scroller():
-                while not stop:
-                    a = rand_addr(); t = time.monotonic()
-                    await call("listing_rows", address=a, count=100)
-                    ll.append((time.monotonic() - t) * 1000)
-                    await asyncio.sleep(0.016)
-            task = asyncio.create_task(scroller())
-            dl = []; errs = 0
-            for f in sample:
-                t = time.monotonic()
-                m = await request("decompile", entry=f["entry"], timeoutSecs=30)
-                errs += "error" in m
-                dl.append((time.monotonic() - t) * 1000)
-            stop = True; await task
-            res["decompile_50_cold_while_listing"] = {**summ(dl), "errors": errs, "total_s": round(sum(dl) / 1000, 1)}
-            res["listing_during_decompile"] = summ(ll)
-            res["sample_function_bytes_median"] = statistics.median(f["size"] for f in sample)
-            # the 50 largest functions: the cold decompile worst case, again with listing fetches running
-            big = sorted(fns, key=lambda f: -f["size"])[:50]
-            stop = False; ll = []
-            task = asyncio.create_task(scroller())
-            dl = []; errs = 0
-            for f in big:
-                t = time.monotonic()
-                m = await request("decompile", entry=f["entry"], timeoutSecs=30)
-                errs += "error" in m
-                dl.append((time.monotonic() - t) * 1000)
-            stop = True; await task
-            res["decompile_50_largest_while_listing"] = {**summ(dl), "errors": errs, "largest_function_bytes": big[0]["size"], "50th_bytes": big[-1]["size"]}
-            res["listing_during_largest_decompile"] = summ(ll)
-            res["rss_after_workload_mb"] = rss_mb(p.pid)
+                async def scroller():
+                    while not stop:
+                        a = rand_addr(); t = time.monotonic()
+                        await call("listing_rows", address=a, count=100)
+                        ll.append((time.monotonic() - t) * 1000)
+                        await asyncio.sleep(0.016)
+                task = asyncio.create_task(scroller())
+                dl = []; errs = 0
+                for f in sample:
+                    t = time.monotonic()
+                    m = await request("decompile", entry=f["entry"], timeoutSecs=30)
+                    errs += "error" in m
+                    dl.append((time.monotonic() - t) * 1000)
+                stop = True; await task
+                res["decompile_50_cold_while_listing"] = {**summ(dl), "errors": errs, "total_s": round(sum(dl) / 1000, 1)}
+                res["listing_during_decompile"] = summ(ll)
+                res["sample_function_bytes_median"] = statistics.median(f["size"] for f in sample)
+                # the 50 largest functions: the cold decompile worst case, again with listing fetches running
+                big = sorted(fns, key=lambda f: -f["size"])[:50]
+                stop = False; ll = []
+                task = asyncio.create_task(scroller())
+                dl = []; errs = 0
+                for f in big:
+                    t = time.monotonic()
+                    m = await request("decompile", entry=f["entry"], timeoutSecs=30)
+                    errs += "error" in m
+                    dl.append((time.monotonic() - t) * 1000)
+                stop = True; await task
+                res["decompile_50_largest_while_listing"] = {**summ(dl), "errors": errs, "largest_function_bytes": big[0]["size"], "50th_bytes": big[-1]["size"]}
+                res["listing_during_largest_decompile"] = summ(ll)
+                res["rss_after_workload_mb"] = rss_mb(p.pid)
     rd.cancel()
     p.stdin.close()
     t = time.monotonic(); p.wait(timeout=20)

@@ -89,7 +89,7 @@ Each edit is one Ghidra transaction, named as the undo label (e.g. "Rename symbo
 - `label` the primary symbol; `labels` all symbols at the address, primary first, only when there is more than one.
 - `comment` is the EOL comment; `pre`, `post`, `plate`, `repeatable` the other kinds (multi-line text), each only when set. The client renders plate and pre above the row, post below it, EOL and repeatable at the end of the line.
 - `header` on a function's entry row: `signature`, `convention`, `params` (count), `paramBytes` / `localBytes` (stack frame sizes), `noReturn`, `thunk`.
-- `xrefs` `{count, items}` when memory references point at the address: `count` is the full number, `items` at most 5 (shortcut: the first 5 by from-address; the full list is `xrefs_to`), each `{from, kind}`.
+- `xrefs` `{count, items}` when memory references point at the address: `count` is the full number, `items` at most 5 (shortcut: the first 5 Ghidra returns, shown ascending by from; the full list is `xrefs_to`), each `{from, kind}`.
 - `parts` for defined structure/union/array data: components `{offset, length, type, name, value}` (arrays name elements `[i]`), at most 64 (`partsTotal` is the real count when cut; shortcut: one level, nested composites show as one component with their display value). The client folds them by default.
 Row building stays on thread R and costs a few Ghidra calls per row; bench numbers are in SPIKE_REPORT.
 

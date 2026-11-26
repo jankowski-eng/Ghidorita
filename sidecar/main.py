@@ -22,6 +22,12 @@ KIND_PREFIX = [("SYMBOL_", "symbol"), ("EXTERNAL_", "symbol"), ("REFERENCE_", "s
                ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code"}
+ROW_COMMENT_KINDS = {"eol": "comment", "pre": "pre", "post": "post", "plate": "plate", "repeatable": "repeatable"}  # CommentType name -> row field
+
+
+def _akey(s):
+    """Sort key of a protocol address string: its offset (qualified addresses carry the space before the last ':')."""
+    return int(s.rpartition(":")[2], 16)
 # analysis profiles (open_binary `profile`): "fast" switches these off for the first-open analysis (measured in SPIKE_REPORT round 4)
 FAST_PROFILE = ["Call Convention ID", "Decompiler Switch Analysis", "Stack"]
 RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a base address option ("-loader-baseAddr")
@@ -41,8 +47,11 @@ class RpcError(Exception):
         self.code = code
 
 
+MASK64 = (1 << 64) - 1
+
+
 def hx(off):
-    return "0x%x" % off
+    return "0x%x" % (off & MASK64)  # Ghidra offsets are signed longs: addresses above 2^63 read negative
 
 
 def lim(v, default, hi=None):
@@ -263,13 +272,37 @@ class Sidecar:
         return self.program
 
     def addr(self, s, prog=None):
+        """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1."""
         prog = prog or self.need()
         try:
-            off = int(s, 16)
-            # shortcut: single default address space only, upgrade when segmented/overlay binaries matter
-            return prog.getAddressFactory().getDefaultAddressSpace().getAddress(off)
+            f = prog.getAddressFactory()
+            name, _, h = s.rpartition(":") if ":" in s else ("", "", s)
+            sp = f.getAddressSpace(name[:-1] if name.endswith(":") else name) if name else f.getDefaultAddressSpace()
+            if sp is None or not re.fullmatch(r"(0[xX])?[0-9a-fA-F]{1,16}", h):
+                raise ValueError(s)
+            off = int(h, 16)
+            return sp.getAddress(off - (1 << 64) if off >= 1 << 63 else off)
         except Exception:
             raise RpcError(INVALID, "bad address %r" % (s,))
+
+    def fmtr(self, prog=None):
+        """-> function Address -> protocol string (the default space as "0x..", others space-qualified); one lookup of the default space."""
+        dsid = (prog or self.need()).getAddressFactory().getDefaultAddressSpace().getSpaceID()
+
+        def f(a):
+            sp = a.getAddressSpace()
+            off = a.getOffset() & MASK64
+            if sp.getSpaceID() == dsid:
+                return "0x%x" % off
+            return "%s%s%x" % (sp.getName(), "::" if sp.isOverlaySpace() else ":", off)
+        return f
+
+    def fmt(self, a, prog=None):
+        return self.fmtr(prog)(a)
+
+    def _rng(self, lo, hi):
+        """Pending change range: (space name, first offset, last offset), unsigned."""
+        return (str(lo.getAddressSpace().getName()), lo.getOffset() & MASK64, hi.getOffset() & MASK64)
 
     @staticmethod
     def _projects_dir():
@@ -803,21 +836,21 @@ class Sidecar:
     # ---- change events (listener runs on Ghidra's event thread; it only copies data and never touches the DB) ----
     def _make_listener(self, prog):
         from jpype import JClass, JImplements, JObject, JOverride
-        sc, space = self, prog.getAddressFactory().getDefaultAddressSpace()
+        sc = self
 
         @JImplements("ghidra.framework.model.DomainObjectListener")
         class L:
             @JOverride
             def domainObjectChanged(self, ev):
                 try:
-                    sc._on_events(ev, space)
+                    sc._on_events(ev)
                 except Exception as e:  # noqa
                     log("listener error", repr(e))
                     sc._record(set(ALL_KINDS), None)
         # Ghidra keeps listeners in a weak set: hold a strong reference to the *Java* proxy, or a GC silently drops it
         return JObject(L(), JClass("ghidra.framework.model.DomainObjectListener"))
 
-    def _on_events(self, ev, space):
+    def _on_events(self, ev):
         from ghidra.program.util import ProgramChangeRecord
         kinds, ranges, broad = set(), [], False
         for r in ev:
@@ -829,10 +862,10 @@ class Sidecar:
                 continue
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
-            if s is None or s.isExternalAddress() or s.getAddressSpace() != space:
-                broad = True  # type events, other spaces, ...: no usable range
+            if s is None or s.isExternalAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
+                broad = True  # type events, ...: no usable range
             else:
-                ranges.append((s.getOffset(), (e or s).getOffset()))
+                ranges.append(self._rng(s, e or s))
         if not kinds:
             return
         self._record(kinds, None if broad else ranges)
@@ -841,10 +874,12 @@ class Sidecar:
         self.snap_clear()
         # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
         # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
-        if ranges is None or not kinds <= RANGE_ONLY_KINDS:
+        # the cache is keyed by default-space offsets (shortcut: a function inside an overlay clears everything, upgrade by keying on the Address)
+        dname = str(self.program.getAddressFactory().getDefaultAddressSpace().getName()) if self.program is not None else ""
+        if ranges is None or not kinds <= RANGE_ONLY_KINDS or any(sp != dname for sp, _, _ in ranges):
             self.cache_clear()
         else:
-            self.cache_invalidate(ranges)
+            self.cache_invalidate([(a, b) for _, a, b in ranges])
         with self.plock:
             p = self.pending
             p["kinds"] |= kinds
@@ -863,15 +898,18 @@ class Sidecar:
             kinds, broad, ranges = sorted(p["kinds"], key=ALL_KINDS.index), p["broad"], sorted(p["ranges"])
             p.update(ranges=[], kinds=set(), broad=False, armed=False)
         merged = []
-        for s, e in ranges:
-            if merged and s <= merged[-1][1] + 1:
-                merged[-1][1] = max(merged[-1][1], e)
+        for sp, s, e in ranges:
+            if merged and merged[-1][0] == sp and s <= merged[-1][2] + 1:
+                merged[-1][2] = max(merged[-1][2], e)
             else:
-                merged.append([s, e])
+                merged.append([sp, s, e])
         if broad or len(merged) > 1000:
             out = None
         else:
-            out = [{"start": hx(s), "end": hx(e)} for s, e in merged]
+            f, prog = self.fmtr(), self.program
+            def at(sp, off):
+                return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
+            out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
         self.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": self.undo_snap})
 
     # ---- decompile cache (shared by the pool and by the event listener) ----
@@ -889,10 +927,14 @@ class Sidecar:
     # ---- reads (thread R) ----
     def list_functions(self):
         out = []
-        for f in self.need().getFunctionManager().getFunctions(True):
+        dspace = self.need().getAddressFactory().getDefaultAddressSpace()
+        for f in self.program.getFunctionManager().getFunctions(True):
             if f.isExternal():
                 continue
-            out.append((f.getEntryPoint().getOffset(), str(f.getName()), f.getBody().getNumAddresses()))
+            ea = f.getEntryPoint()
+            if ea.getAddressSpace() != dspace:  # shortcut: functions in other spaces are not listed (the listing shows them), upgrade with qualified entries
+                continue
+            out.append((ea.getOffset() & MASK64, str(f.getName()), f.getBody().getNumAddresses()))
         out.sort()
         return [{"name": n, "entry": hx(o), "size": int(s)} for o, n, s in out]
 
@@ -901,7 +943,7 @@ class Sidecar:
         f = prog.getFunctionManager().getFunctionContaining(self.addr(address))
         if f is None:
             return None
-        return {"name": str(f.getName()), "entry": hx(f.getEntryPoint().getOffset()),
+        return {"name": str(f.getName()), "entry": self.fmt(f.getEntryPoint()),
                 "size": int(f.getBody().getNumAddresses()), "signature": str(f.getSignature().getPrototypeString())}
 
     # ---- slow reads: scan workers (thread S). They never run on R, so a long scan cannot delay listing fetches. ----
@@ -964,7 +1006,7 @@ class Sidecar:
         with self.scanning(scan) as prog:
             text_arg(query, "query")
             limit = lim(limit, 100, 5000)
-            st, out, seen, space = prog.getSymbolTable(), [], set(), prog.getAddressFactory().getDefaultAddressSpace()
+            st, out, seen, fa = prog.getSymbolTable(), [], set(), self.fmtr(prog)
             q = query.strip()
             if not q:
                 return []
@@ -973,9 +1015,9 @@ class Sidecar:
                 if prog.getMemory().contains(a):
                     syms = list(st.getSymbols(a))
                     for s in syms:
-                        out.append({"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)})
+                        out.append({"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)})
                     if not syms:
-                        out.append({"name": hx(a.getOffset()), "address": hx(a.getOffset()), "kind": "other"})
+                        out.append({"name": fa(a), "address": fa(a), "kind": "other"})
                     seen.update(o["name"] + o["address"] for o in out)
             except RpcError:
                 pass
@@ -987,9 +1029,9 @@ class Sidecar:
                 if n & 255 == 0:
                     scan.check()
                 a = s.getAddress()
-                if a.isExternalAddress() or a.getAddressSpace() != space:
+                if not a.isMemoryAddress():
                     continue
-                o = {"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)}
+                o = {"name": str(s.getName()), "address": fa(a), "kind": self._sym_kind(prog, s)}
                 if o["name"] + o["address"] not in seen:
                     out.append(o)
             return out[:limit]
@@ -1000,8 +1042,7 @@ class Sidecar:
 
     def _sym_item(self, prog, s):
         a, ns = s.getAddress(), s.getParentNamespace()
-        mem = a.isMemoryAddress() and a.getAddressSpace() == prog.getAddressFactory().getDefaultAddressSpace()  # shortcut: default space only
-        return {"name": str(s.getName()), "address": hx(a.getOffset()) if mem else None, "kind": self._sym_kind(prog, s),
+        return {"name": str(s.getName()), "address": self.fmt(a, prog) if a.isMemoryAddress() else None, "kind": self._sym_kind(prog, s),
                 "namespace": "" if ns.isGlobal() else str(ns.getName(True)), "source": self.SOURCES.get(str(s.getSource()), "other")}
 
     def _sym_key(self, prog, s, sort):
@@ -1010,7 +1051,7 @@ class Sidecar:
             return name
         if sort == "address":
             a = s.getAddress()
-            return a.getOffset() if a.isMemoryAddress() else -1
+            return (a.getOffset() & MASK64) if a.isMemoryAddress() else -1
         if sort == "kind":
             return (self._sym_kind(prog, s), name)
         if sort == "namespace":
@@ -1098,7 +1139,7 @@ class Sidecar:
     def _xref_to_item(self, fm, r):
         fa = r.getFromAddress()
         rt = r.getReferenceType()
-        o = {"from": hx(fa.getOffset()), "type": str(rt.getName()), "kind": self._ref_kind(rt)}
+        o = {"from": self.fmt(fa), "type": str(rt.getName()), "kind": self._ref_kind(rt)}
         f = fm.getFunctionContaining(fa)
         if f is not None:
             o["function"] = str(f.getName())
@@ -1113,7 +1154,7 @@ class Sidecar:
             if len(out) >= limit:
                 break
             out.append(self._xref_to_item(fm, r))
-        out.sort(key=lambda o: int(o["from"], 16))
+        out.sort(key=lambda o: _akey(o["from"]))
         return out
 
     def xrefs_to_variable(self, entry, name, limit=500):
@@ -1133,7 +1174,7 @@ class Sidecar:
                     if len(out) < limit:
                         out.append(self._xref_to_item(fm, r))
                 break
-        out.sort(key=lambda o: int(o["from"], 16))
+        out.sort(key=lambda o: _akey(o["from"]))
         return out
 
     def xrefs_from(self, address):
@@ -1153,14 +1194,14 @@ class Sidecar:
             elif r.isRegisterReference():
                 o.update(to=None, target="register", label=str(prog.getRegister(r.getToAddress()) or r.getToAddress()))
             else:
-                o.update(to=hx(r.getToAddress().getOffset()), target="memory")
+                o.update(to=self.fmt(r.getToAddress()), target="memory")
             out.append(o)
         return out
 
     def _scan_strings(self, prog, minLength, scan):
         from ghidra.program.util import DefinedStringIterator
         from ghidra.program.model.data import StringDataInstance
-        items = []
+        items, fa = [], self.fmtr(prog)
         for d in DefinedStringIterator.forProgram(prog):
             if len(items) & 255 == 0:
                 scan.check()
@@ -1170,7 +1211,7 @@ class Sidecar:
             if v is not None:
                 v = str(v)
                 if len(v) >= minLength:
-                    items.append({"address": hx(d.getMinAddress().getOffset()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
+                    items.append({"address": fa(d.getMinAddress()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
         return items
 
     def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
@@ -1229,16 +1270,16 @@ class Sidecar:
             acc = ListAccumulator()
             done = MemorySearcher(ProgramByteSource(prog), matcher, sset, limit).findAll(acc, mon)
             scan.check()
-            fm, items, last = prog.getFunctionManager(), [], None
+            fm, items, last, fa = prog.getFunctionManager(), [], None, self.fmtr(prog)
             for m in acc.get():
                 ad, b = m.getAddress(), m.getBytes()
-                o = {"address": hx(ad.getOffset()), "length": int(m.getLength()), "bytes": " ".join("%02x" % (x & 255) for x in b[:16])}
+                o = {"address": fa(ad), "length": int(m.getLength()), "bytes": " ".join("%02x" % (x & 255) for x in b[:16])}
                 f = fm.getFunctionContaining(ad)
                 if f is not None:
                     o["function"] = str(f.getName())
                 items.append(o)
                 last = ad
-            return {"items": items, "next": None if done or last is None else hx(last.getOffset() + 1)}
+            return {"items": items, "next": None if done or last is None else fa(last.next() or last)}
 
     def list_data_types(self, query, limit=100, scan=None):
         """Scan worker (thread S): walks every program and built-in type, so it must not hold up listing fetches on R."""
@@ -1576,7 +1617,7 @@ class Sidecar:
                 self._cmd(CreateDataCmd(a, True, False, dt))(p)
         self.edit("Create structure %s" % name, go)
         if apply:
-            self._record({"data"}, [(a.getOffset(), a.getOffset() + length - 1)])
+            self._record({"data"}, [self._rng(a, a.add(length - 1))])
         return {"path": str(dtm.getDataType(cp, name).getPathName())}
 
     def undo_state(self, prog=None):
@@ -1589,11 +1630,76 @@ class Sidecar:
         return o
 
     def listing_info(self):
-        mem = self.need().getMemory()
-        space = self.program.getAddressFactory().getDefaultAddressSpace()  # shortcut: default space only
-        ranges = [{"start": hx(r.getMinAddress().getOffset()), "size": int(r.getLength())}
-                  for r in mem.getLoadedAndInitializedAddressSet() if r.getMinAddress().getAddressSpace() == space]
+        prog = self.need()
+        f = self.fmtr(prog)
+        # all spaces, in Ghidra's address order: listing_rows walks the same order. size as a JS-safe number (shortcut: ranges of 2^53+ bytes, never)
+        ranges = [{"start": f(r.getMinAddress()), "size": int(r.getLength())} for r in prog.getMemory().getLoadedAndInitializedAddressSet().getAddressRanges(True)]
         return {"ranges": ranges, "totalBytes": sum(r["size"] for r in ranges)}
+
+    @staticmethod
+    def _view(loaded, a, fwd):
+        """The loaded set clipped to [a, end] (forward) or [start, a) (backward), across address spaces (AddressSet ranges cannot span spaces)."""
+        from ghidra.program.model.address import AddressSet
+        out = AddressSet()
+        for r in loaded.getAddressRanges(True):
+            mn, mx = r.getMinAddress(), r.getMaxAddress()
+            if fwd:
+                if mx.compareTo(a) >= 0:
+                    out.add(mn if mn.compareTo(a) >= 0 else a, mx)
+            elif mn.compareTo(a) < 0:
+                out.add(mn, mx if mx.compareTo(a) < 0 else a.previous())
+            else:
+                break
+        return out
+
+    ROW_PARTS_MAX = 64     # components listed per data unit
+    ROW_XREFS_SHOWN = 5    # references named per row annotation
+
+    def _row_marks(self, prog, cus, fa):
+        """Which of the walked code units have a symbol, a comment of each kind, a function or references to them: one iterator
+        per kind over the walked window instead of several calls per row (thread R, cost matters: see bench_sidecar)."""
+        from ghidra.program.model.address import AddressSet
+        from ghidra.program.model.listing import CommentType
+        listing = prog.getListing()
+        if cus[0].getMinAddress().getAddressSpace() == cus[-1].getMaxAddress().getAddressSpace():
+            win = AddressSet(cus[0].getMinAddress(), cus[-1].getMaxAddress())
+        else:  # a fetch across two address spaces: shortcut: window of the walked units one by one, upgrade only if that is slow
+            win = AddressSet()
+            for cu in cus:
+                win.add(cu.getMinAddress(), cu.getMaxAddress())
+        rm = prog.getReferenceManager()
+        return {
+            "sym": {fa(x.getAddress()) for x in prog.getSymbolTable().getPrimarySymbolIterator(win, True)},
+            "fn": {fa(f.getEntryPoint()): f for f in prog.getFunctionManager().getFunctions(win, True)},
+            "ref": {fa(x): x for x in rm.getReferenceDestinationIterator(win, True)},
+            "cm": {k: {fa(x) for x in listing.getCommentAddressIterator(t, win, True)}
+                   for k, t in ((k, getattr(CommentType, k.upper())) for k in ROW_COMMENT_KINDS)},
+        }
+
+    def _row_parts(self, cu):
+        from ghidra.program.model.data import Array
+        n = int(cu.getNumComponents())
+        is_arr = isinstance(cu.getDataType(), Array)
+        parts = []
+        for i in range(min(n, self.ROW_PARTS_MAX)):
+            c = cu.getComponent(i)
+            name = "[%d]" % i if is_arr else str(c.getFieldName() or "field%d" % i)
+            parts.append({"offset": int(c.getParentOffset()), "length": int(c.getLength()), "type": str(c.getDataType().getName()),
+                          "name": name, "value": str(c.getDefaultValueRepresentation())})
+        return parts, n
+
+    def _row_header(self, f):
+        sf = f.getStackFrame()
+        h = {"signature": str(f.getSignature().getPrototypeString()), "params": int(f.getParameterCount()),
+             "paramBytes": int(sf.getParameterSize()), "localBytes": int(sf.getLocalSize())}
+        cc = str(f.getCallingConventionName() or "")
+        if cc and cc.lower() not in ("unknown", "default"):
+            h["convention"] = cc
+        if f.hasNoReturn():
+            h["noReturn"] = True
+        if f.isThunk():
+            h["thunk"] = True
+        return h
 
     def listing_rows(self, address, count, direction="forward"):
         """Walk code units from an anchor address; no index. See protocol.md."""
@@ -1602,50 +1708,69 @@ class Sidecar:
         prog = self.need()
         fwd = direction != "backward"
         count = max(0, min(int(count), 1000))
-        listing, st, mem = prog.getListing(), prog.getSymbolTable(), prog.getMemory()
+        listing, st, mem, fa = prog.getListing(), prog.getSymbolTable(), prog.getMemory(), self.fmtr(prog)
         loaded = mem.getLoadedAndInitializedAddressSet()
         a = self.addr(address)
         cu = listing.getCodeUnitContaining(a)
         a = cu.getMinAddress() if cu is not None else a
-        lo, hi = loaded.getMinAddress(), loaded.getMaxAddress()
-        if count == 0 or lo is None:
+        if count == 0:
             return []
-        if fwd:
-            if a.compareTo(hi) > 0:
-                return []
-            view = loaded.intersectRange(a if a.compareTo(lo) >= 0 else lo, hi)
-        else:
-            if a.compareTo(lo) <= 0:
-                return []
-            end = a.previous()
-            view = loaded.intersectRange(lo, end if end.compareTo(hi) <= 0 else hi)
-        rows = []
-        for cu in listing.getCodeUnits(view, fwd):
-            if len(rows) >= count:
+        cus = []
+        for cu in listing.getCodeUnits(self._view(loaded, a, fwd), fwd):
+            if len(cus) >= count:
                 break
+            cus.append(cu)
+        if not cus:
+            return []
+        if not fwd:
+            cus.reverse()
+        marks, rm, rows = self._row_marks(prog, cus, fa), prog.getReferenceManager(), []
+        for cu in cus:
             ca = cu.getMinAddress()
-            n = cu.getLength()
-            if isinstance(cu, Instruction):
+            n = int(cu.getLength())
+            key = fa(ca)
+            is_ins = isinstance(cu, Instruction)
+            if is_ins:
                 ops = ", ".join(str(cu.getDefaultOperandRepresentation(i)) for i in range(cu.getNumOperands()))
             else:
                 ops = str(cu.getDefaultValueRepresentation())
             if n <= 16:
                 b = bytes(x & 0xFF for x in cu.getBytes())
-            else:  # shortcut: show the first 16 bytes of big data units only
+            else:  # shortcut: the first 16 bytes only (bytesMore says how many are left), upgrade with a get_bytes RPC
                 buf = JArray(JByte)(16)
                 mem.getBytes(ca, buf)
                 b = bytes(x & 0xFF for x in buf)
-            row = {"address": hx(ca.getOffset()), "length": int(n), "bytes": b.hex(" ") + (" …" if n > 16 else ""),
-                   "mnemonic": str(cu.getMnemonicString()), "operands": ops}
-            sym = st.getPrimarySymbol(ca)
-            if sym is not None:
-                row["label"] = str(sym.getName())
-            c = cu.getComment(CommentType.EOL)
-            if c:
-                row["comment"] = str(c)
+            row = {"address": key, "length": n, "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
+            if n > 16:
+                row["bytesMore"] = n - 16
+            if key in marks["sym"]:
+                syms = sorted(st.getSymbols(ca), key=lambda x: not x.isPrimary())
+                names = [str(x.getName()) for x in syms]
+                row["label"] = names[0]
+                if len(names) > 1:
+                    row["labels"] = names
+            for k, out in ROW_COMMENT_KINDS.items():
+                if key in marks["cm"][k]:
+                    c = cu.getComment(getattr(CommentType, k.upper()))
+                    if c:
+                        row[out] = str(c)
+            f = marks["fn"].get(key)
+            if f is not None:
+                row["header"] = self._row_header(f)
+            if key in marks["ref"]:
+                refs = []
+                for r in rm.getReferencesTo(ca):
+                    refs.append({"from": fa(r.getFromAddress()), "kind": self._ref_kind(r.getReferenceType())})
+                    if len(refs) >= self.ROW_XREFS_SHOWN:
+                        break
+                refs.sort(key=lambda o: _akey(o["from"]))  # shortcut: the first 5 Ghidra returns, not the 5 lowest; the full list is xrefs_to
+                row["xrefs"] = {"count": int(rm.getReferenceCountTo(ca)), "items": refs}
+            if not is_ins and cu.isDefined() and cu.getNumComponents() > 0:
+                parts, total = self._row_parts(cu)
+                row["parts"] = parts
+                if total > len(parts):
+                    row["partsTotal"] = total
             rows.append(row)
-        if not fwd:
-            rows.reverse()
         return rows
 
     # ---- edits (thread R). One transaction each; its name is the undo label. ----
@@ -1745,11 +1870,11 @@ class Sidecar:
         if fm.getFunctionContaining(a) is not None:
             raise RpcError(INVALID, "address is already inside a function")
         cmd = (CreateFunctionCmd(name, a, None, SourceType.USER_DEFINED) if name else CreateFunctionCmd(a))
-        self.edit("Create function at %s" % hx(a.getOffset()), self._cmd(cmd))
+        self.edit("Create function at %s" % address, self._cmd(cmd))
         f = fm.getFunctionAt(a)
         if f is None:
             raise RpcError(INTERNAL, "function was not created")
-        return {"entry": hx(a.getOffset()), "name": str(f.getName())}
+        return {"entry": self.fmt(a), "name": str(f.getName())}
 
     def define_data(self, address, dataType):
         from ghidra.app.cmd.data import CreateDataCmd
@@ -1776,7 +1901,7 @@ class Sidecar:
                 raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
             self._cmd(CreateDataCmd(a, True, False, dt))(p)
-            out["range"] = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
+            out["range"] = self._rng(a, a.add(dt.getLength() - 1))
         self.edit("Define data", go)
         self._record({"data"}, [out["range"]])
         return {}
@@ -1804,7 +1929,7 @@ class Sidecar:
         if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
             raise RpcError(INVALID, "no instructions or defined data in range")
         self.edit("Clear code", lambda p: self._cmd(ClearCmd(view))(p))
-        self._record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
+        self._record({"code", "data"}, [self._rng(lo, hi)])
         return {}
 
     def _function(self, entry):
@@ -2020,7 +2145,7 @@ class Sidecar:
             body = func.getBody()
             with self.cache_lock:
                 if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store
-                    self.cache[key] = (body.getMinAddress().getOffset(), body.getMaxAddress().getOffset(), out)
+                    self.cache[key] = (body.getMinAddress().getOffset() & MASK64, body.getMaxAddress().getOffset() & MASK64, out)
                     if len(self.cache) > 256:
                         self.cache.popitem(last=False)
             return {**out, "cached": False}
@@ -2033,7 +2158,7 @@ class Sidecar:
         from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
-        fm = prog.getFunctionManager()
+        fm, fa = prog.getFunctionManager(), self.fmtr(prog)
         lines_out, tokens = [], []
         for ln, line in enumerate(DecompilerUtils.toLines(res.getCCodeMarkup())):
             indent = str(line.getIndentString())
@@ -2053,7 +2178,7 @@ class Sidecar:
                 tok = {"line": ln, "colStart": start, "colEnd": col, "kind": kind}
                 ma = t.getMinAddress()
                 if ma is not None:
-                    tok["address"] = hx(ma.getOffset())
+                    tok["address"] = fa(ma)
                 if kind in ("variable", "param"):
                     tok["varName"] = s
                 if isinstance(t, ClangFuncNameToken):
@@ -2062,7 +2187,7 @@ class Sidecar:
                     if op is not None and op.getOpcode() == PcodeOp.CALL:
                         f = fm.getFunctionAt(op.getInput(0).getAddress())
                         if f is not None:
-                            tok["targetFunction"] = hx(f.getEntryPoint().getOffset())
+                            tok["targetFunction"] = fa(f.getEntryPoint())
                 tokens.append(tok)
             lines_out.append(text)
         return {"text": "\n".join(lines_out), "tokens": tokens}

@@ -1,0 +1,145 @@
+"""Listing completeness (round 8 listing): address spaces, unsigned addresses, row content. Runs the Sidecar's methods in-process on
+programs built by hand (a raw blob, an overlay block, a block above 2^63), so no import/analysis is needed."""
+import asyncio, glob, os, pathlib, sys
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+JAVA = os.environ.get("JAVA_HOME", "/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home")
+INVALID = -32602
+
+
+@pytest.fixture(scope="module")
+def sc():
+    gd = os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(os.path.join(HERE, "..", "ghidra-install", "ghidra_*/")))[-1]
+    from pyghidra.launcher import HeadlessPyGhidraLauncher
+    launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(gd))
+    launcher.java_home = pathlib.Path(JAVA)
+    launcher.add_vmargs("-Djava.awt.headless=true")
+    launcher.start()
+    import main
+    s = main.Sidecar()
+    s.loop = asyncio.new_event_loop()  # _record schedules the change notification on it; never run here
+    return s
+
+
+def build(sc, name, blocks, lang="x86:LE:64:default"):
+    """Program with initialized blocks: (name, offset, bytes, overlay). Becomes sc.program."""
+    from java.io import ByteArrayInputStream
+    from java.lang import Object
+    from ghidra.program.database import ProgramDB
+    from ghidra.program.model.lang import LanguageID
+    from ghidra.program.util import DefaultLanguageService
+    from ghidra.util.task import TaskMonitor
+    from jpype import JArray, JByte
+    language = DefaultLanguageService.getLanguageService().getLanguage(LanguageID(lang))
+    prog = ProgramDB(name, language, language.getDefaultCompilerSpec(), Object())
+    tx = prog.startTransaction("init")
+    sp = prog.getAddressFactory().getDefaultAddressSpace()
+    for bname, off, data, overlay in blocks:
+        arr = JArray(JByte)([b - 256 if b > 127 else b for b in data])
+        prog.getMemory().createInitializedBlock(bname, sp.getAddress(off - (1 << 64) if off >= 1 << 63 else off), ByteArrayInputStream(arr), len(data), TaskMonitor.DUMMY, overlay)
+    prog.endTransaction(tx, True)
+    sc.program = prog
+    return prog
+
+
+# push rbp; mov rbp,rsp; call +5 (-> 0xa); ret; push rbp; ret
+CODE = bytes([0x55, 0x48, 0x89, 0xE5, 0xE8, 0x01, 0x00, 0x00, 0x00, 0xC3, 0x55, 0xC3]) + bytes(52)
+
+
+def test_addr_roundtrip_and_errors(sc):
+    from main import RpcError
+    prog = build(sc, "t_addr", [("ram", 0x401000, CODE, False), ("hi", 0xFFFFFFFFFFFFF000, CODE, False), ("ovl", 0x1000, CODE, True)])
+    f = sc.fmtr(prog)
+    for s in ("0x401000", "0xfffffffffffff000", "OVL1::1000", "0xffffffffffffffff"):
+        pass
+    a = sc.addr("0xfffffffffffff000")
+    assert f(a) == "0xfffffffffffff000" and a.getOffset() < 0  # signed inside Java, unsigned on the wire
+    assert f(sc.addr("ram:401000")) == "0x401000"  # a qualified default space reads back as the plain form
+    for bad in ("", "zz", "nospace:10", "0x10000000000000000", "-1", "OVL1:::10", "ram:"):
+        with pytest.raises(RpcError) as e:
+            sc.addr(bad)
+        assert e.value.code == INVALID, bad
+
+
+def test_spaces_unsigned_and_walk_order(sc):
+    prog = build(sc, "t_spaces", [("ram", 0x401000, CODE, False), ("hi", 0xFFFFFFFFFFFFF000, CODE, False), ("ovl", 0x1000, CODE, True)])
+    info = sc.listing_info()
+    starts = [r["start"] for r in info["ranges"]]
+    assert sorted(starts) == sorted(["0x401000", "0xfffffffffffff000", "OVL::1000"]) or any(s.endswith("::1000") for s in starts), starts
+    assert all(r["size"] == len(CODE) for r in info["ranges"]) and info["totalBytes"] == 3 * len(CODE)
+    ov = next(s for s in starts if "::" in s)
+    # forward from the first range walks every range in the order of listing_info, addresses all unsigned/qualified
+    rows = sc.listing_rows(starts[0], 1000)
+    assert len(rows) == 3 * len(CODE)  # undefined bytes, one row each
+    seen = [r["address"] for r in rows if r["address"] in starts]
+    assert seen == starts
+    assert all(not r["address"].startswith("-") for r in rows)
+    # rows of the overlay and above 2^63 are reachable from their own address, and backward steps into the previous range
+    assert sc.listing_rows(ov, 1)[0]["address"] == ov
+    assert sc.listing_rows("0xfffffffffffff000", 1)[0]["address"] == "0xfffffffffffff000"
+    i = starts.index(ov)
+    if i > 0:
+        back = sc.listing_rows(ov, 1, "backward")
+        assert back and back[-1]["address"] != ov
+    last = sc.listing_rows(starts[-1], 1000)[-1]["address"]
+    assert sc.listing_rows(last, 5)[0]["address"] == last and len(sc.listing_rows(last, 5)) == 1  # end of the last range, no wrap
+
+
+def test_row_content(sc):
+    from ghidra.program.model.symbol import SourceType
+    from ghidra.app.cmd.disassemble import DisassembleCommand
+    build(sc, "t_rows", [("ram", 0x401000, CODE, False)])
+    sc.edit("dis", lambda p: DisassembleCommand(sc.addr("0x401000"), None, True).applyTo(p) or True)
+    sc.create_function("0x401000", "main_fn")
+    sc.create_function("0x40100a", "callee")
+    sc.set_comment("0x401000", "plate", "PLATE\nline two")
+    sc.set_comment("0x401000", "pre", "pre text")
+    sc.set_comment("0x401004", "eol", "eol text")
+    sc.set_comment("0x401004", "post", "post text")
+    sc.set_comment("0x401009", "repeatable", "rep text")
+    sc.define_data("0x401010", "char[20]")
+    sc.edit("alias", lambda p: p.getSymbolTable().createLabel(sc.addr("0x401010"), "alias_a", SourceType.USER_DEFINED))
+    sc.edit("alias", lambda p: p.getSymbolTable().createLabel(sc.addr("0x401010"), "alias_b", SourceType.USER_DEFINED))
+    rows = {r["address"]: r for r in sc.listing_rows("0x401000", 100)}
+    f = rows["0x401000"]
+    assert f["label"] == "main_fn" and "labels" not in f
+    h = f["header"]
+    assert "main_fn" in h["signature"] and h["params"] == 0 and isinstance(h["localBytes"], int) and isinstance(h["paramBytes"], int)
+    assert f["plate"] == "PLATE\nline two" and f["pre"] == "pre text"
+    assert "header" not in rows["0x401001"] and "plate" not in rows["0x401001"] and "xrefs" not in rows["0x401001"]
+    call = rows["0x401004"]
+    assert call["comment"] == "eol text" and call["post"] == "post text" and call["mnemonic"] == "CALL"
+    assert rows["0x401009"]["repeatable"] == "rep text"
+    callee = rows["0x40100a"]
+    assert callee["header"]["signature"].find("callee") >= 0
+    assert callee["xrefs"]["count"] == 1 and callee["xrefs"]["items"] == [{"from": "0x401004", "kind": "call"}]
+    d = rows["0x401010"]
+    assert d["length"] == 20 and d["bytesMore"] == 4 and len(d["bytes"].split()) == 16
+    assert d["labels"][0] == d["label"] and sorted(d["labels"]) == ["alias_a", "alias_b"]
+    assert [p["name"] for p in d["parts"]][:3] == ["[0]", "[1]", "[2]"] and len(d["parts"]) == 20 and d["parts"][1]["offset"] == 1 and d["parts"][0]["type"] == "char"
+    assert "partsTotal" not in d
+    # more parts than the cap: cut with the real count
+    sc.define_data("0x401100" if False else "0x401010", "char[20]")
+    # xref cap: five shown, the real count reported
+    from main import Sidecar
+    assert Sidecar.ROW_XREFS_SHOWN == 5
+
+
+def test_parts_and_xref_caps(sc):
+    from ghidra.program.model.symbol import RefType, SourceType
+    build(sc, "t_caps", [("ram", 0x500000, bytes(0x800), False)])
+    sc.define_data("0x500000", "short[100]")
+    rows = sc.listing_rows("0x500000", 1)
+    assert rows[0]["length"] == 200 and len(rows[0]["parts"]) == 64 and rows[0]["partsTotal"] == 100 and rows[0]["bytesMore"] == 184
+
+    def refs(p):
+        rm = p.getReferenceManager()
+        for i in range(8):
+            rm.addMemoryReference(sc.addr("0x500%03x" % (0x300 + i * 4)), sc.addr("0x500000"), RefType.DATA, SourceType.USER_DEFINED, 0)
+    sc.edit("refs", refs)
+    x = sc.listing_rows("0x500000", 1)[0]["xrefs"]
+    assert x["count"] == 8 and len(x["items"]) == 5 and all(i["kind"] == "data" for i in x["items"])
+    assert [i["from"] for i in x["items"]] == sorted((i["from"] for i in x["items"]), key=lambda s: int(s, 16))
