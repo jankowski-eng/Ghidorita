@@ -9,6 +9,10 @@ INVALID = -32602
 
 def start():
     gd = os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(os.path.join(HERE, "..", "ghidra-install", "ghidra_*/")))[-1]
+    os.environ.setdefault("GHIDRA_INSTALL_DIR", str(gd))
+    os.environ.setdefault("JAVA_HOME", JAVA)
+    from ghidrette.core import jscans
+    jscans.build()  # the Java scan helper is compiled before the JVM starts
     from pyghidra.launcher import HeadlessPyGhidraLauncher
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(gd))
     launcher.java_home = pathlib.Path(JAVA)
