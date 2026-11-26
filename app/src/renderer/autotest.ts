@@ -4,6 +4,7 @@ import { rpc } from "./client";
 import { RpcError } from "./backend";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { runEditFlow, runPhase2 } from "./autotestEdit";
+import { runNavFlow } from "./autotestNav";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -222,7 +223,8 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
       result.importOk = importOk;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
-      result.ok = result.navOk && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
+      result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
     } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;

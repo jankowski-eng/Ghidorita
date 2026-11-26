@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const r = await build({ entryPoints: [new URL("../src/renderer/editActions.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false });
-const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
+const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 
 test("listing keys", () => {
   assert.equal(listingKey({ key: "l" }), "rename"); assert.equal(listingKey({ key: "L" }), "rename");
@@ -37,4 +37,15 @@ test("mapPos", () => {
   assert.deepEqual(mapPos(a, "a\nb\nX\nY\nc\nd\ne", pos(4, 1)), pos(6, 1)); // lines inserted above
   assert.deepEqual(mapPos("abc\nlonger line", "abc\nx", pos(2, 10)), pos(2, 2)); // clamped
   assert.deepEqual(mapPos("a\nb\nc", "a", pos(3, 1)), pos(1, 1));
+});
+
+test("token -> references target", () => {
+  assert.deepEqual(xrefTargetOf({ kind: "variable", varName: "local_10" }, "local_10", fn), { type: "variable", entry: "0x1000", name: "local_10", label: "local_10" });
+  assert.deepEqual(xrefTargetOf({ kind: "param", varName: "p" }, "p", fn), { type: "variable", entry: "0x1000", name: "p", label: "p" });
+  assert.deepEqual(xrefTargetOf({ kind: "function", targetFunction: "0x2000" }, "foo", fn), { type: "address", address: "0x2000", label: "foo" });
+  assert.deepEqual(xrefTargetOf({ kind: "function" }, "main", fn), { type: "address", address: "0x1000", label: "main" });
+  assert.equal(xrefTargetOf({ kind: "function" }, "other", fn), null); // not a call and not this function's own name
+  assert.deepEqual(xrefTargetOf({ kind: "label", address: "0x1010" }, "LAB_1010", fn), { type: "address", address: "0x1010", label: "LAB_1010" });
+  assert.equal(xrefTargetOf({ kind: "const" }, "5", fn), null); assert.equal(xrefTargetOf(undefined, "", fn), null);
+  assert.equal(xrefTargetOf({ kind: "variable", varName: "x" }, "x", null), null); // no function: nothing to look the variable up in
 });
