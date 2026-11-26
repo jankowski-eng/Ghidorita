@@ -25,3 +25,12 @@ export function fill(total: number, spans: Span[], n: number): Float32Array {
 /** Executed ranges as map spans. shortcut: default space only (coverage files name no other), a range across a gap between loaded ranges counts the gap too. */
 export const coverageSpans = (map: AddrMap, cov: Coverage): Span[] =>
   cov.spans().map(([lo, hi]) => ({ pos: map.pos(lo), len: Number(hi - lo + 1n) })).filter((s) => s.pos < map.total);
+
+/** Tooltip text for map position `pos`: its address and the function containing it, else the loaded range. `sorted` = funcSpans-like entries by pos. shortcut: nested/overlapping bodies resolve to the last one starting before pos. */
+export function describeAt(map: AddrMap, funcs: FunctionInfo[], pos: number): string {
+  const p = Math.max(0, Math.min(Math.floor(pos), map.total - 1)), addr = map.addr(p);
+  const f = funcs.filter((x) => { const s = map.posOf(x.entry); return s <= p && p < s + Math.max(x.size, 1) && s < map.total; }).pop();
+  if (f) return `${addr} · ${f.name}`;
+  let i = map.cum.length - 1; while (i > 0 && map.cum[i] > p) i--;
+  return `${addr} · no function (range ${map.ranges[i].start}, ${map.ranges[i].size} B)`;
+}

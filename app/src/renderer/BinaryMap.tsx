@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address, FunctionInfo } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
-import { fill, funcSpans, type Span } from "./binmap";
+import { describeAt, fill, funcSpans, type Span } from "./binmap";
 
 /** A layer is a set of byte spans drawn in one colour over the map (functions today; coverage and reviewed ranges can be added the same way). */
 export interface Layer { name: string; color: [number, number, number]; spans: Span[] }
@@ -13,13 +13,14 @@ export function BinaryMap({ map, funcs, here, layers = NONE, onGo }: { map: Addr
   const box = useRef<HTMLDivElement>(null), cv = useRef<HTMLCanvasElement>(null);
   const [h, setH] = useState(0);
   const drag = useRef(false);
+  const [tip, setTip] = useState<{ y: number; text: string } | null>(null);
   useEffect(() => { const el = box.current!; const ro = new ResizeObserver(() => setH(Math.floor(el.clientHeight))); ro.observe(el); setH(Math.floor(el.clientHeight)); return () => ro.disconnect(); }, []);
   const all = useMemo(() => [{ name: "Functions", color: [90, 140, 220] as [number, number, number], spans: funcSpans(map, funcs) }, ...layers], [map, funcs, layers]);
   const fills = useMemo(() => all.map((l) => fill(map.total, l.spans, Math.max(1, h))), [all, map, h]);
   const pos = here ? map.posOf(here) : -1;
   useEffect(() => {
     const c = cv.current; if (!c || h <= 0) return;
-    const w = c.width = 20; c.height = h;
+    const w = c.width = 44; c.height = h;
     const g = c.getContext("2d")!;
     g.fillStyle = "#1b1b1c"; g.fillRect(0, 0, w, h);
     const img = g.getImageData(0, 0, w, h);
@@ -28,17 +29,16 @@ export function BinaryMap({ map, funcs, here, layers = NONE, onGo }: { map: Addr
     g.fillStyle = "#777"; for (const cum of map.cum.slice(1)) g.fillRect(0, Math.floor((cum / map.total) * h), w, 1); // boundaries between loaded ranges
     if (pos >= 0 && map.total > 0) { g.fillStyle = "#fff"; g.fillRect(0, Math.min(h - 2, Math.floor((pos / map.total) * h)), w, 2); }
   }, [fills, all, h, pos, map]);
-  const go = (e: React.PointerEvent) => {
-    const r = box.current!.getBoundingClientRect();
-    onGo(map.addr(Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) * map.total));
-  };
+  const at = (e: React.PointerEvent) => Math.max(0, Math.min(1, (e.clientY - box.current!.getBoundingClientRect().top) / box.current!.clientHeight)) * map.total;
+  const go = (e: React.PointerEvent) => onGo(map.addr(at(e)));
   return (
     <div className="bmap" ref={box} role="slider" aria-label="Binary map" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pos >= 0 && map.total ? Math.round((pos / map.total) * 100) : 0} aria-valuetext={here ?? "no location"} tabIndex={0}
-      title={`Binary map: ${all.map((l) => l.name).join(", ")}. Click or drag to go to an address.`}
+      aria-description={`Layers: ${all.map((l) => l.name).join(", ")}. Click or drag to go to an address.`}
       onPointerDown={(e) => { drag.current = true; e.currentTarget.setPointerCapture(e.pointerId); go(e); }}
-      onPointerMove={(e) => { if (drag.current) go(e); }} onPointerUp={() => { drag.current = false; }} onPointerCancel={() => { drag.current = false; }}
+      onPointerMove={(e) => { if (drag.current) go(e); if (map.total) setTip({ y: e.clientY - box.current!.getBoundingClientRect().top, text: describeAt(map, funcs, at(e)) }); }} onPointerLeave={() => setTip(null)} onPointerUp={() => { drag.current = false; }} onPointerCancel={() => { drag.current = false; }}
       onKeyDown={(e) => { const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0; if (d && pos >= 0) { e.preventDefault(); onGo(map.addr(pos + d * Math.max(1, map.total / 100))); } }}>
       <canvas ref={cv} />
+      {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
     </div>
   );
 }
