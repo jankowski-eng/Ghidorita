@@ -3,7 +3,7 @@ import { AddrMap } from "./addrmap";
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import type { MenuCommand, MenuState } from "../preload/index";
-import { runEditFlow, runPhase2 } from "./autotestEdit";
+import { runEditFlow, runPhase2, runTypesFlow } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
 import { runR5Flow } from "./autotestR5";
 
@@ -230,7 +230,12 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
       result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
-      if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
+      if (result.ok) {
+        const ed = await runEditFlow(fl, c, result);
+        let ok = ed.ok;
+        if (ok) { const ty = await runTypesFlow(c, result, ed.persist as { entry: string } | undefined); ok = ty.ok; persist = ed.persist && { ...(ed.persist as object), types: ty.persist }; }
+        result.ok = ok && c.errors.length === 0;
+      }
     } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;
     if (persist && result.ok) { (result as any).persist = persist; window.host.autotestQuit(result); } else window.host.autotestDone(result); // quit through the real before-quit path (saves, stops the sidecar)

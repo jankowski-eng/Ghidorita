@@ -147,7 +147,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string };
+  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string } };
   c.setPath(file);
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
@@ -156,5 +156,142 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
   const rows = await rpc.call("listing_rows", { address: x.entry, count: 1 });
   const undo = await rpc.call("undo_state", {});
   result.phase2 = { name: f?.name, hasOrigVar: d.text.includes(x.origVar), hasNewVar: d.text.includes(x.newVar), comment: rows[0]?.comment ?? null, dirty: undo.dirty };
-  result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty;
+  let typesOk = true;
+  if (x.types) { // the struct, its data, the decompiler's use of it and the struct made from data survived save + reopen
+    const t = x.types, st = await rpc.call("get_data_type", { path: "/" + t.name }), fd = await rpc.call("get_data_type", { path: "/" + t.from });
+    const row = (await rpc.call("listing_rows", { address: t.addr, count: 1 }))[0], row2 = (await rpc.call("listing_rows", { address: t.fromAddr, count: 1 }))[0];
+    const dec = await rpc.call("decompile", { entry: t.entry });
+    result.phase2.types = { size: st.size, fields: st.components!.filter((c) => !c.undefined).map((c) => c.name), row: row.mnemonic, fromRow: row2.mnemonic, fromFields: fd.components!.filter((c) => !c.undefined).length, inDecompiler: dec.text.includes(t.name) };
+    typesOk = st.size === t.size && st.components!.filter((c) => !c.undefined).slice(0, 2).map((c) => c.name).join() === t.fields.join() && row.mnemonic === t.name
+      && row2.mnemonic === t.from && fd.components!.filter((c) => !c.undefined).length === 2 && dec.text.includes(t.name);
+  }
+  result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty && typesOk;
+}
+
+type EditPersist = { entry: string } | undefined;
+
+/**
+ * Data type manager flow, all through the UI: create a struct, add fields (dialog + inline cells), resize and fill undefined bytes,
+ * apply it to data, show it in the listing and the decompiler (function signature), undo every step, redo every step, create a
+ * struct from listing data, save. `edit` is the edit flow's persist record (real sidecar) or undefined (mock).
+ */
+export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, edit: EditPersist): Promise<{ ok: boolean; persist?: Record<string, unknown> }> {
+  const R: Record<string, any> = (result.types = {});
+  const lb = () => document.querySelector<HTMLElement>(".lbox")!;
+  const btn = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  const input = (label: string) => document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`);
+  const until = async (f: () => Promise<boolean> | boolean, what: string, ms = 10000) => {
+    const t0 = Date.now();
+    for (;;) { if (await f()) return; if (Date.now() - t0 > ms) throw new Error("timeout waiting for " + what); await sleep(60); }
+  };
+  const dialog = (title: string) => waitFor(() => byLabel("dialog", title), 5000, `dialog "${title}"`);
+  const closed = (title: string) => waitFor(() => !byLabel("dialog", title), 8000, `dialog "${title}" to close`);
+  const click = async (label: string) => { (await waitFor(() => { const b = btn(label); return b && !b.disabled ? b : null; }, 5000, "button " + label)).click(); };
+  const fillAll = async (title: string, vals: Record<string, string>) => {
+    await dialog(title);
+    let last: HTMLInputElement | null = null;
+    for (const [label, v] of Object.entries(vals)) { last = await waitFor(() => input(label), 5000, "input " + label); typeInto(last, v); }
+    press(last!, "Enter"); await closed(title);
+  };
+  const get = (path: string) => rpc.call("get_data_type", { path });
+  const listingHas = (text: string) => [...document.querySelectorAll(".lrow")].some((x) => x.textContent?.includes(text));
+  const base = await rpc.call("undo_state", {});
+  const strings = (await rpc.call("list_strings", { limit: 2, minLength: 1 })).items;
+  const a = strings[0].address, b = strings[1].address;
+  const fl = await rpc.call("list_functions", {});
+  const entry = edit?.entry ?? fl[Math.min(2, fl.length - 1)].entry;
+  const NAME = "AutotestStruct";
+  let steps = 0; // undo steps this flow adds (one per transaction)
+
+  // 1. open the manager (View > Data Type Manager), create a struct through the dialog
+  c.command({ type: "datatypes" });
+  await waitFor(() => byLabel("region", "Data Type Manager"), 5000, "data type manager");
+  await click("New struct");
+  await fillAll("New struct", { Name: NAME }); steps++;
+  await waitFor(() => [...document.querySelectorAll('[role="treeitem"]')].some((x) => x.textContent?.includes(NAME)), 8000, "struct in the tree");
+  await waitFor(() => document.body.textContent?.includes("struct " + NAME), 8000, "editor header");
+  R.created = true;
+
+  // 2. add two fields in the dialog, rename one inline
+  await click("Add field");
+  await fillAll("Add field", { "Field type": "dword", "Field name": "f_a" }); steps++;
+  await waitFor(() => input("Name 0"), 8000, "first field row");
+  await click("Add field");
+  await fillAll("Add field", { "Field type": "char[8]", "Field name": "f_name", "Field comment": "autotest field" }); steps++;
+  await waitFor(() => input("Name 1"), 8000, "second field row");
+  typeInto(input("Name 0")!, "f_first"); press(input("Name 0")!, "Enter"); steps++;
+  await until(async () => (await get("/" + NAME)).components?.[0].name === "f_first", "inline rename");
+  const d = await get("/" + NAME);
+  R.fields = d.components!.map((x) => `${x.offset}:${x.type}:${x.name}`);
+  if (d.size !== 12 || d.components!.length !== 2 || d.components![1].comment !== "autotest field") throw new Error("unexpected struct " + JSON.stringify(R.fields));
+
+  // 3. resize (undefined filler) and fill the filler with a type through its inline type cell
+  typeInto(input("Size")!, "16"); press(input("Size")!, "Enter"); steps++;
+  await waitFor(() => input("Type 2"), 8000, "undefined filler rows");
+  R.filler = (await get("/" + NAME)).components!.filter((x) => x.undefined).length;
+  typeInto(input("Type 2")!, "dword"); press(input("Type 2")!, "Enter"); steps++;
+  await until(async () => { const x = await get("/" + NAME); return x.size === 16 && x.components!.length === 3 && x.components![2].type === "dword"; }, "filler replaced by a dword");
+  R.fillerFilled = true;
+
+  // 4. apply it at a string's address from the editor, close the manager, find it in the listing
+  await click("Apply at address");
+  await fillAll("Apply data type", { Address: a, "Data type": "/" + NAME }); steps++;
+  await click("Close data types");
+  await waitFor(() => !byLabel("region", "Data Type Manager"), 3000, "manager to close");
+  await c.select(a);
+  await waitFor(() => listingHas(NAME), 8000, "struct in the listing");
+  R.listing = true;
+
+  // 5. the decompiler shows the type: set a parameter of the function to NAME * through Edit Function Signature
+  await c.select(entry);
+  await waitFor(() => c.editorText().length > 0, 15000, "decompiler text");
+  c.editor().focus(); document.querySelector<HTMLElement>(".monaco-editor textarea")!.focus();
+  c.command({ type: "edit", action: "signature" });
+  const sig = (await rpc.call("get_function_at", { address: entry }))!.signature;
+  const box = await waitFor(() => input("Signature"), 5000, "signature input");
+  typeInto(box, sig.replace(/\(.*\)\s*;?$/, `(${NAME} *autotest_param)`)); press(box, "Enter"); await closed("Edit function signature"); steps++;
+  await waitFor(() => c.editorText().includes(NAME), 15000, "decompiler to show " + NAME);
+  R.decompiler = true;
+
+  // 6. undo every step (Cmd+Z on the listing), looking at the visible effect of the first two
+  const undo = async () => { lb().focus(); press(lb(), "z", { metaKey: true }); };
+  // labels repeat ("Edit S: add" twice), so a step is noticed by the undo state *and* the struct's content changing
+  const depth = async () => JSON.stringify([await rpc.call("undo_state", {}), (await get("/" + NAME).catch(() => null))?.components?.map((x) => [x.type, x.name, x.comment])]);
+  await undo(); await waitFor(() => !c.editorText().includes(NAME), 15000, "undo signature");
+  await undo(); await c.select(a); await waitFor(() => !listingHas(NAME), 10000, "undo apply");
+  for (let i = 2; i < steps; i++) { const n = await depth(); await undo(); await until(async () => (await depth()) !== n, "undo step " + (i + 1)); }
+  await until(async () => (await rpc.call("get_data_type", { path: "/" + NAME }).then(() => false, () => true)), "struct gone after undoing everything");
+  const st = await rpc.call("undo_state", {});
+  R.undoAll = st.undoName === base.undoName && st.canRedo;
+  if (!R.undoAll) throw new Error(`undo stack not back at baseline: ${JSON.stringify([st, base])}`);
+
+  // 7. redo every step through the real Edit menu
+  for (let i = 0; i < steps; i++) { const n = await depth(); await c.menu("redo"); await until(async () => (await depth()) !== n, "redo step " + (i + 1)); }
+  const d2 = await get("/" + NAME);
+  if (d2.size !== 16 || d2.components!.length !== 3 || d2.components![0].name !== "f_first") throw new Error("redo did not restore the struct: " + JSON.stringify(d2.components));
+  await c.select(a); await waitFor(() => listingHas(NAME), 10000, "redo apply");
+  await c.select(entry); await waitFor(() => c.editorText().includes(NAME), 15000, "redo signature in the decompiler");
+  R.redoAll = true;
+
+  // 8. create a struct from listing data: int + short, selected by cursor + length, applied; one undo removes both
+  await rpc.call("define_data", { address: b, dataType: "int" });
+  await rpc.call("define_data", { address: "0x" + (BigInt(b) + 4n).toString(16), dataType: "short" });
+  await c.select(b); await sleep(300);
+  lb().focus(); c.command({ type: "edit", action: "createStruct" });
+  await fillAll("Create structure", { "Structure name": "AutotestFromData", "Length (bytes)": "6" });
+  await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "struct from data");
+  const f2 = await get("/AutotestFromData");
+  R.fromData = f2.components!.filter((x) => !x.undefined).map((x) => `${x.offset}:${x.type}`);
+  if (f2.size !== 6 || R.fromData.join() !== "0:int,4:short") throw new Error("unexpected struct from data " + JSON.stringify(R.fromData));
+  await waitFor(() => listingHas("AutotestFromData"), 10000, "struct from data in the listing");
+  await undo(); await until(async () => !(await rpc.call("get_data_type", { path: "/AutotestFromData" }).then(() => true, () => false)), "undo struct from data");
+  await waitFor(() => !listingHas("AutotestFromData"), 10000, "listing without the struct from data");
+  await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
+  R.fromDataUndoRedo = true;
+
+  // 9. save through File > Save; the dirty marker clears
+  await c.menu("save");
+  await until(async () => !(await rpc.call("undo_state", {})).dirty, "save");
+  const ok = R.created && R.fillerFilled && R.listing && R.decompiler && R.undoAll && R.redoAll && R.fromDataUndoRedo;
+  return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b } };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DataTypeDetail, EnumOp, StructOp } from "../../../protocol";
 import { rpc } from "./client";
 import { FormDialog } from "./FormDialog";
@@ -7,14 +7,19 @@ import { hex } from "./dtTree";
 /** Runs one edit RPC; resolves true on success. Errors are shown by the owner (banner) and never thrown. */
 export type Run = (f: () => Promise<unknown>) => Promise<boolean>;
 
-/** A text cell: commits on Enter or blur when changed, Escape reverts; a rejected commit reverts to the stored value. */
-function Cell({ value, placeholder, label, disabled, onCommit }: { value: string; placeholder?: string; label: string; disabled?: boolean; onCommit: (v: string) => Promise<boolean> }) {
+/** A text cell: commits on Enter or blur when changed (once per value), Escape reverts; a rejected commit reverts to the stored value. */
+function Cell({ value, placeholder, label, disabled, className = "cell", onCommit }: { value: string; placeholder?: string; label: string; disabled?: boolean; className?: string; onCommit: (v: string) => Promise<boolean> }) {
   const [v, setV] = useState(value);
+  const sent = useRef<string | null>(null);
   useEffect(() => setV(value), [value]);
-  const commit = () => { if (v !== value) void onCommit(v).then((ok) => { if (!ok) setV(value); }); };
-  return <input className="cell" aria-label={label} value={v} placeholder={placeholder} disabled={disabled} spellCheck={false} autoComplete="off"
+  const commit = () => {
+    if (v === value || sent.current === v) return; // Enter commits, then the blur it causes must not send it again
+    sent.current = v;
+    void onCommit(v).then((ok) => { sent.current = null; if (!ok) setV(value); });
+  };
+  return <input className={className} aria-label={label} value={v} placeholder={placeholder} disabled={disabled} spellCheck={false} autoComplete="off"
     onChange={(e) => setV(e.target.value)} onBlur={commit}
-    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { setV(value); e.stopPropagation(); e.currentTarget.blur(); } }} />;
+    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); e.currentTarget.blur(); } else if (e.key === "Escape") { setV(value); e.stopPropagation(); e.currentTarget.blur(); } }} />;
 }
 
 /** Struct and union editor: every committed change is one edit_struct call (one Ghidra transaction, one undo step). */
@@ -23,9 +28,7 @@ export function StructEditor({ d, run, reload, onApply }: { d: DataTypeDetail; r
   const union = d.kind === "union";
   const [sel, setSel] = useState<number | null>(null);
   const [hideFiller, setHideFiller] = useState(false);
-  const [size, setSize] = useState(String(d.size));
   const [dlg, setDlg] = useState<null | "add" | "insert">(null);
-  useEffect(() => setSize(String(d.size)), [d.size, d.path]);
   useEffect(() => { if (sel !== null && sel >= comps.length) setSel(null); }, [comps.length]); // eslint-disable-line
   useEffect(() => setSel(null), [d.path]);
   const op = (o: StructOp) => run(() => rpc_edit(d.path, o));
@@ -45,13 +48,10 @@ export function StructEditor({ d, run, reload, onApply }: { d: DataTypeDetail; r
         <button aria-label="Apply at address" onClick={onApply}>Apply at address…</button>
       </div>
       <div className="tools">
-        {!union && <label>Size <input aria-label="Size" className="num" value={size} disabled={d.packed} onChange={(e) => setSize(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
-          onBlur={() => { if (size !== String(d.size)) void op({ op: "resize", size: Number(size) }).then((ok) => { if (!ok) setSize(String(d.size)); }); }} /></label>}
+        {!union && <label>Size <Cell label="Size" className="num" value={String(d.size)} disabled={d.packed} onCommit={(v) => op({ op: "resize", size: Number(v) })} /></label>}
         <label><input type="checkbox" aria-label="Packed" checked={!!d.packed} onChange={(e) => void op({ op: "pack", packed: e.target.checked })} /> Packed</label>
-        {d.packed && <label>Packing <input aria-label="Packing value" className="num" defaultValue={d.packingValue ?? ""} key={d.packingValue ?? "default"} placeholder="default"
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
-          onBlur={(e) => { const v = e.currentTarget.value.trim(); if (v !== String(d.packingValue ?? "")) void op({ op: "pack", packed: true, ...(v ? { packingValue: Number(v) } : {}) }); }} /></label>}
+        {d.packed && <label>Packing <Cell label="Packing value" className="num" value={String(d.packingValue ?? "")} placeholder="default"
+          onCommit={(v) => op({ op: "pack", packed: true, ...(v.trim() ? { packingValue: Number(v) } : {}) })} /></label>}
         <span className="meta">alignment {d.alignment}</span>
         {!union && <label><input type="checkbox" aria-label="Hide undefined" checked={hideFiller} onChange={(e) => setHideFiller(e.target.checked)} /> Hide undefined</label>}
       </div>
