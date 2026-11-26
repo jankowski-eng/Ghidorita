@@ -404,3 +404,25 @@ Within noise. I did **not** measure decompile latency: `_tokens` now calls `getH
 - Register-space and stack-space listing remain out of scope (`listing_info` lists loaded initialized memory only).
 
 **Rebased onto `main` 6804792** (round 9 hardening, coverage, command bar, Java scan helper). Conflicts: `list_functions` (kept main's `source` field and `load_coverage`, all-spaces body), `protocol.md`, mock and autotest imports, the report. Fixes the merge needed: the in-process harness now builds `GhidretteScans` before the JVM starts; `coverage.ts` threw on qualified (overlay) listing rows (`BigInt("OVL1::1000")`), now such rows are never covered (`shortcut:` comment, test); the autotest still looked for the aria-label `Symbol name`, which main's command bar commit renamed to `Symbol or action` (the autotest failed at "search panel" on untouched `main` too). After the rebase: pytest 64 passed, 3 skipped, 2 failed (before the harness fix: `test_xrefs_symbols_strings_search`, fixed; `test_snapshot_survives_sigkill` fails on `main` too), `npm test` 52 pass, autotest mock and real `/bin/ls` pass, `AUTOTEST_PHASE=2` passes. Coverage files stay default-space only (`load_coverage` formats with `hx`).
+
+## Round 10: renderer architecture (no behavior change)
+
+Branch `claude/ghidrette-renderer-architecture-v2`, on `main` 36ea9da. Goal: mirror `sidecar/ARCHITECTURE.md` in `app/src/renderer/`; no feature, protocol or visual change. Layout and rules: [app/ARCHITECTURE.md](app/ARCHITECTURE.md).
+
+**What was already there.** While this round was in progress `main` gained its own provider boundary (`ApplicationBackend`, `rpc.ts`'s `WebSocketBackend`, `wire.ts` payload checks, capabilities, session ids, `test/backend-boundary.test.mjs`). That is the renderer's `data/` layer, so the first plan (a `data/` module per domain over a global `rpc()`) was dropped, and a first attempt on the old `rpc()` code was not rebased (it conflicted in meaning, not only in text). The scripted modes were already a separate chunk (`import()` in `main.tsx`).
+
+**Before.** `App.tsx` 608 lines / 43,258 B: about 45 `useState`/`useRef`, the open/close/cancel flow, `program_changed` handling, editing, menu routing, window handlers, three dialogs, panes and the welcome pane in one component; `autotest*.ts` mixed with the components.
+
+**After.**
+- `store/`: `createStore` (reducer + `useSyncExternalStore`, no dependency); `program.ts` (reducer for the active program and the open lifecycle); `views.ts` (reducer for positions, panels, dialogs); `session.ts` (`createSession(backend)`: open, cancel, close, save, undo, `program_changed`, `onReset` / `onChanged`; context and hooks).
+- `features/`: navigation, editing, dialogs (+ `DialogHost`), menu, coverage, exports, reactions, bootstrap.
+- Components: `Workbench`, `WelcomePane`, `Shell` (toolbar, bars, dock, status bar, type manager); `autotest*.ts` moved to `autotest/`.
+- `App.tsx` 53 lines / 2,956 B.
+- Production bundle (`app/out/renderer/assets`): main chunk 9,117,067 → 9,124,755 B (+7.7 KB); the `autotest-*.js` chunk is the same 89,246 B and nothing else imports it (`test/layering.test.mjs`).
+- Tests: `npm test` 74 → 86 (store reducers 5, session against an in-memory backend 5: open / replace / failed open keeps the program / second open ignored / close / save-only change / held change during an open / cancel and progress; layering 2). `npm run typecheck` clean. From one final run: real sidecar autotest on `/bin/ls` ok, `AUTOTEST_PHASE=2` ok, `sidecar/test_provider_contract.py` + `test_provider_ui.py` 7 passed (fixture, pyghidra, mock).
+
+**Behavior kept.** Code moved, not rewritten: the open/cancel/close races, `program_changed` coalescing during an open, `goSeq` (newest navigation wins), `latest()` refetches, the `shortcut:` comments and error handling. One simplification: refs that mirrored state (`openedRef`, `openingRef`, `funcsRef`, …) are gone because the store is readable synchronously. DOM order differs only by the dialogs now being rendered last (they are modal overlays).
+
+**Not moved / left.** `Listing.tsx` (323 lines), `Decompiler.tsx` and the autotest scripts are components or test code with their own internal state; they take the same props as before. `scrollReq` is reset with the program as before; the coverage runs stay module state (`coverage.ts`). Round 7 (background analysis) is not on this branch: it conflicts in meaning with main's session and provider contract and needs its own rework; its UI will go into `store/` and `features/` when it lands.
+
+**Pre-existing, not from this work.** `MOCK=1 AUTOTEST=/bin/ls npm start` fails on untouched `main` 36ea9da at "timeout waiting for import dialog" (the step after the default open: `waitFor(!dialog && opened)` passes while the open is still running, so the next `open-path` is ignored); the result before that step is identical on both. The real-sidecar autotest and the provider UI tests cover the same flows.

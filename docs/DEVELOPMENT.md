@@ -3,7 +3,7 @@
 Electron (TypeScript, React, Monaco) ⇄ WebSocket JSON-RPC ⇄ Python sidecar (PyGhidra → Ghidra JVM, headless).
 
 All commands below run from the repo root unless a `cd` says otherwise. Set `GHIDRA_SRC` to your Ghidra source checkout.
-Protocol: `../protocol.md`, `../protocol.ts`. Results: `../SPIKE_REPORT.md`.
+Protocol: `../protocol.md`, `../protocol.ts`. Results: `../SPIKE_REPORT.md`. Code layout: [../app/ARCHITECTURE.md](../app/ARCHITECTURE.md) (renderer), [../sidecar/ARCHITECTURE.md](../sidecar/ARCHITECTURE.md) (sidecar).
 
 ## One-time setup
 
