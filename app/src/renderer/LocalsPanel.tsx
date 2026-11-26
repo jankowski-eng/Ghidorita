@@ -12,7 +12,7 @@ export function LocalsPanel() {
       <table className="vals"><thead><tr><th>name</th><th>type</th><th>value</th><th>was</th><th>where</th></tr></thead>
         <tbody>{items.map((i) => {
           const before = was[i.name], changed = before !== undefined && before !== i.value;
-          return <tr key={i.kind + i.name} className={changed ? "changed" : ""}><td>{i.name}</td><td>{i.type}</td><td>{i.value}</td><td>{changed ? before : ""}</td><td>{i.where}</td></tr>;
+          return <tr key={i.kind + i.name} className={changed ? "changed" : ""}><td>{i.name}</td><td>{i.type}</td><td>{i.value}</td><td>{changed ? before : ""}</td><td title={/^(stack|0x)/.test(i.where) ? undefined : "a register: only right where the decompiler keeps this variable in it"}>{i.where}</td></tr>;
         })}</tbody></table>
     </div>
   );

@@ -31,8 +31,9 @@ What *is* available headlessly and worth keeping in mind: the **P-code emulator*
 | Needs on the host | gdb (or lldb, dbgeng), Python, the GUI | `qemu-system-*` (or any RSP stub) |
 | Model | a trace database with snapshots, many views | the last stop, breakpoints, registers |
 | Address mapping | Static Mappings service | one `offset` (0: image loaded where it runs) |
-| Stepping | instruction, p-code, over/into/out | instruction (F8) and decompiler statement (F7) |
-| Recording / time travel | traces, emulator, Tenet import | not yet |
+| Stepping | instruction, p-code, over/into/out | instruction (F8), decompiler statement over (F7), into (F10), out (Shift+F10) |
+| Recording / time travel | traces, emulator, Tenet import | the stops are recorded and can be viewed again (no reverse execution) |
+| Values | register, memory and stack views from the trace | the decompiler's variables with values at the stop, memory through data types |
 | Targets | local and remote processes, kernels, QEMU | QEMU / any gdb stub first |
 
 The statement step is the part Ghidra does not have as such: it runs the target to a boundary of the decompiler's own line mapping, so the stop and the highlight in the decompiler agree by construction.
@@ -40,5 +41,5 @@ The statement step is the part Ghidra does not have as such: it runs the target 
 ## Limits worth knowing
 
 - RSP gives us what the stub offers: QEMU's stub has no memory map or module list, so there is no module-based mapping to automate; relocation will be a user-given offset first.
-- A statement step is only as good as the decompiler's address mapping: Ghidra maps a few instructions per line (a prologue maps to nothing; the stop at a function's entry highlights the first mapped line).
+- Values of stack variables need Ghidra's stack depth at the stop (unknown after some AArch64 prologues), register variables are not checked for liveness. A statement step is only as good as the decompiler's address mapping: Ghidra maps a few instructions per line (a prologue maps to nothing; the stop at a function's entry highlights the first mapped line).
 - Going back needs a recording: RSP has reverse-step packets only where the stub implements them (QEMU's replay mode does; not wired up here), and Ghidra's time travel works on traces it imported or recorded. Not part of this slice.

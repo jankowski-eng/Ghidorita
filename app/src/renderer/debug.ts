@@ -82,14 +82,15 @@ export function statementRange(tokens: Token[], line: number, pc: Address): { st
   return { start: "0x" + (p < m ? p : m).toString(16), end: "0x" + ((next ?? m + 1n) - 1n).toString(16) };
 }
 
-/** What to show after a decompiler line: the variables of the line with their values, and what they were before this step. One entry per line that names one. */
+/** What to show after a decompiler line: the variables of the line with their values, and what they were before this step (a value read from a register is marked `?`). One entry per line that names one. */
 export function lineValues(tokens: Token[], text: string, items: DebugValue[], was: Record<string, string>): { line: number; text: string }[] {
   const by = new Map(items.map((i) => [i.name, i])), lines = text.split("\n"), out = new Map<number, string[]>();
   for (const t of tokens) {
     if (t.kind !== "variable" && t.kind !== "param") continue;
     const name = lines[t.line]?.slice(t.colStart, t.colEnd), it = name ? by.get(name) : undefined;
     if (!it) continue;
-    const parts = out.get(t.line) ?? [], label = `${it.name} = ${it.value}` + (it.name in was && was[it.name] !== it.value ? ` (was ${was[it.name]})` : "");
+    const stale = !!it.where && !/^(stack|0x)/.test(it.where); // a register: only right where the decompiler keeps the variable in it
+    const parts = out.get(t.line) ?? [], label = `${it.name} = ${it.value}${stale ? "?" : ""}` + (it.name in was && was[it.name] !== it.value ? ` (was ${was[it.name]})` : "");
     if (!parts.includes(label)) out.set(t.line, [...parts, label]);
   }
   return [...out].sort((a, b) => a[0] - b[0]).map(([line, parts]) => ({ line, text: "   ← " + parts.join(", ") }));

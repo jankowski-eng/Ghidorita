@@ -8,7 +8,7 @@ from testlib import HERE, INVALID, Client, Proc, run
 
 QEMU = shutil.which("qemu-system-arm") or ("/opt/homebrew/bin/qemu-system-arm" if os.path.exists("/opt/homebrew/bin/qemu-system-arm") else None)
 FW = os.path.join(HERE, "testdata", "fw", "fw.bin")
-WORK_A, WORK_B, MAIN, TARGET = "0x8", "0x18", "0x28", -32008
+WORK_A, WORK_B, MAIN, SCALE, TARGET = "0x8", "0x18", "0x28", "0x54", -32008
 
 
 def free_port():
@@ -74,7 +74,7 @@ def test_attach_break_continue_step_detach(qemu, proc):
             assert (await stop_at(c, n, "running"))[1]["state"] == "running"
             n, st = await stop_at(c, n)
             assert st["address"] == WORK_A and reg(st, "pc") == 0x8, st
-            assert reg(st, "lr") == 0x2d, hex(reg(st, "lr"))  # work_a was called from main_loop (bl at 0x28, Thumb return address 0x2c|1)
+            assert reg(st, "lr") == 0x3d, hex(reg(st, "lr"))  # work_a was called from main_loop (bl at 0x38, Thumb return address 0x3c|1)
             await c.ok("debug_step")
             n, st2 = await stop_at(c, n)
             assert 0x8 < int(st2["address"], 16) < 0x18, st2["address"]
@@ -109,10 +109,7 @@ def test_statement_step(qemu, proc):
     """Statement steps in main_loop run over the calls, stop at the boundaries of main_loop, and a breakpoint inside a called function ends the step there."""
     async def go():
         async with Client(proc.port) as c:
-            await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x0")
-            await c.ok("clear_code", address=WORK_A, length=0x2a)  # a raw image has no functions yet: the analysis left data after the vectors
-            for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop")):
-                await c.ok("create_function", address=a, name=n)
+            await open_fw(c)
             toks = (await c.ok("decompile", entry=MAIN))["tokens"]
             first = {}
             for t in toks:
@@ -142,8 +139,8 @@ def test_statement_step(qemu, proc):
 
 async def open_fw(c):
     await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x0")
-    await c.ok("clear_code", address=WORK_A, length=0x2a)  # a raw image has no functions yet: the analysis left data after the vectors
-    for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop")):
+    await c.ok("clear_code", address=WORK_A, length=0x90)  # a raw image has no functions yet: the analysis left data after the vectors
+    for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop"), (SCALE, "scale")):
         await c.ok("create_function", address=a, name=n)
 
 
@@ -242,5 +239,23 @@ def test_aarch64_registers_and_stack_values(qemu64, proc):
             assert [i["raw"] for i in stack] == ["0x00000009"], params  # the ninth argument: read from the frame at sp-at-entry + 0
             m = await c.ok("debug_memory", address=next(r["value"] for r in st["registers"] if r["name"] == "sp"), length=16)
             assert len(m["bytes"]) == 32
+            await c.ok("debug_detach")
+    run(go())
+
+
+def test_stack_parameters_of_an_unoptimised_function(qemu, proc):
+    """scale() takes six parameters: e and f are passed on the stack. After its `sub sp, #0x20` Ghidra knows the stack depth, so the values read them at sp-at-entry + their offset."""
+    async def go():
+        async with Client(proc.port) as c:
+            await open_fw(c)
+            await c.ok("debug_breakpoint", address=hex(int(SCALE, 16) + 2))  # after the sub sp
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu)
+            n, st = await stop_at(c)
+            await c.ok("debug_continue")
+            n, st = await stop_at(c, n)
+            assert st["address"] == hex(int(SCALE, 16) + 2), st["address"]
+            v = await c.ok("debug_values", entry=SCALE)
+            stack = [i for i in v["items"] if i["where"].startswith("stack")]
+            assert [i["raw"] for i in stack] == ["0x00000005", "0x00000006"], v  # scale(counter, 2, 3, 4, 5, 6): e and f from the frame
             await c.ok("debug_detach")
     run(go())

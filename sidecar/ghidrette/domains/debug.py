@@ -403,6 +403,10 @@ class Debug:
         from ghidra.program.model.mem import ByteMemBufferImpl
         from ghidra.docking.settings import SettingsImpl
         buf = ByteMemBufferImpl(prog.getAddressFactory().getDefaultAddressSpace().getAddress(addr), JArray(JByte)([b - 256 if b > 127 else b for b in data]), self.big)
+        from ghidra.program.model.scalar import Scalar
+        v = dt.getValue(buf, SettingsImpl.NO_SETTINGS, len(data))
+        if isinstance(v, Scalar):  # integers in decimal (the default representation is hex with an "h")
+            return str(int(v.getSignedValue() if v.isSigned() else v.getUnsignedValue()))
         return str(dt.getRepresentation(buf, SettingsImpl.NO_SETTINGS, len(data)))
 
     @rpc(lane="R")
@@ -456,7 +460,7 @@ class Debug:
         """The variables of the function at `entry` (the decompiler's parameters, locals and the globals it uses) with their values in the
         target now: [{name, kind param|local|global, type, size, where, value, raw}]. Stack variables sit at sp-at-entry + offset (sp-at-entry
         from Ghidra's stack depth analysis for the pc); a variable in a register is the register's value at the stop, which is only
-        meaningful where the decompiler keeps it live (shortcut: no liveness check). Variables Ghidra holds in no fixed place are left out."""
+        meaningful where the decompiler keeps it live (shortcut: no liveness check). Stack variables need Ghidra's stack depth at the pc: where it is unknown (AArch64 prologues with writeback, for one) they are left out; upgrade: unwind analysis. Variables Ghidra holds in no fixed place are left out."""
         from ghidra.app.cmd.function import CallDepthChangeInfo
         from ghidra.util.task import TaskMonitor
         from .decompile import decompile_for_edit
