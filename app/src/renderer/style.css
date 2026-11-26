@@ -178,3 +178,7 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .dcov { box-shadow: inset 3px 0 0 #4ec36b; background: #1f2a23; } .dcov-a { box-shadow: inset 3px 0 0 #e0a93b; background: #2a2418; } .dcov-b { box-shadow: inset 3px 0 0 #5aa0e0; background: #1c2630; }
 .covfuncs { display: flex; gap: 24px; padding: 4px 8px; overflow: auto; max-height: 45%; } .covfuncs > div { flex: 1; min-width: 0; }
 .secs { width: 100%; max-height: 140px; display: block; overflow: auto; font-size: 12px; } .secs td { padding: 0 8px 0 0; white-space: nowrap; } .secs td:last-child { width: 100%; } .ebar { display: block; height: 6px; }
+
+.lrow.cov-a::before, .lrow.cov-b::before { position: absolute; left: 4px; font-size: 9px; font-weight: 700; } .lrow.cov-a::before { content: "A"; color: #e0a93b; } .lrow.cov-b::before { content: "B"; color: #5aa0e0; }
+.covlegend { display: flex; gap: 16px; padding: 2px 8px; } .covlegend b { font-weight: normal; color: #888; }
+.sw { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; } .sw.both { background: #4ec36b; } .sw.a { background: #e0a93b; } .sw.b { background: #5aa0e0; }

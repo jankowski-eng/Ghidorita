@@ -1,7 +1,7 @@
 import type { Address, FunctionInfo } from "../../../protocol";
 import { coverage } from "./coverage";
+import { plural } from "./format";
 
-const n = (v: bigint) => v.toLocaleString();
 
 /** Coverage runs: load several files, name them, show one (A) or two (A vs B) in the listing and on the binary map. */
 export function CoveragePanel({ version, funcs, onGo, onLoad, onChange }: { version: number; funcs: FunctionInfo[]; onGo: (a: Address) => void; onLoad: () => void; onChange: () => void }) {
@@ -21,14 +21,18 @@ export function CoveragePanel({ version, funcs, onGo, onLoad, onChange }: { vers
         <label className="chip">B {pick("b")}</label>
         <button onClick={() => set(() => coverage.clear())} disabled={!runs.length}>Clear all</button>
         <span role="status" aria-label="Coverage difference">
-          {d ? `only A ${n(d.onlyA)} B · only B ${n(d.onlyB)} B · both ${n(d.both)} B` : runs.length ? "pick two runs to compare" : "no coverage loaded"}
+          {d ? `only A ${plural(d.onlyA, "byte")} · only B ${plural(d.onlyB, "byte")} · both ${plural(d.both, "byte")}` : runs.length ? "pick two runs to compare" : "no coverage loaded"}
         </span>
+      </div>
+      <div className="covlegend" aria-label="Legend">
+        <span><i className="sw both" /> both runs{!d && " (the shown run)"}</span>
+        {d && <><span><i className="sw a" /> only A <b>(A in the listing gutter)</b></span><span><i className="sw b" /> only B <b>(B in the listing gutter)</b></span></>}
       </div>
       {fd && (
         <div className="covfuncs">
           {([["only A", fd.onlyA], ["only B", fd.onlyB]] as const).map(([label, fs]) => (
             <div key={label} role="list" aria-label={`Functions reached ${label}`}>
-              <div className="dim">{label}: {fs.length} functions</div>
+              <div className="dim">{label}: {plural(fs.length, "function")}</div>
               {fs.map((f) => <div key={f.entry} role="listitem"><button className="lnk" onClick={() => onGo(f.entry)}>{f.name}</button> <span className="dim">{f.entry}</span></div>)}
             </div>
           ))}
@@ -38,7 +42,7 @@ export function CoveragePanel({ version, funcs, onGo, onLoad, onChange }: { vers
         {runs.map((r) => (
           <div key={r.id} role="listitem" className="covrun">
             <input aria-label={`Name of run ${r.id}`} defaultValue={r.name} onBlur={(e) => set(() => coverage.rename(r.id, e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
-            <span className="dim">{r.cov.size} ranges · {n(r.cov.bytes())} bytes</span>
+            <span className="dim">{plural(r.cov.size, "range")} · {plural(r.cov.bytes(), "byte")}</span>
             <button aria-label={`Show ${r.name} as A`} aria-pressed={coverage.a === r.id} onClick={() => set(() => coverage.select("a", r.id))}>A</button>
             <button aria-label={`Show ${r.name} as B`} aria-pressed={coverage.b === r.id} onClick={() => set(() => coverage.select("b", r.id))}>B</button>
             <button aria-label={`Remove ${r.name}`} onClick={() => set(() => coverage.remove(r.id))}>×</button>

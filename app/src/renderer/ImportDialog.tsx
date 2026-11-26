@@ -1,11 +1,11 @@
 import { isFailure, type ImportSelection } from "./backend";
+import { fmtSize } from "./format";
 import { useEffect, useMemo, useState } from "react";
 import type { AnalysisProfile, FileLayout, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
 import { trapTab, useRestoreFocus } from "./hooks";
 import { buildOptions, choiceError, entropyHint, parseBase } from "./openOptions";
 
 const label = (c: ImportCandidate) => `${c.loader}${c.language ? ` — ${c.language} / ${c.compilerSpec}` : c.requiresLanguage === false ? "" : " — choose language"}${c.preferred ? " (preferred)" : ""}`;
-const mb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const errText = (e: unknown) => isFailure(e, "busy") ? "The backend is busy. Try again in a moment." : isFailure(e, "notFound") ? "File not found." : e instanceof Error ? e.message : String(e);
 
 /** Shows the provider’s import choices. Enter = open with the preselected (default) choice. */
@@ -60,17 +60,17 @@ export function ImportDialog({ imports, path, onOpen, onCancel }: { imports: Imp
         {ready && cand && <>
           {ready.entropy.length > 0 && <div className="triage" role="img" aria-label={`Entropy by file position. ${entropyHint(ready.entropy)}`}>
             <div className="ebars">{ready.entropy.map((x, i) => <span key={i} title={`${x} bits/byte`} style={{ height: `${Math.round((x / 8) * 100)}%`, background: x >= 7.5 ? "#e0a93b" : "#5a8f6a" }} />)}</div>
-            <span className="meta">{mb(ready.sizeBytes)} · {entropyHint(ready.entropy)}</span>
+            <span className="meta">{fmtSize(ready.sizeBytes)} · {entropyHint(ready.entropy)}</span>
           </div>}
           <dl className="card-facts" aria-label="File summary">
             <dt>Format</dt><dd>{cand.loader}{cand.preferred ? "" : " (not the preferred loader)"}</dd>
             <dt>Architecture</dt><dd>{language ? `${language}${spec ? ` / ${spec}` : ""}` : "not chosen yet"}</dd>
-            <dt>Size</dt><dd>{mb(ready.sizeBytes)}</dd>
+            <dt>Size</dt><dd>{fmtSize(ready.sizeBytes)}</dd>
             {ready.layout?.entry && <><dt>Entry point</dt><dd>{ready.layout.entry}</dd></>}
             {profile && <><dt>Analysis</dt><dd>{state && "profiles" in state ? state.profiles?.find((p) => p.id === profile)?.label ?? profile : profile}</dd></>}
           </dl>
           {!!ready.layout?.sections.length && <table className="secs" aria-label="Sections"><tbody>
-            {ready.layout.sections.map((x, i) => <tr key={i}><td>{x.name}</td><td>{mb(x.size)}</td><td title={`${x.entropy} bits/byte`}><span className="ebar" style={{ width: `${Math.round((x.entropy / 8) * 100)}%`, background: x.entropy >= 7.5 ? "#e0a93b" : "#5a8f6a" }} /></td></tr>)}
+            {ready.layout.sections.map((x, i) => <tr key={i}><td>{x.name}</td><td>{fmtSize(x.size)}</td><td title={`${x.entropy} bits/byte`}><span className="ebar" style={{ width: `${Math.round((x.entropy / 8) * 100)}%`, background: x.entropy >= 7.5 ? "#e0a93b" : "#5a8f6a" }} /></td></tr>)}
           </tbody></table>}
           {!language && <div className="err" role="status">This format needs a language: open Advanced options and choose one.</div>}
           <button type="button" aria-expanded={adv || !language} onClick={() => setAdv(!adv)}>{adv || !language ? "Hide advanced options" : "Advanced options…"}</button>

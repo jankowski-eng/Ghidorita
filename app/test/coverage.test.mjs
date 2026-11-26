@@ -61,3 +61,9 @@ test("funcDiff: functions reached only in A or only in B, any overlap counts; ma
   assert.equal(r.markAny(["0x99", "0x14"]), " cov-a");
   assert.equal(r.markAny(["0x99"]), "");
 });
+
+test("format: plural and sizes below 1 KB", async () => {
+  const { plural, fmtSize } = await import("data:text/javascript," + encodeURIComponent(transformSync(readFileSync(new URL("../src/renderer/format.ts", import.meta.url), "utf8"), { loader: "ts", format: "esm" }).code));
+  assert.equal(plural(1, "function"), "1 function"); assert.equal(plural(2, "function"), "2 functions"); assert.equal(plural(134n, "byte"), "134 bytes");
+  assert.equal(fmtSize(48), "48 bytes"); assert.equal(fmtSize(1), "1 byte"); assert.equal(fmtSize(1536), "2 KB");
+});
