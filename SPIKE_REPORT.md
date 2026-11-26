@@ -190,7 +190,7 @@ Also: `import_candidates` returns `sizeBytes` (the renderer has no fs).
 - No change to the benchmarks or `timings.json`.
 
 ## Round 5: row 7, data type manager
-Branch `claude/ghidrette-data-type-manager-c9a23c`, cut from `main` (the row-6 branch `app-shell-restructure` is already merged there). Not merged.
+Branch `claude/ghidrette-data-type-manager-c9a23c`, cut from `main` (the row-6 branch `app-shell-restructure` is already merged there). Merged into `main` (97b1cc0); branch deleted.
 
 **What works** (protocol.md "Data types", protocol.ts, mock, pytest, autotest all updated):
 - 9 new RPCs: `dt_sources`, `dt_children` (one category level, lazy), `get_data_type`, `create_data_type` (struct/union/enum/typedef/pointer/category), `delete_data_type`, `rename_data_type`, `edit_struct` (add/insert/set/delete/clear/move/resize/pack), `edit_enum` (set/rename/remove/resize), `create_struct_from_data` (struct from the data items at a listing range, applied in the same transaction). `list_data_types` gained `kind` and `source`. Applying a type to an address reuses `define_data`.
