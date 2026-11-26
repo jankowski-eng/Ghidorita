@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
-import type { ActiveSession, Address, ImportOptions, ListingRow, ProgramEntry } from "../../../../protocol";
+import type { ActiveSession, AnalysisState, Address, ImportOptions, ListingRow, ProgramEntry } from "../../../../protocol";
 import { readBrowsing, resolveOpen } from "../session";
-import { isFailure, isObsolete, type ApplicationBackend, type OpenJob, type OpenProgress, type ProgramChange } from "../backend";
+import { isFailure, isObsolete, type AnalysisMode, type ApplicationBackend, type OpenJob, type OpenProgress, type ProgramChange } from "../backend";
 import { coverage } from "../coverage";
 import { latest } from "../latest";
 import { functionLookup } from "../symbols";
@@ -80,12 +80,13 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
     } finally { if (get().program === current) dispatch({ type: "readingDone" }); }
   };
 
-  const open = async (p: string, options: ImportOptions = {}, stored?: ProgramEntry) => {
+  const open = async (p: string, options: ImportOptions = {}, stored?: ProgramEntry, mode?: AnalysisMode) => {
     if (blocked()) return;
     dispatch({ type: "openStarted", path: p, startedAt: Date.now() });
     try {
       const onProgress = (progress: OpenProgress) => dispatch({ type: "progress", p: progress });
-      const job = openJob = stored ? backend.projects.reopen(stored, onProgress) : lifecycle.open(p, options, onProgress);
+      const m = mode ?? (opts.autotest ? "blocking" : undefined); // the autotest's older flows expect a finished analysis when open returns
+      const job = openJob = stored ? backend.projects.reopen(stored, onProgress, m) : lifecycle.open(p, options, onProgress, m);
       const outcome = await resolveOpen(job, lifecycle);
       if (outcome.kind === "unknown") {
         dispatch({ type: "unavailable" });
@@ -99,6 +100,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
         else { fail(outcome.error); setNotice("Could not open " + p); }
         return;
       }
+      dispatch({ type: "analysis", state: outcome.session.analysis ?? null });
       if (!opts.autotest) window.host.recentAdd(p).catch(() => {});
       return await loadBrowsing(current!);
     } finally {
@@ -108,6 +110,18 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
       if (change && get().program?.session.sessionId === change.sessionId) programChanged(change.sessionId, change.p);
     }
   };
+
+  /** Open a program from the browser; "full" also upgrades a finished fast analysis (a partial one resumes by itself when opened). */
+  const openStored = (entry: ProgramEntry, then?: "full") =>
+    open(entry.sourcePath ?? entry.name, {}, entry).then((fl) => { if (fl && then) void analysisAction("full"); });
+  /** The status bar's analysis button, and Run full analysis. */
+  const analysisAction = (a: "cancel" | "resume" | "full") => send(async () => {
+    const current = get().program;
+    if (!current) return;
+    if (a === "cancel") await current.api.analysis.cancel();
+    else { const state = await current.api.analysis.start(a === "full" ? "full" : undefined); if (get().program === current) dispatch({ type: "analysis", state }); }
+  });
+  const analysisChanged = (sessionId: string, state: AnalysisState) => { if (get().program?.session.sessionId === sessionId) dispatch({ type: "analysis", state }); };
 
   const closeProgram = async () => {
     const current = get().program;
@@ -167,7 +181,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
 
   const session = {
     backend, caps, store, views, refs, errors, opts, menu: { current: null as import("../../preload/index").MenuState | null },
-    blocked, fail, flash, setNotice, send, selectSession, loadBrowsing, open, closeProgram, cancelOpen, refreshFunctions, refreshUndo, save, undoRedo, programChanged,
+    blocked, fail, flash, setNotice, send, selectSession, loadBrowsing, open, openStored, analysisAction, analysisChanged, closeProgram, cancelOpen, refreshFunctions, refreshUndo, save, undoRedo, programChanged,
     /** the program the UI shows right now (null if none) */
     program: () => get().program,
     onReset: (f: () => void) => { resetSubs.add(f); return () => { resetSubs.delete(f); }; },

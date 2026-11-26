@@ -1,4 +1,4 @@
-import type { ActiveSession, FunctionInfo, ListingRow, UndoState } from "../../../../protocol";
+import type { ActiveSession, AnalysisState, FunctionInfo, ListingRow, UndoState } from "../../../../protocol";
 import type { AddrMap } from "../addrmap";
 import type { ProgramOperations } from "../backend";
 import type { Progress } from "../OpenDialog";
@@ -24,6 +24,8 @@ export interface ProgramState {
   reading: boolean;
   browseError: string;
   undo: UndoState;
+  /** `analysis` capability: the background analysis of the open program (null = none known) */
+  analysis: AnalysisState | null;
   saving: boolean;
   stats: Stats;
   /** `error` is the last failure (status bar), `notice` the welcome pane's line, `flash` a five second status bar hint */
@@ -32,7 +34,7 @@ export interface ProgramState {
 
 export const initialProgram: ProgramState = {
   program: null, opening: null, progress: null, closing: false, unavailable: false, funcs: [], map: null, initialRows: [], reading: false, browseError: "",
-  undo: noUndo, saving: false, stats: {}, error: "", notice: "", flash: "",
+  undo: noUndo, analysis: null, saving: false, stats: {}, error: "", notice: "", flash: "",
 };
 
 export type ProgramAction =
@@ -45,13 +47,14 @@ export type ProgramAction =
   | { type: "reading" } | { type: "browsed"; funcs: FunctionInfo[]; map: AddrMap; rows: ListingRow[] } | { type: "browseFailed"; message: string } | { type: "readingDone" }
   | { type: "funcs"; funcs: FunctionInfo[] }
   | { type: "undo"; u: UndoState }
+  | { type: "analysis"; state: AnalysisState | null }
   | { type: "saving"; on: boolean }
   | { type: "stats"; patch: Stats }
   | { type: "error"; message: string } | { type: "notice"; message: string } | { type: "flash"; message: string };
 
 export function programReducer(s: ProgramState, a: ProgramAction): ProgramState {
   switch (a.type) {
-    case "program": return { ...s, program: a.program, funcs: [], map: null, initialRows: [], undo: noUndo, stats: {}, reading: false, browseError: "" };
+    case "program": return { ...s, program: a.program, funcs: [], map: null, initialRows: [], undo: noUndo, analysis: null, stats: {}, reading: false, browseError: "" };
     case "openStarted": return { ...s, error: "", notice: "", progress: null, opening: { path: a.path, startedAt: a.startedAt, cancelling: false } };
     case "openEnded": return { ...s, opening: null, progress: null };
     case "progress": return !s.opening || s.opening.cancelling ? s : { ...s, progress: a.p }; // late progress after cancel is dropped
@@ -64,6 +67,7 @@ export function programReducer(s: ProgramState, a: ProgramAction): ProgramState 
     case "readingDone": return { ...s, reading: false };
     case "funcs": return { ...s, funcs: a.funcs };
     case "undo": return { ...s, undo: a.u };
+    case "analysis": return { ...s, analysis: a.state };
     case "saving": return { ...s, saving: a.on };
     case "stats": return { ...s, stats: { ...s.stats, ...a.patch } };
     case "error": return { ...s, error: a.message };

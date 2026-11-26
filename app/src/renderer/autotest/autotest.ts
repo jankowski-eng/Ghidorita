@@ -1,4 +1,4 @@
-import type { Address, FunctionInfo } from "../../../../protocol";
+import type { Address, AnalysisState, FunctionInfo } from "../../../../protocol";
 import { AddrMap } from "../addrmap";
 import type { ApplicationBackend, ProgramOperations } from "../backend";
 import type { ImportOptions } from "../../../../protocol";
@@ -9,6 +9,7 @@ import { runR5Flow } from "./autotestR5";
 import { runListingFlow } from "./autotestListing";
 import { runFocusedFlow } from "./autotestFlows";
 import { runAddrFlow } from "./autotestAddr";
+import { runAnalysisFlow } from "./autotestAnalysis";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestControls {
@@ -23,6 +24,9 @@ export interface AutotestCtx extends AutotestControls {
   backend: ApplicationBackend;
   program(): ProgramOperations;
   open(path: string): Promise<FunctionInfo[] | undefined>;
+  /** open with analysis "background" (open() above waits for the analysis, the older flows need that) */
+  openBg(path: string, opts?: ImportOptions): Promise<FunctionInfo[] | undefined>;
+  analysis(): AnalysisState | null;
   select(entry: Address): Promise<void>;
   /** navigate to any address like Go to Address does */
   goAddr(address: Address): Promise<void>;
@@ -211,7 +215,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const loader = d.querySelector<HTMLSelectElement>('select[aria-label="Loader"]')!;
       const preselectedPreferred = /preferred/.test(loader.selectedOptions[0].textContent!);
       press(loader, "Enter"); // defaults
-      await waitFor(() => !dlg("Import binary") && c.status().opened, 300000, "default open");
+      await waitFor(() => !dlg("Import binary") && c.status().opened && !c.status().opening, 300000, "default open"); // opened flips before the listing is read: a request made while opening is ignored
       const defaultSent = JSON.stringify(c.openAttempts[sentStart]);
       d = await importDlg(file);
       await waitFor(() => !openBtn(d).disabled, 10000, "import dialog ready 2");
@@ -246,13 +250,14 @@ export async function runAutotest(file: string, c: AutotestCtx) {
 
       result.importOk = importOk;
       await c.open(file); // use the default import for the remaining checks
+      result.analysisOk = await runAnalysisFlow(file, c, result); // background open, status bar indicator, cancel, resume, browser Run full analysis; needs the fast key unseen (the R5 flow opens it); ends with the default import open
       result.r5Ok = await runR5Flow(file, c, result); // strings, references from, comment prefill, labels, import profile; ends with the default import open
       result.saveOk = dirtyShown && savedClean && !m0?.dirty;
       const bo = result.browserOpen as any, cl = result.close as any;
       result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.navFindOk = await runNavFlow(await c.program().functions.list(), c, result);
-      result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && result.analysisOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) result.ok = (await runListingFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
       if (result.ok) result.ok = (await runAddrFlow(file, await c.program().functions.list(), c, result)) && c.errors.length === 0;
       if (result.ok) {

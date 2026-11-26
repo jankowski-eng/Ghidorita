@@ -15,6 +15,7 @@ export async function runAnalysisFlow(file: string, c: AutotestCtx, result: Reco
   await waitFor(() => document.querySelectorAll(".lbox .lrow").length > 0, 15000, "listing rows");
   R.listingWhileRunning = state() === "running";
   R.indicator = await waitFor(() => /Analyzing/.test(bar()?.textContent ?? "") && !!btn("Cancel analysis"), 10000, "analysis indicator").then(() => true);
+  await waitFor(() => (c.analysis()?.done ?? 0) > 0, 15000, "analysis progress event"); // the first analysis_state after the reply: only then is Cancel certain to hit a running analysis
   const f0 = c.funcCount();
   btn("Cancel analysis")!.click();
   await waitFor(() => state() === "cancelled", 60000, "analysis cancelled");

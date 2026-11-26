@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { analysisRunning } from "../analysis";
 import { onProgramChanged } from "../changes";
 import { useSession } from "../store/session";
 import type { TabsApi } from "../useTabs";
@@ -19,6 +20,6 @@ export function useProgramReactions(tabs: TabsApi) {
       currentFunctions: () => store.getState().funcs,
       setUndo: (u) => { if (isCurrent()) store.dispatch({ type: "undo", u }); },
       refreshXrefs: () => isCurrent() && views.dispatch({ type: "set", patch: (v) => ({ xrefVersion: v.xrefVersion + 1 }) }),
-    }).catch((e) => { if (isCurrent()) session.fail(e); });
+    }, analysisRunning(store.getState().analysis)).catch((e) => { if (isCurrent()) session.fail(e); });
   }), []); // eslint-disable-line
 }

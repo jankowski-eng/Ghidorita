@@ -58,3 +58,10 @@ test("createStore: notifies on change only, unsubscribe works", () => {
   st.dispatch("noop"); st.dispatch("inc"); off(); st.dispatch("inc");
   assert.deepEqual([st.getState(), calls], [2, 1]);
 });
+
+test("program: the analysis state belongs to one program and is dropped with it", () => {
+  const running = { state: "running", analysis: "partial", profile: "full", analyzer: "Stack", done: 2, pct: 10 };
+  const s = step(initialProgram, { type: "program", program: { session: { sessionId: "a" } } }, { type: "analysis", state: running });
+  assert.deepEqual(s.analysis, running);
+  assert.equal(step(s, { type: "program", program: null }).analysis, null);
+});

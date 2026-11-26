@@ -38,7 +38,7 @@ export function WelcomePane() {
         actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
       <div className="notice">
         <p>{projects ? "Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below." : "Open a file to browse its listing."}</p>
-        {projects && <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={(entry) => void s.open(entry.sourcePath ?? entry.name, {}, entry)} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} />}
+        {projects && <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={(entry) => void s.openStored(entry)} onFull={(entry) => void s.openStored(entry, "full")} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} />}
       </div>
     </>
   );
