@@ -44,6 +44,7 @@ export function App() {
   const openingRef = useRef(false);
   const openedRef = useRef(false);
   const cancellingRef = useRef(false);
+  const funcsCountRef = useRef(0);
   const goSeq = useRef(0);
   const refetch = useRef(latest()).current;
   const topAddrRef = useRef<Address>("");
@@ -93,7 +94,7 @@ export function App() {
     try {
       await rpc.call("open_binary", { path: p });
       const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
-      setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
+      funcsCountRef.current = fl.length; setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
       if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
     } catch (e) {
@@ -144,9 +145,8 @@ export function App() {
       };
       autotestRef.current = !!cfg.autotest;
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), cancelOpen: () => api.current.cancelOpen(), cancelFile: cfg.cancelFile,
-        status: () => ({ opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
-        searchAndGo: async (q) => { const h = (await searchSymbols(q, 100)).find((x) => x.kind === "function"); if (!h) return null; await api.current.go(h.address, "search"); return h.address; },
+        open: (p) => api.current.open(p), cancelFile: cfg.cancelFile,
+        status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
         select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
         selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
@@ -181,7 +181,7 @@ export function App() {
   return (
     <div className="app">
       <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={!!opening}
-        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onOpen={() => open(path)}
+        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onOpen={() => open(path)}
         onPick={async () => { const p = await window.host.pickFile(); if (p) { setPath(p); open(p); } }} />
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
       {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onClose={() => setSearchOpen(false)} />}

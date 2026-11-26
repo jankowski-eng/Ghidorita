@@ -7,10 +7,8 @@ export interface AutotestCtx {
   open(path: string): Promise<FunctionInfo[] | undefined>;
   select(entry: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
-  cancelOpen(): void;
   cancelFile: string | null;
-  status(): { opened: boolean; opening: boolean; phase: string; notice: string };
-  searchAndGo(query: string): Promise<Address | null>;
+  status(): { funcs: number; opened: boolean; opening: boolean; phase: string; notice: string };
   back(): void;
   forward(): void;
   selected(): Address | null;
@@ -21,19 +19,41 @@ export interface AutotestCtx {
   setPath(p: string): void;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
+  const t0 = Date.now();
+  for (;;) { const v = f(); if (v) return v; if (Date.now() - t0 > ms) throw new Error("timeout waiting for " + what); await sleep(50); }
+}
+// real-UI helpers: find by role/label, set a React-controlled input the way a user's typing does, dispatch real key events
+const byLabel = <E extends HTMLElement>(role: string, label: string) => document.querySelector<E>(`[role="${role}"][aria-label="${label}"]`);
+const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+const typeInto = (el: HTMLInputElement, text: string) => {
+  el.focus();
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, text);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+};
+const press = (el: HTMLElement, key: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
 export async function runAutotest(file: string, c: AutotestCtx) {
     const result: Record<string, unknown> = { ok: false };
     try {
       c.setPath(file);
-      if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again
-        const p = c.open(c.cancelFile), t0 = Date.now();
-        while (c.status().phase !== "analysis" && c.status().opening && Date.now() - t0 < 120000) await new Promise((r) => setTimeout(r, 100));
-        const reached = c.status().phase;
-        c.cancelOpen(); await p;
+      if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again, all through the UI
+        const openViaUi = () => { const i = document.querySelector<HTMLInputElement>('input[aria-label="Binary path"]')!; typeInto(i, c.cancelFile!); press(i, "Enter"); };
+        openViaUi();
+        await waitFor(() => c.status().phase === "analysis", 120000, "analysis phase");
+        const dlg = byLabel("dialog", "Opening binary")!;
+        const cancelBtn = [...dlg.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!;
+        cancelBtn.click();
+        await waitFor(() => !c.status().opening, 30000, "open to end after Cancel");
         const st = c.status();
-        const again = await Promise.race([c.open(c.cancelFile), new Promise<undefined>((r) => setTimeout(() => r(undefined), 300000))]); // needs a never-analyzed, non-trivial binary (see README)
-        result.cancel = { phaseAtCancel: reached, openedAfterCancel: st.opened, notice: st.notice, reopenFunctions: again?.length ?? 0, openedAfterReopen: c.status().opened };
-        result.cancelOk = reached === "analysis" && !st.opened && /cancel/i.test(st.notice) && !!again?.length && c.status().opened;
+        const emptyState = !document.querySelector(".main") && /Open a binary to begin/.test(document.body.textContent ?? "");
+        openViaUi();
+        await waitFor(() => c.status().opening, 5000, "reopen to start");
+        await waitFor(() => !c.status().opening, 300000, "reopen to finish"); // needs a never-analyzed, non-trivial binary (see README)
+        const after = c.status();
+        result.cancel = { openedAfterCancel: st.opened, emptyState, notice: st.notice, reopenFunctions: after.funcs, openedAfterReopen: after.opened };
+        result.cancelOk = !st.opened && emptyState && /cancel/i.test(st.notice) && after.funcs > 0 && after.opened;
       }
       const fl = await c.open(file);
       if (!fl?.length) throw new Error("no functions");
@@ -65,11 +85,18 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.afterBackTop = c.topAddr();
       c.forward(); await new Promise((r) => setTimeout(r, 1000));
       result.afterForwardTop = c.topAddr();
-      const q = fl[Math.min(5, fl.length - 1)].name; // symbol search -> navigate -> listing top row is the result
-      const hit = await c.searchAndGo(q);
-      await new Promise((r) => setTimeout(r, 1000));
-      result.search = { query: q, address: hit, listingTop: c.topAddr() };
-      result.searchOk = !!hit && c.topAddr() === hit;
+      // symbol search through the real panel: click Search, type, wait for hits, press Enter; focus must come back
+      const q = fl[Math.min(5, fl.length - 1)].name;
+      const sbtn = button("Search symbols")!; sbtn.focus(); sbtn.click();
+      const box = await waitFor(() => document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Symbol name"]'), 5000, "search panel");
+      typeInto(box, q);
+      const opt = await waitFor(() => document.querySelector<HTMLElement>('#sym-list [role="option"][aria-selected="true"]'), 5000, "search results");
+      const hit = opt.querySelector(".a")!.textContent!;
+      press(box, "Enter");
+      await waitFor(() => !byLabel("dialog", "Search symbols"), 5000, "search panel to close");
+      await sleep(1000);
+      result.search = { query: q, address: hit, listingTop: c.topAddr(), focusRestored: document.activeElement === sbtn };
+      result.searchOk = c.topAddr() === hit && document.activeElement === sbtn;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.ok = result.navOk && result.searchOk && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
     } catch (e) { c.fail(e); }
