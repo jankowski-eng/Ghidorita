@@ -42,7 +42,7 @@ Other modes:
 ```bash
 MOCK=1 npm start                    # fake sidecar, 2M fake rows
 AUTOTEST=/bin/ls npm start          # scripted flow, prints AUTOTEST_RESULT, writes app/out/screenshot.png
-cd ../sidecar && .venv/bin/python -m pytest -s test_smoke.py   # sidecar smoke test on /bin/ls, writes timings.json
+cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: test_smoke.py (timings.json) + test_backend.py (v1 API)
 cd ../app && npm test                                          # address map unit test
 BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompile measurements in the renderer
 ../sidecar/.venv/bin/python ../bench/bench_sidecar.py <binary> /tmp/bench-projects out.json   # sidecar-level measurements
