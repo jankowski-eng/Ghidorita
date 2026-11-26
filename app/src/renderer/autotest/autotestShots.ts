@@ -34,7 +34,7 @@ async function graphShot(fl: { name: string; entry: string; size: number }[], c:
   need(g.blocks.length >= 3, "function with at least three blocks");
   await c.select(f.entry);
   await waitFor(() => document.querySelector(".editor")?.getBoundingClientRect().height, 10000, "decompiler visible");
-  press(document.body, " ");
+  c.command({ type: "graph" }); // the graph key is a menu accelerator
   const nodes = () => [...document.querySelectorAll<SVGGElement>('.graph g[role="button"]')];
   await waitFor(() => nodes().length === g.blocks.length, 15000, "one node per block");
   need(nodes().some((n) => n.getAttribute("aria-current")), "the block at the cursor is highlighted");
