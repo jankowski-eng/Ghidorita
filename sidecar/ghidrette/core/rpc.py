@@ -30,7 +30,7 @@ def rpc(lane="R", job=False, busy_ok=False, scoped=False):
 
 
 class Method:
-    def __init__(self, name, fn, lane, job, busy_ok, scoped):
+    def __init__(self, name, fn, lane, job, busy_ok, scoped=False):
         self.name, self.fn, self.lane, self.job, self.busy_ok, self.scoped = name, fn, lane, job, busy_ok, scoped
 
     def describe(self):
