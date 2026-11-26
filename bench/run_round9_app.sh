@@ -5,7 +5,7 @@ export JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/C
 export GHIDRA_INSTALL_DIR=${GHIDRA_INSTALL_DIR:-/Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV}
 BIN=/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis
 PROJ=${BIG_PROJECTS:?set BIG_PROJECTS}
-OUT=results_round6
+OUT=results_round9
 while [ ! -f $OUT/DONE_OPEN ]; do sleep 30; done
 (cd ../app && npm run build >/dev/null 2>&1)
 for i in 1 2 3; do

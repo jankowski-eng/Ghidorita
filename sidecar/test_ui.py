@@ -3,7 +3,7 @@ import json, os, subprocess
 
 import pytest
 
-from test_backend import HERE, JAVA, Client, Proc, ghidra_dir, run
+from testlib import HERE, JAVA, Client, Proc, ghidra_dir, run
 from test_big import BIG, PROJECTS
 
 APP = os.path.join(HERE, "..", "app")

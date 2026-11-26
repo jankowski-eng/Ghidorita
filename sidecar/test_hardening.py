@@ -1,4 +1,4 @@
-"""Round 6 (hardening): defects that were reproduced, each with the test that fails on the old code. Real Ghidra on /bin/ls (one analysis, copied per test)."""
+"""Round 9 (hardening): defects that were reproduced, each with the test that fails on the old code. Real Ghidra on /bin/ls (one analysis, copied per test)."""
 import asyncio, os
 
 from ghidrette.core.errors import RpcError

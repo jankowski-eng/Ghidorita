@@ -1,4 +1,4 @@
-"""Paths that need a real large binary (round 6). Not run unless its analysis is already stored (a first open takes 10-40 minutes):
+"""Paths that need a real large binary (round 9). Not run unless its analysis is already stored (a first open takes 10-40 minutes):
 
   SPIKE_BIG_BINARY    default /opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis (66.7 MB)
   SPIKE_BIG_PROJECTS  projects dir holding it analysed with the fast profile, default ../bench/projects/exegesis-fast
@@ -8,7 +8,7 @@ import asyncio, os, time
 
 import pytest
 
-from test_backend import CANCELLED, HERE, Client, Proc, run
+from testlib import CANCELLED, HERE, Client, Proc, run
 
 TIMEOUT = -32003
 BIG = os.environ.get("SPIKE_BIG_BINARY", "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis")
