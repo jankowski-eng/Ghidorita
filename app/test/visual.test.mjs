@@ -4,7 +4,7 @@ import { build } from "esbuild";
 
 const load = async (file) => import("data:text/javascript," + encodeURIComponent((await build({ entryPoints: [new URL(file, import.meta.url).pathname], bundle: true, format: "esm", write: false })).outputFiles[0].text));
 const { KEYS, keyId, keyOf, isHint, showKey, hintLine, matchesKey } = await load("../src/keys.ts");
-const { dotOf, covStyle, COLORS } = await load("../src/renderer/palette.ts");
+const { dotOf, slotDot, covStyle, COLORS } = await load("../src/renderer/palette.ts");
 const { isBackEdge } = await load("../src/renderer/graphLayout.ts");
 const { ACTIONS } = await load("../src/renderer/commandActions.ts");
 const { readFileSync } = await import("node:fs");
@@ -82,4 +82,10 @@ test("the debugger's keys are in the table, are real accelerators, and the comma
   assert.equal(isHint("edit:rename"), true); // plain letters stay hints
   for (const [label] of ACTIONS.filter((a) => a.cmd.type === "debug" && a.cmd.action !== "attach" && a.cmd.action !== "detach").map((a) => [a.label])) assert.ok(label);
   assert.equal(showKey("Shift+F10", true), "⇧F10");
+});
+
+test("stack slots: analysis and default names get the amber ring, a person's name is solid", () => {
+  for (const src of ["analysis", "default"]) assert.deepEqual([slotDot(src).color, slotDot(src).shape], [COLORS.inferred, "ring"]);
+  assert.equal(slotDot("user").shape, "solid"); assert.equal(slotDot("imported").color, COLORS.library);
+  assert.notEqual(slotDot("default").label, slotDot("analysis").label);
 });

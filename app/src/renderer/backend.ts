@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
+  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -41,6 +41,8 @@ export interface ListingReads {
 export interface FunctionNavigation {
   list(): Promise<FunctionInfo[]>;
   containing(params: { address: Address }): Promise<{ name: string; entry: Address; size: number; signature: string } | null>;
+  /** the function's stack variables by offset (capability "stackFrame"); a quick read on thread R, not a Job */
+  stackFrame(params: { entry: Address }): Promise<StackFrame>;
 }
 
 export interface Decompilation {

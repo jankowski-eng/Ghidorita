@@ -66,6 +66,7 @@ export const results = {
   remove_bookmark: object,
   get_bytes: shape({ address, length: positive, bytes: str }),
   list_functions: array(shape({ ...labelFields, source: optional(source) })),
+  stack_frame: shape({ entry: address, name: str, localSize: count, parameterSize: count, slots: array(shape({ offset: integer, size: positive, name: str, dataType: str, parameter: bool, source })) }),
   get_function_at: nullable(shape({ ...labelFields, signature: str })),
   decompile: shape({ text: str, cached: bool, warnings: optional(array(str)), tokens: array(shape({
     line: count, colStart: count, colEnd: count, kind: oneOf("keyword", "type", "function", "variable", "param", "const", "comment", "label", "field", "default"),

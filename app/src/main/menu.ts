@@ -77,6 +77,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: acc("dock:symbols"), click: () => send({ type: "dock", panel: "symbols" }) },
         { id: "strings", label: "Defined Strings", enabled: state.hasProgram && caps.has(dockCapability.strings), accelerator: acc("dock:strings"), click: () => send({ type: "dock", panel: "strings" }) },
         { id: "changes", label: "Changes", enabled: state.hasProgram && caps.has(dockCapability.changes), accelerator: acc("dock:changes"), click: () => send({ type: "dock", panel: "changes" }) },
+        { id: "stack", label: "Stack Frame", enabled: state.hasProgram && caps.has(dockCapability.stack), click: () => send({ type: "dock", panel: "stack" }) }, // Ghidra has no key for its stack window
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: acc("dock:calls"), click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: acc("dock:bookmarks"), click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },

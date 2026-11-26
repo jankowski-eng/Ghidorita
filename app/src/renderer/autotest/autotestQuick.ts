@@ -85,6 +85,32 @@ async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   R.calls = { entry: f.entry, callers: r.callers.length, callees: r.callees.length, clicked: target.name, thunks: [...r.callers, ...r.callees].filter((e) => e.thunk).length };
 }
 
+/** The Stack panel follows the function at the cursor: one row per slot, amber rings on analysis/default slots, a click selects (Rename/Retype enable). */
+async function stackStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("stackFrame"), "provider has no stackFrame capability");
+  let pick: { f: FunctionInfo; slots: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["functions"]["stackFrame"]>>["slots"] } | null = null;
+  for (const f of fl.slice(0, 300)) {
+    const slots = (await c.program().functions.stackFrame({ entry: f.entry })).slots;
+    if (slots.length >= 2 && slots.some((s) => s.source === "analysis" || s.source === "default")) { pick = { f, slots }; break; }
+  }
+  need(pick, "no function with a stack frame");
+  const { f, slots } = pick!;
+  await c.select(f.entry);
+  c.command({ type: "dock", panel: "stack" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Stack frame"]'), 5000, "stack panel");
+  const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
+  await waitFor(() => rows().length === slots.length && region.textContent!.includes(`${slots.length} slots`), 10000, "stack rows");
+  const inferred = slots.filter((s) => s.source === "analysis" || s.source === "default").length;
+  need(region.querySelectorAll(".psrc.ring").length === inferred, `amber rings on the ${inferred} inferred slots`);
+  const rename = region.querySelector<HTMLButtonElement>('button[aria-label="Rename slot"]');
+  if (rename) {
+    need(rename.disabled, "Rename needs a selected slot");
+    rows()[0].click();
+    await waitFor(() => !region.querySelector<HTMLButtonElement>('button[aria-label="Rename slot"]')!.disabled, 5000, "Rename enabled after a click");
+  }
+  R.stack = { entry: f.entry, slots: slots.length, inferred, editable: !!rename };
+}
+
 async function bookmarkStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>, result: Record<string, any>) {
   need(c.backend.capabilities.has("bookmarks"), "provider has no bookmarks capability");
   await c.goAddr(fl[0].entry);
@@ -134,6 +160,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   const R: Record<string, any> = (result.quick = {});
   await copyStep(fl, c, R);
   await callsStep(fl, c, R);
+  await stackStep(fl, c, R);
   await bookmarkStep(fl, c, R, result);
   return true;
 }

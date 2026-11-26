@@ -102,6 +102,10 @@ export interface ListingRow {
   dataType?: string;       // data rows only (absent on instructions): the data type's name as define_data takes it ("dword", "char[20]", "char *"; a structure, union, enum or typedef as its category path, "/A/S"); "undefined" for an undefined byte
 }
 
+/** One stack variable. offset: the stack offset of its first byte (parameters are positive, locals negative); source: who made it (Ghidra's SourceType: user = a person, analysis = a guess, imported = from the file's debug info, default = Ghidra's own name). */
+export interface StackSlot { offset: number; size: number; name: string; dataType: string; parameter: boolean; source: SymbolSource }
+export interface StackFrame { entry: Address; name: string; localSize: number; parameterSize: number; slots: StackSlot[] }
+
 export interface FunctionHeader {
   signature: string;          // C prototype as Ghidra prints it
   convention?: string;        // calling convention name, absent when unknown/default
@@ -139,7 +143,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -198,6 +202,8 @@ export interface Methods {
   // ---- reads ----
   // Bytes as hex ("48 8b 05"), 1..65536 of them; NotFound unless every byte is initialized memory. Lane R. Capability "bytes".
   get_bytes: { params: { address: Address; length: number }; result: { address: Address; length: number; bytes: string } };
+  // Stack frame of a function: its stack variables (parameters and locals) by offset. Lane R. Capability "stackFrame".
+  stack_frame: { params: { entry: Address }; result: StackFrame };
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
