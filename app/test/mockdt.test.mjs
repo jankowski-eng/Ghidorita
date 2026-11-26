@@ -16,7 +16,7 @@ const err = async (m, p, code = -32602) => { const r = await call(m, p); assert.
 test.after(() => { ws.close(); proc.kill(); });
 
 test("mock data types: struct editor, apply, undo/redo, enum, categories", async () => {
-  await ok("open_binary", { path: "/x/prog" });
+  await ok("open_binary", { path: "/x/prog", analysis: "blocking" });
   assert.deepEqual((await ok("dt_sources")).map((s) => s.id), ["program", "builtin"]);
   assert.deepEqual(await ok("create_data_type", { kind: "struct", name: "S1" }), { path: "/S1" });
   await err("create_data_type", { kind: "struct", name: "S1" });

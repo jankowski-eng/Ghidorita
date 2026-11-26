@@ -48,10 +48,15 @@ export interface ChangeDeps {
  * the function list only when names/functions can have changed, tabs (all of them for name-affecting kinds, else those
  * overlapping the ranges), the listing and the xrefs. Views keep their place: tabs re-decompile in place (the editor maps scroll/cursor onto
  * the new text); the listing refetches only its buffered rows that intersect the ranges (all from the top row when a type changed) and keeps
- * its row cursor.
+ * its row cursor. While an analysis runs (analysisRunning) only the function list and the listing refresh; the program_changed that follows its end reloads the rest.
  */
-export async function onProgramChanged(p: Params, d: ChangeDeps): Promise<void> {
+export async function onProgramChanged(p: Params, d: ChangeDeps, analysisRunning = false): Promise<void> {
   d.setUndo(p.undo);
+  if (analysisRunning) { // about one per second, always everything: refresh what is cheap to refresh and shown (function list, listing rows in place); tabs (decompiles) and xrefs wait for the end
+    if (functionsMayChange(p, d.currentFunctions())) await d.refetchFunctions();
+    d.refreshListing(p.ranges);
+    return;
+  }
   const broad = nameAffecting(p.kinds);
   const funcs = broad && functionsMayChange(p, d.currentFunctions()) ? await d.refetchFunctions() : d.currentFunctions();
   const open = d.tabs();

@@ -252,6 +252,7 @@ function anEnd(state, analysis) {
   an = { ...an, state, analysis, analyzer: "", pct: state === "done" ? 100 : -1 };
   if (analysis === "done") anFuncs = NFUNC;
   anRecord(); anPublish();
+  anNotify?.("program_changed", { ranges: null, kinds: ["symbol", "function", "code", "data", "comment", "type", "other"], undo: undoState() }); // like the sidecar: one last refresh after the end
 }
 function anStart(notify, profile) {
   anNotify = notify; const upgrade = an.analysis === "done"; // fast -> full: the functions are all there already

@@ -48,7 +48,7 @@ def test_smoke(tmp_path):
                 return await reply(nid[0])
 
             t = time.monotonic()
-            r = await call("open_binary", path=binary)
+            r = await call("open_binary", path=binary, analysis="blocking")
             timings["import_analysis_s"] = round(time.monotonic() - t, 2)
             assert "result" in r and r["result"]["persisted"] is False, r
             phases = {n["params"]["phase"] for n in notes if n["method"] == "progress"}
@@ -58,7 +58,7 @@ def test_smoke(tmp_path):
             assert fns
             t = time.monotonic()
             notes.clear()
-            r2 = await call("open_binary", path=binary)  # reopen: loaded from the project, no analysis
+            r2 = await call("open_binary", path=binary, analysis="blocking")  # reopen: loaded from the project, no analysis
             timings["reopen_s"] = round(time.monotonic() - t, 2)
             assert r2["result"]["persisted"] is True and r2["result"]["programId"] == r["result"]["programId"], r2
             assert not any(n["params"]["phase"] == "analysis" for n in notes if n["method"] == "progress")
