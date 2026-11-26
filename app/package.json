@@ -1,5 +1,5 @@
 {
-  "name": "ghidra-desktop-spike-app",
+  "name": "ghidorita",
   "version": "0.0.1",
   "private": true,
   "main": "out/main/index.js",
