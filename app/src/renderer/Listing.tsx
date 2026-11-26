@@ -25,7 +25,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
-  const b = useRef({ rows: [] as ListingRow[], lines: [] as Line[], top: 0, atStart: false, atEnd: false, busy: false, gen: 0, view: 30, lastSet: -1, acc: 0, cur: "" as Address });
+  const b = useRef({ rows: [] as ListingRow[], lines: [] as Line[], top: 0, atStart: false, atEnd: false, busy: false, failed: false, gen: 0, view: 30, lastSet: -1, acc: 0, cur: "" as Address });
   const st = b.current;
   const render = () => tick((n) => n + 1);
 
@@ -50,7 +50,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
 
   // keep the buffer filled around the top line; loops until satisfied
   const ensure = async () => {
-    if (st.busy || !st.rows.length) return;
+    if (st.busy || st.failed || !st.rows.length) return; // after an error, wait for the next user action instead of retrying in a loop
     const gen = st.gen;
     const needFwd = !st.atEnd && st.top + st.view + MARGIN > st.lines.length;
     const needBack = !st.atStart && st.top < MARGIN;
@@ -72,7 +72,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
       trim();
       topAddrRef.current = st.lines[st.top]?.row.address ?? topAddrRef.current;
       render();
-    } catch (e) { onError(e); }
+    } catch (e) { st.failed = true; onError(e); }
     finally { if (gen === st.gen) { st.busy = false; ensure(); } }
   };
 
@@ -95,6 +95,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
   };
   const moveCursor = (n: number) => {
     if (!st.rows.length) return;
+    st.failed = false;
     let i = curIndex();
     if (i < 0) { const top = st.lines[st.top]?.row; i = Math.max(0, top ? st.rows.indexOf(top) : 0); n = 0; } // cursor not buffered: start at the top row
     const ni = Math.max(0, Math.min(st.rows.length - 1, i + n)), row = st.rows[ni];
@@ -110,7 +111,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
 
   const jump = async (address: Address, thumb: boolean) => {
     const gen = ++st.gen;
-    st.busy = false;
+    st.busy = false; st.failed = false;
     try {
       const rows = await fetchRows(address, "forward");
       if (gen !== st.gen) return;
@@ -125,6 +126,7 @@ export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onEr
 
   const scrollLines = (n: number) => {
     const before = st.top;
+    st.failed = false;
     st.top = Math.max(0, Math.min(st.top + n, maxTop()));
     topAddrRef.current = st.lines[st.top]?.row.address ?? topAddrRef.current;
     syncThumb(); render(); ensure();

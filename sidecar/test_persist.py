@@ -188,7 +188,10 @@ def test_define_data_clear_code_undo_dirty(projects):
 
                 # clear_code
                 n = len(c.notes)
+                far = (await c.ok("listing_rows", address=f, count=40))[-1]  # well past the 8 bytes cleared below
+                assert int(far["address"], 16) >= fi + 16
                 await c.ok("clear_code", address=f, length=8)
+                assert far in await c.ok("listing_rows", address=far["address"], count=1)  # length is honoured, not "to the end"
                 ev = await change(c, n, "Clear code")
                 assert {"code"} <= set(ev["kinds"]) and "data" in ev["kinds"] and ev["undo"]["dirty"] is True
                 assert (await row())[0]["mnemonic"] == "??"

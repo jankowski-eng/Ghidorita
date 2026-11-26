@@ -351,7 +351,10 @@ class Sidecar:
     def close_program(self):
         if self.opening is not None:
             raise RpcError(BUSY, "open_binary in progress")
-        self._close()
+        try:
+            self._close(strict=True)  # a failed save keeps the program (and its edits) open instead of reporting success
+        except RuntimeError as e:
+            raise RpcError(INTERNAL, str(e))
         return {}
 
     # ---- program lifecycle ----
@@ -1085,7 +1088,9 @@ class Sidecar:
             if n < 1:
                 raise RpcError(INVALID, "length must be >= 1")
             lo = a
-            hi = a.getAddressSpace().getMaxAddress() if a.getOffset() + n - 1 > a.getAddressSpace().getMaxAddress().getOffset() else a.add(n - 1)
+            mask = (1 << 64) - 1  # getOffset is a signed long: the max address of a 64-bit space reads as -1
+            top = a.getAddressSpace().getMaxAddress()
+            hi = top if (a.getOffset() & mask) + n - 1 > (top.getOffset() & mask) else a.add(n - 1)
         view = AddressSet(lo, hi).intersect(mem)
         # ClearCmd.applyTo returns true even when it did nothing; an empty transaction would not be undoable
         if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
