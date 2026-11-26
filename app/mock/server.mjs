@@ -290,8 +290,8 @@ const handlers = {
   list_functions() {
     // fn_4000 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
     // get_function_at keeps the real STEP so address-to-function lookups stay consistent
-    const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP }));
-    for (const [a, name] of S.created) out.push({ name, entry: hex(a), size: STRIDE * 4 });
+    const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP, source: S.names.has(i) ? "user" : i % 7 === 0 ? "analysis" : "default" }));
+    for (const [a, name] of S.created) out.push({ name, entry: hex(a), size: STRIDE * 4, source: "user" });
     return out.sort((x, y) => parseInt(x.entry, 16) - parseInt(y.entry, 16));
   },
   decompile({ entry, timeoutSecs }, notify, rid) {

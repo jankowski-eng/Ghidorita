@@ -345,7 +345,7 @@ export function App() {
     try {
       const { ranges } = await rpc.call("load_coverage", { path });
       coverage.current = new Coverage(ranges);
-      setNotice(`Coverage loaded: ${coverage.current.size} ranges (green bar in the listing). File > Clear Coverage removes it.`);
+      setFlash(`Coverage loaded: ${coverage.current.size} range${coverage.current.size === 1 ? "" : "s"} (green bar in the listing)`);
       apiNow_refresh();
     } catch (e) { fail(e); }
   };
