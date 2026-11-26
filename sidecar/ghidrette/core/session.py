@@ -23,6 +23,7 @@ class Session:
         self.program = self.results = self.consumer = None
         self.program_id = None
         self.epoch = 0                    # bumped whenever the program changes (open/close); guarded by lock
+        self.revision = 0                 # bumped after every write; protects prepared variable edits
         self.lock = threading.Lock()      # the program swap: program + epoch (+ lanes.running/active)
         self.undo_snap = clean_undo()
         self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
@@ -93,6 +94,8 @@ class Session:
         finally:
             prog.endTransaction(tx, ok)  # not ok => rolled back, nothing on the undo stack
             prog.flushEvents()  # also on rollback: a decompile that saw the half-applied state must not be cached
+            with self.lock:
+                self.revision += 1
         self.refresh_undo(prog)
         return r
 

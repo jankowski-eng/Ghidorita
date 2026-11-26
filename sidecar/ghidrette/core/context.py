@@ -19,15 +19,16 @@ class Ctx:
         self.project = None
         self.shutdown_hooks = []
 
-    def notify(self, method, params):  # thread-safe
+    def notify(self, method, params, generation=None):  # thread-safe
         def send():
-            if self.ws is not None:
-                asyncio.ensure_future(self._send(json.dumps({"jsonrpc": "2.0", "method": method, "params": params})))
+            if self.ws is not None and (generation is None or generation == self.events.generation):
+                asyncio.ensure_future(self._send(json.dumps({"jsonrpc": "2.0", "method": method, "params": params}), generation))
         self.loop.call_soon_threadsafe(send)
 
-    async def _send(self, s):
+    async def _send(self, s, generation=None):
         try:
-            await self.ws.send(s)
+            if self.ws is not None and (generation is None or generation == self.events.generation):
+                await self.ws.send(s)
         except Exception:
             pass
 

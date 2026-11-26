@@ -81,14 +81,14 @@ class Project:
     def close(self):
         """Shutdown only (thread R, after _close): release the project so Ghidra removes its lock files."""
         if not self.lock.acquire(timeout=30):  # an open that does not stop: leave the project to the OS, Ghidra detects the stale lock
-            log("project still in use by an open, not closing it")
-            return
+            raise RuntimeError("project still in use by an open; close did not finish")
         try:
             gp, self.gp, self.proj = self.gp, None, None
             if gp is not None:
                 gp.close()
         except Exception as e:  # noqa
             log("project close failed:", repr(e))
+            raise
         finally:
             self.lock.release()
 

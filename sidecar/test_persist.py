@@ -145,17 +145,29 @@ def test_sigkill_loses_unsaved_but_keeps_saved(projects):
 def test_snapshot_survives_sigkill(projects):
     async def go():
         proc = Proc(projects, {"SIDECAR_SNAPSHOT_SECS": "1"})
-        async with Client(proc.port) as c:
-            await c.ok("open_binary", path=BIN)
-            a = await fn5(c)
-            await c.ok("rename_symbol", address=a, newName="snapshot_name")
-            await asyncio.sleep(3.5)  # a recovery snapshot has been taken
-        proc.p.kill()
-        proc.p.wait()
-        return a
+        try:
+            async with Client(proc.port) as c:
+                await c.ok("open_binary", path=BIN)
+                a = await fn5(c)
+                await c.ok("rename_symbol", address=a, newName="snapshot_name")
+                assert (await c.ok("undo_state"))["dirty"] is True
+                end = time.monotonic() + 45
+                snapshots = []
+                while time.monotonic() < end:
+                    snapshots = glob.glob(os.path.join(projects, "**", "snapshot*.grf"), recursive=True)
+                    if snapshots:
+                        break
+                    await asyncio.sleep(0.2)
+                assert snapshots, "no Ghidra recovery snapshot within 45s"
+                state = await c.ok("undo_state")  # queued on R: snapshot finished before SIGKILL
+                assert state["dirty"] is True and state["canUndo"] is True
+            return a
+        finally:
+            proc.p.kill()
+            proc.p.wait()
     a = run(go())
     persisted, name = asyncio.run(reopen_name(projects, a))
-    assert persisted is True and name == "snapshot_name"  # recovered, never saved
+    assert persisted is True and name == "snapshot_name"  # recovered from snapshot, never saved
 
 
 def test_save_while_decompiling(projects):

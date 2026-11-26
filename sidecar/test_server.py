@@ -26,6 +26,11 @@ def test_auth_mandatory(tmp_path):
             with pytest.raises(Exception):
                 async with websockets.connect("ws://127.0.0.1:%d/wrong" % port):
                     pass
+            async with websockets.connect("ws://127.0.0.1:%d/s3cret" % port) as ws:
+                await ws.send("x" * ((2 << 20) + 1))
+                with pytest.raises(websockets.exceptions.ConnectionClosedError) as exc:
+                    await ws.recv()
+                assert exc.value.rcvd.code == 1009
         run(go())
     finally:
         p.stdin.close()

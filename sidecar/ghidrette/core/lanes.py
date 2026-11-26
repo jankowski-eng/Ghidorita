@@ -2,7 +2,7 @@
 
   asyncio loop  dispatch, cancel_* (they only flip flags), reply delivery
   R             `jobs` queue, one thread: ALL program reads that are not slow, and ALL writes (edits, undo/redo, save, close)
-  S (scan)      `sjobs` queue, SIDECAR_SCAN_WORKERS threads: symbol table, strings, memory search. Never run on R, so a long scan
+  S (scan)      `sjobs` queue, SIDECAR_SCAN_WORKERS threads: symbol table, strings, memory search, variable-edit preparation. Never run on R, so a long scan
                 cannot delay listing fetches
   D (decomp)    `djobs` queue, SIDECAR_DECOMP_WORKERS threads, each owns one DecompInterface (created, used and disposed on that thread)
   O             one thread per open_binary (import + analysis + save); started by the open lane, at most one at a time (`opening`)
@@ -12,13 +12,18 @@ hand-over; the per-domain locks are documented where they are declared.
 """
 import concurrent.futures, contextlib, os, queue, threading
 
-from .errors import CANCELLED, NO_PROGRAM, RpcError
+from .errors import BUSY, CANCELLED, NO_PROGRAM, RpcError
 
 
 class Job:
     """A decompile request (loop thread creates it, a pool worker runs it)."""
     def __init__(self, epoch):
         self.cancelled, self.mon, self.epoch = False, None, epoch
+
+    def cancel(self):
+        self.cancelled = True
+        if self.mon is not None:
+            self.mon.cancel()
 
 
 class Scan:
@@ -92,9 +97,9 @@ class Worker:
 class Lanes:
     def __init__(self, ctx):
         self.ctx = ctx
-        self.jobs = queue.Queue()    # thread R: reads, edits, undo/redo. Never waits behind a decompile or an open.
-        self.djobs = queue.Queue()   # decompiler pool, one shared queue
-        self.sjobs = queue.Queue()   # scan workers (thread S): symbol table, strings, memory search; one shared queue
+        self.jobs = queue.Queue(maxsize=128)   # thread R: reads, edits, undo/redo
+        self.djobs = queue.Queue(maxsize=128)  # decompiler pool, one shared queue
+        self.sjobs = queue.Queue(maxsize=128)  # scan workers, one shared queue
         self.workers = []
         self.running = set()         # decompile Jobs currently inside a worker; session.lock
         self.active = set()          # Scans currently running; session.lock
@@ -120,6 +125,8 @@ class Lanes:
     def _worker(self, q):
         while True:
             fn, fut = q.get()
+            if fut.cancelled():
+                continue
             try:
                 res, exc = fn(), None
             except BaseException as e:  # noqa
@@ -139,6 +146,8 @@ class Lanes:
             if item is None:
                 continue
             fn, fut = item
+            if fut.cancelled():
+                continue
             try:
                 res, exc = fn(), None
             except BaseException as e:  # noqa
@@ -167,7 +176,10 @@ class Lanes:
 
     def run(self, fn, q=None):
         fut = self.ctx.loop.create_future()
-        (q or self.jobs).put((fn, fut))
+        try:
+            (q or self.jobs).put_nowait((fn, fut))
+        except queue.Full:
+            raise RpcError(BUSY, "worker queue full")
         return fut
 
     def on_r(self, fn):

@@ -1,6 +1,6 @@
 """The open program's lifecycle: open_binary (hash, import, analyze, save, publish; thread O), cancel_open, close, save, undo/redo.
 Closing order matters, see close(). Opens go through ctx.project (thread O holds project.lock for a whole open)."""
-import hashlib, re, threading, time, os
+import asyncio, hashlib, re, threading, time, os
 
 from ..core.args import hx, text_arg
 from ..core.errors import BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NOT_FOUND, RpcError, log
@@ -19,8 +19,7 @@ class Program:
             threading.Thread(target=self._snapshot_loop, daemon=True).start()
 
     def _snapshot_loop(self):
-        """Crash safety: every SIDECAR_SNAPSHOT_SECS, unsaved edits go to Ghidra's recovery file (what the GUI does). Unlike save it
-        keeps the undo history; the next open of the program restores them (_consume). Runs on thread R, like every program write."""
+        """Crash safety: periodically snapshot dirty programs on R; reopening can recover without clearing undo history."""
         secs = float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120"))
         while True:
             time.sleep(secs)
@@ -53,13 +52,13 @@ class Program:
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary in progress")
         try:
-            self.close(strict=True)  # a failed save keeps the program (and its edits) open instead of reporting success
+            self.close()  # a failed save keeps the program (and its edits) open instead of reporting success
         except RuntimeError as e:
             raise RpcError(INTERNAL, str(e))
         return {}
 
     # ---- program lifecycle ----
-    def close(self, strict=False):
+    def close(self):
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
         prog, res, consumer = self.ses.program, self.ses.results, self.ses.consumer
@@ -67,10 +66,8 @@ class Program:
             try:
                 self._save_program(prog, "close")
             except Exception as e:  # noqa
-                if strict:  # replacing the program (open_binary): keep it open rather than drop its unsaved edits
-                    log("close save FAILED, keeping the program open:", repr(e))
-                    raise RuntimeError("save failed before closing the current program, not opening another: %s" % e)
-                log("close save FAILED, edits lost:", repr(e))
+                log("close save FAILED, keeping the program open:", repr(e))
+                raise RuntimeError("save failed before closing the current program: %s" % e) from e
         with self.ses.lock:
             self.ses.program = None
             self.ses.epoch += 1
@@ -82,13 +79,13 @@ class Program:
             for sc in list(self.ctx.lanes.active):
                 sc.cancel()
         self.ctx.events.detach(prog)
+        self.ctx.events.reset()
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and (self.ctx.lanes.active or any(w.busy or w.decomp is not None for w in self.ctx.lanes.workers)):
             time.sleep(0.02)
         stuck = bool(self.ctx.lanes.active) or any(w.busy or w.decomp is not None for w in self.ctx.lanes.workers)
         if stuck:
             log("decompiler or scan worker still busy after 10 s: leaking the old program instead of releasing it under a live reader")
-        self.ctx.events.reset()
         self.ses.results = self.ses.consumer = None
         if not stuck:
             if res is not None:
@@ -107,6 +104,8 @@ class Program:
                 return False
             t0 = time.monotonic()
             prog.getDomainFile().save(TaskMonitor.DUMMY)
+            with self.ses.lock:
+                self.ses.revision += 1
             if why != "save":
                 log("%s save took %.2fs" % (why, time.monotonic() - t0))
             return True
@@ -117,7 +116,8 @@ class Program:
         saved = self._save_program(prog, "save")
         self.ses.refresh_undo(prog)
         if saved:  # Ghidra's save drops the undo/redo stacks and clears dirty: tell the client (empty ranges/kinds = nothing to refetch)
-            self.ctx.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.ses.undo_snap})
+            self.ctx.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.ses.undo_snap},
+                            generation=self.ctx.events.generation)
         return {"saved": saved}
 
     def _publish(self, prog, res, consumer, op, key):
@@ -180,7 +180,6 @@ class Program:
 
     @rpc(lane="open")
     async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None):
-        text_arg(path, "path")
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
         args = (loader, language, compilerSpec, baseAddress, profile)
@@ -195,9 +194,22 @@ class Program:
             self.ctx.loop.call_soon_threadsafe(self.ctx.lanes.settle, fut, res, exc)
         threading.Thread(target=body, daemon=True, name="open").start()
         try:
-            return await fut
+            return await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            op.cancel()
+
+            def finish(f):
+                try:
+                    f.exception()  # the disconnected caller will not consume a failed open
+                except asyncio.CancelledError:
+                    pass
+                if self.ctx.lanes.opening is op:
+                    self.ctx.lanes.opening = None
+            fut.add_done_callback(finish)
+            raise
         finally:
-            self.ctx.lanes.opening = None
+            if fut.done() and self.ctx.lanes.opening is op:
+                self.ctx.lanes.opening = None
 
     def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile):
         """Thread O. One end state for every failure (bad arguments, missing file, cancel, load error): no program is open, nothing is
@@ -205,8 +217,9 @@ class Program:
         res = prog = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
-            self.ctx.lanes.on_r(lambda: self.close(strict=True))  # old program goes first (listener removed, cache cleared, interfaces disposed)
+            self.ctx.lanes.on_r(self.close)  # old program goes first (listener removed, cache cleared, interfaces disposed)
             op.check()
+            text_arg(path, "path")
             if not os.path.isfile(path):
                 raise RpcError(NOT_FOUND, "no such file: %s" % path)
             opts = self._check_options(loader, language, compilerSpec, baseAddress)
@@ -232,13 +245,26 @@ class Program:
                 try:
                     prog, consumer = self._consume(proj, "/" + key)
                 except Exception as e:  # noqa
-                    # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
-                    if op.cancelled or self._not_corruption(e):
-                        raise  # not corruption: never delete a program that may hold saved edits
-                    log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
-                    proj.getProjectData().getFile("/" + key).delete()
-                    persisted = False
-                else:
+                    if self._transient_open_error(e):
+                        for _ in range(10):
+                            op.check()
+                            time.sleep(0.1)
+                            try:
+                                prog, consumer = self._consume(proj, "/" + key)
+                                break
+                            except Exception as retry:  # noqa
+                                if not self._transient_open_error(retry):
+                                    raise
+                        else:
+                            raise  # never delete a saved item just because Ghidra could not access it
+                    else:
+                        # A SIGKILL during the first (non-atomic) save can leave an unreadable item.
+                        if op.cancelled or self._not_corruption(e):
+                            raise  # not corruption: never delete a program that may hold saved edits
+                        log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
+                        proj.getProjectData().getFile("/" + key).delete()
+                        persisted = False
+                if persisted:
                     op.check()
                     self.ctx.project.meta_touch(key)
                     log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
@@ -285,10 +311,14 @@ class Program:
             self.ctx.project.lock.release()
 
     @staticmethod
+    def _transient_open_error(e):
+        return bool(re.search(r"permission denied|access denied|locked|in use|already open", repr(e), re.I))
+
+    @staticmethod
     def _not_corruption(e):
         """True for load failures that say nothing about the file being damaged: locked, a Ghidra version mismatch (older or newer
         build than the one that saved it), or the JVM running out of memory."""
-        if re.search(r"lock|in use|already open|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
+        if Program._transient_open_error(e) or re.search(r"lock|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
             return True
         try:
             name = str(e.getClass().getSimpleName())
@@ -298,7 +328,7 @@ class Program:
 
     @staticmethod
     def _consume(proj, path):
-        """pyghidra.consume_program, but with okToRecover: unsaved edits of a crashed session (see _snapshot_loop) come back."""
+        """pyghidra.consume_program with Ghidra recovery enabled for any valid existing recovery file."""
         from java.lang import Object
         from ghidra.program.model.listing import Program
         from ghidra.util.task import TaskMonitor
@@ -422,6 +452,8 @@ class Program:
         except Exception as e:  # noqa
             raise RpcError(INTERNAL, "%s failed: %s" % ("undo" if undo else "redo", e))
         prog.flushEvents()  # RESTORED -> program_changed (ranges null) and cache clear
+        with self.ses.lock:
+            self.ses.revision += 1
         return self.ctx.session.refresh_undo(prog)
 
     @rpc(lane="R")

@@ -12,19 +12,21 @@ const appDir = path.resolve(__dirname, "../.."); // app/ (this file is app/out/m
 const repo = path.resolve(appDir, "..");
 const outDir = app.isPackaged ? path.join(app.getPath("userData"), "out") : path.join(appDir, "out"); // app.asar is read-only
 let sidecar: ChildProcess | null = null;
+let sidecarStoppedCleanly = false;
 
 const alive = () => !!sidecar && sidecar.exitCode === null && sidecar.signalCode === null;
 // The sidecar saves a dirty program on shutdown (stdin EOF / SIGTERM) and exits only afterwards; a save can take a while on a big
 // program, so the SIGKILL grace is long. It costs nothing when idle (the sidecar exits at once). Hard upper bound, logged.
 const KILL_GRACE_MS = 60_000;
-/** Graceful stop: close stdin + SIGTERM, SIGKILL only after KILL_GRACE_MS. Resolves when the sidecar has exited. */
-function stopSidecar(): Promise<void> {
+/** Graceful stop: close stdin + SIGTERM, SIGKILL only after KILL_GRACE_MS. Returns the sidecar's exit status. */
+function stopSidecar(): Promise<number> {
   const p = sidecar;
-  if (!p || !alive()) return Promise.resolve();
+  if (!p) return Promise.resolve(0);
+  if (!alive()) return Promise.resolve(sidecarStoppedCleanly ? 0 : 1);
   quitting = true; // an exit we asked for is not a crash (no "backend stopped" dialog on SIGINT / uncaught error)
   return new Promise((resolve) => {
     const t = setTimeout(() => { console.error(`sidecar still running after ${KILL_GRACE_MS} ms, SIGKILL (an in-progress save may be lost)`); try { p.kill("SIGKILL"); } catch {} }, KILL_GRACE_MS);
-    p.once("exit", () => { clearTimeout(t); resolve(); });
+    p.once("exit", (code) => { clearTimeout(t); sidecarStoppedCleanly = code === 0; resolve(code ?? 1); });
     try { p.stdin?.end(); } catch {}
     p.kill("SIGTERM");
   });
@@ -56,7 +58,16 @@ app.on("before-quit", (e) => {
   saveBeforeQuit().then((go) => {
     if (!go) return;
     stopped = true; quitting = true;
-    return stopSidecar().then(() => (exitCode === null ? app.quit() : app.exit(exitCode)));
+    return stopSidecar().then((code) => {
+      if (code !== 0) {
+        console.error(`sidecar shutdown failed (${code}); edits may not have been saved`);
+        const opts = { type: "error" as const, buttons: ["OK"], message: "Saving may have failed", detail: "The backend did not complete shutdown successfully. Recent edits may not have been saved." };
+        if (win && !win.isDestroyed()) dialog.showMessageBoxSync(win, opts);
+        else dialog.showMessageBoxSync(opts);
+        app.exit(1);
+      } else if (exitCode === null) app.quit();
+      else app.exit(exitCode);
+    });
   });
 });
 ipcMain.handle("quit-ready", (e, r: unknown) => { const o = r as { ok?: unknown; error?: unknown } | null; if (fromWin(e) && o && typeof o.ok === "boolean") quitSave?.({ ok: o.ok, error: typeof o.error === "string" ? o.error.slice(0, 2000) : undefined }); });
@@ -139,8 +150,8 @@ ipcMain.handle("autotest-done", async (e, result: { ok: boolean }) => {
   if (!fromWin(e)) return;
   await finishAutotest(result);
   stopped = true;
-  await stopSidecar();
-  app.exit(result.ok ? 0 : 1);
+  const code = await stopSidecar();
+  app.exit(result.ok && code === 0 ? 0 : 1);
 });
 async function finishAutotest(result: { ok: boolean; persist?: unknown }) {
   await new Promise((r) => setTimeout(r, 300)); // let the last paint land

@@ -1,7 +1,7 @@
 """Decompiling: the decompiler pool's `decompile` (thread D, each worker owns a DecompInterface), the result cache, the tokenizer.
 
 The cache is shared by the pool and invalidated through events.subscribe (comment/code changes by range, anything else clears it).
-decompile_for_edit is the one function other domains may call (highvars): a decompile for an edit, run on the caller's thread."""
+decompile_for_edit is the one function other domains may call (highvars): a decompile for an edit, run on the caller's scan worker."""
 import contextlib, threading
 from collections import OrderedDict
 
@@ -17,9 +17,9 @@ RANGE_ONLY_KINDS = {"comment", "code"}
 
 @contextlib.contextmanager
 def decompile_for_edit(ctx, prog, func, timeoutSecs, job):
-    """Decompile `func` with a short-lived DecompInterface on the CALLING thread (R) and yield the HighFunction; the interface is
+    """Decompile `func` with a short-lived DecompInterface on the calling scan worker and yield the HighFunction; the interface is
     disposed when the with block ends. `job` is registered for cancel_decompile (its monitor is the one the decompile runs under).
-    Raises Cancelled / Timeout / Internal exactly like the pool's decompile. See highvars._high_edit for why this is not the pool."""
+    Raises Cancelled / Timeout / Internal exactly like the pool's decompile. See highvars._high_edit for the revision check."""
     from ghidra.app.decompiler import DecompInterface
     from ghidra.pyghidra import PyGhidraTaskMonitor
     mon = PyGhidraTaskMonitor(None, None)

@@ -3,7 +3,7 @@ import os, re
 
 from ghidrette.app import App
 
-# lane: R (thread R), R+job (R, cancellable by request id), scan (S pool), decomp (D pool), project (R, Busy during an open),
+# lane: R (thread R), edit (prepare on S, commit on R), file (parse off R), scan (S pool), decomp (D pool), project (R, Busy during an open),
 # project+busy_ok (same, but answered during an open), loop (asyncio loop), open (own thread O)
 GOLDEN = {
     "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop",
@@ -12,9 +12,9 @@ GOLDEN = {
     "list_languages": "project+busy_ok",
     "search_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "search_memory": "scan", "list_data_types": "scan",
     "decompile": "decomp", "variable_uses": "decomp",
-    "rename_variable": "R+job", "retype_variable": "R+job", "auto_create_structure": "R+job",
+    "rename_variable": "edit", "retype_variable": "edit", "auto_create_structure": "edit", "load_coverage": "file",
     **{m: "R" for m in (
-        "list_functions", "load_coverage", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",
+        "list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",
         "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment", "create_function",
         "set_function_signature", "undo", "redo", "define_data", "clear_code", "save", "dt_sources", "dt_children",
         "get_data_type", "create_data_type", "delete_data_type", "rename_data_type", "edit_struct", "edit_enum",

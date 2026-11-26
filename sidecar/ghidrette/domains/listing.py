@@ -2,7 +2,7 @@
 import os
 
 from ..core.args import akey, hx, ref_kind, text_arg
-from ..core.errors import INVALID, NOT_FOUND, RpcError
+from ..core.errors import CANCELLED, INVALID, NOT_FOUND, RpcError
 from ..core.rpc import rpc
 
 SOURCES = {"USER_DEFINED": "user", "ANALYSIS": "analysis", "IMPORTED": "imported", "DEFAULT": "default"}  # SourceType name -> protocol SymbolSource
@@ -26,12 +26,11 @@ class Listing:
         return [{"name": str(f.getName()), "entry": fa(f.getEntryPoint()), "size": int(f.getBody().getNumAddresses()),
                  "source": SOURCES.get(str(f.getSymbol().getSource()), "other")} for f in fns]
 
-    @rpc(lane="R")
-    def load_coverage(self, path):
+    @rpc(lane="file")
+    def load_coverage(self, path, _cancel=None):
         """Text coverage file -> address ranges. One entry per line: `0xSTART-0xEND` (END inclusive) or a single `0xADDR`; blank lines and `#` comments skipped.
         shortcut: plain text only; drcov and other tool formats need converting first, upgrade when a real trace format is wanted."""
         text_arg(path, "path")
-        self.ses.need()
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
         if os.path.getsize(path) > COVERAGE_MAX_BYTES:
@@ -39,6 +38,8 @@ class Listing:
         out = []
         with open(path, encoding="utf-8", errors="replace") as f:
             for n, line in enumerate(f, 1):
+                if _cancel is not None and _cancel.is_set():
+                    raise RpcError(CANCELLED, "coverage parse cancelled")
                 s = line.split("#", 1)[0].strip()
                 if not s:
                     continue

@@ -25,13 +25,14 @@ class Events:
         self.subscribers = []
         self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
         self.plock = threading.Lock()
+        self.generation = 0
 
     def subscribe(self, fn):
         self.subscribers.append(fn)
 
     # ---- the Ghidra listener ----
     def attach(self, prog):
-        lst = self._make_listener(prog)
+        lst = self._make_listener(prog, self.generation)
         prog.addListener(lst)
         self.listener = lst
 
@@ -43,7 +44,7 @@ class Events:
             except Exception:
                 pass
 
-    def _make_listener(self, prog):
+    def _make_listener(self, prog, generation):
         from jpype import JClass, JImplements, JObject, JOverride
         ev_ = self
 
@@ -52,14 +53,14 @@ class Events:
             @JOverride
             def domainObjectChanged(self, ev):
                 try:
-                    ev_._on_events(ev)
+                    ev_._on_events(ev, generation)
                 except Exception as e:  # noqa
                     log("listener error", repr(e))
-                    ev_.record(set(ALL_KINDS), None)
+                    ev_.record(set(ALL_KINDS), None, generation)
         # Ghidra keeps listeners in a weak set: hold a strong reference to the *Java* proxy, or a GC silently drops it
         return JObject(L(), JClass("ghidra.framework.model.DomainObjectListener"))
 
-    def _on_events(self, ev):
+    def _on_events(self, ev, generation):
         from ghidra.program.util import ProgramChangeRecord
         kinds, ranges, broad = set(), [], False
         for r in ev:
@@ -77,14 +78,20 @@ class Events:
                 ranges.append(self.ctx.session.rng(s, e or s))
         if not kinds:
             return
-        self.record(kinds, None if broad else ranges)
+        self.record(kinds, None if broad else ranges, generation)
 
     # ---- recording and emitting ----
-    def record(self, kinds, ranges):
+    def record(self, kinds, ranges, generation=None):
         """A change happened (listener, or an edit that knows its range): invalidate subscribers now, tell the client soon."""
+        with self.plock:
+            generation = self.generation if generation is None else generation
+            if generation != self.generation:
+                return
         for fn in self.subscribers:
             fn(kinds, ranges, ranges is None)
         with self.plock:
+            if generation != self.generation:
+                return
             p = self.pending
             p["kinds"] |= kinds
             if ranges is None:
@@ -95,17 +102,20 @@ class Events:
                 return
             p["armed"] = True
         loop = self.ctx.loop
-        loop.call_soon_threadsafe(lambda: loop.call_later(0.05, self._emit))
+        loop.call_soon_threadsafe(lambda: loop.call_later(0.05, self._emit, generation))
 
     def reset(self):
         """The program is being swapped or closed (thread R): everything derived from it is stale, nothing is announced."""
+        with self.plock:
+            self.generation += 1
+            self.pending.update(ranges=[], kinds=set(), broad=False, armed=False)
         for fn in self.subscribers:
             fn(set(ALL_KINDS), None, True)
-        with self.plock:
-            self.pending.update(ranges=[], kinds=set(), broad=False, armed=False)
 
-    def _emit(self):
+    def _emit(self, generation):
         with self.plock:
+            if generation != self.generation:
+                return
             p = self.pending
             kinds, broad, ranges = sorted(p["kinds"], key=ALL_KINDS.index), p["broad"], sorted(p["ranges"])
             p.update(ranges=[], kinds=set(), broad=False, armed=False)
@@ -117,12 +127,19 @@ class Events:
                 merged[-1][2] = max(merged[-1][2], e)
             else:
                 merged.append([sp, s, e])
-        if broad or len(merged) > 1000:
-            out = None
-        else:
-            ses = self.ctx.session
-            f, prog = ses.fmtr(), ses.program
-            def at(sp, off):
-                return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
-            out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
-        self.ctx.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": self.ctx.session.undo_snap})
+        ses = self.ctx.session
+        with ses.lock:
+            prog = ses.program
+            if prog is None:
+                return
+            if broad or len(merged) > 1000:
+                out = None
+            else:
+                f = ses.fmtr(prog)
+                def at(sp, off):
+                    return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
+                out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
+            undo = ses.undo_snap
+        with self.plock:
+            if generation == self.generation:
+                self.ctx.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": undo}, generation=generation)

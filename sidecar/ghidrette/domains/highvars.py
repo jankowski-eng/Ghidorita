@@ -1,7 +1,7 @@
-"""Edits through the decompiler's high-level variables (thread R, cancellable): rename/retype a variable, auto-create a structure.
+"""Edits through the decompiler's high-level variables (prepare on S, commit on R, cancellable).
 Cross-domain edge: decompile.decompile_for_edit (see ARCHITECTURE.md)."""
 from ..core.args import lim, name_arg, text_arg
-from ..core.errors import INTERNAL, INVALID, NOT_FOUND, RpcError
+from ..core.errors import CANCELLED, INTERNAL, INVALID, NOT_FOUND, RpcError
 from ..core.rpc import rpc
 from .decompile import decompile_for_edit
 
@@ -11,18 +11,29 @@ class HighVars:
         self.ctx, self.ses = ctx, ctx.session
 
     def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job):
-        """rename_variable / retype_variable. Decided: the whole thing runs on thread R with a short-lived DecompInterface
-        (not a pool worker). The HighFunction is only valid for the program state it was decompiled from; every write
-        also runs on R, so no edit can slip between the decompile and the commit. Cost: R is blocked for one decompile.
-        The timeout is the request's `timeoutSecs` (default 30); `cancel_decompile` with the request id cancels it (job)."""
+        """Prepare on a scan worker, then commit on R only if the program and revision still match."""
         text_arg(name, "name")
         timeoutSecs = lim(timeoutSecs, 30)
-        prog, func = self.ses.function(entry)
-        with decompile_for_edit(self.ctx, prog, func, timeoutSecs, job) as hf:
-            sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None)
-            if sym is None:
-                raise RpcError(NOT_FOUND, "no variable %r in function at %s" % (name, entry))
+        with self.ctx.lanes.scanning(job) as prog:
+            with self.ses.lock:
+                revision = self.ses.revision
+            addr = self.ses.addr(entry, prog)
+            func = prog.getFunctionManager().getFunctionAt(addr)
+            if func is None:
+                raise RpcError(NOT_FOUND, "no function at %s" % entry)
+            with decompile_for_edit(self.ctx, prog, func, timeoutSecs, job) as hf:
+                sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None)
+                if sym is None:
+                    raise RpcError(NOT_FOUND, "no variable %r in function at %s" % (name, entry))
+
+        def commit():
+            with self.ses.lock:
+                stale = (job.cancelled or self.ses.program is not prog or
+                         self.ses.epoch != job.epoch or self.ses.revision != revision)
+            if stale:
+                raise RpcError(CANCELLED, "variable edit cancelled or program changed; retry")
             self.ses.edit(tx_name % func.getName(), lambda p: fn(p, func, hf, sym))
+        self.ctx.lanes.on_r(commit)
         return {}
 
     @staticmethod
@@ -39,7 +50,7 @@ class HighVars:
                 return True
         return False
 
-    @rpc(lane="R", job=True)
+    @rpc(lane="edit")
     def rename_variable(self, entry, name, newName, timeoutSecs=30, job=None):
         from ghidra.program.model.pcode import HighFunctionDBUtil
         from ghidra.program.model.symbol import SourceType
@@ -61,7 +72,7 @@ class HighVars:
                                                       HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, SourceType.USER_DEFINED)
         HighFunctionDBUtil.updateDBVariable(sym, None, dt, SourceType.USER_DEFINED)
 
-    @rpc(lane="R", job=True)
+    @rpc(lane="edit")
     def retype_variable(self, entry, name, dataType, timeoutSecs=30, job=None):
         from ghidra.program.model.data import DataTypeConflictHandler
         from ghidra.util.data import DataTypeParser
@@ -77,7 +88,7 @@ class HighVars:
             self._commit_type(prog, func, hf, sym, dt)
         return self._high_edit("Retype variable in %s", entry, name, go, timeoutSecs, job)
 
-    @rpc(lane="R", job=True)
+    @rpc(lane="edit")
     def auto_create_structure(self, entry, name, structName=None, timeoutSecs=30, job=None):
         """Ghidra's "Auto Create Structure" (FillOutStructureHelper, as FillOutStructureCmd uses it) on a decompiler variable:
         infers fields from the load/store offsets through the variable (following it into callees), adds the struct, and
