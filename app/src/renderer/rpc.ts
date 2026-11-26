@@ -1,46 +1,249 @@
-import type { Methods, Notifications } from "../../../protocol";
-import { RpcError, type Backend } from "./backend";
+import { ErrorCode, type ActiveSession, type Capability, type Methods, type Notifications } from "../../../protocol";
+import {
+  BackendError, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenProgress, type ProgramChange,
+  type ProgramLifecycle, type ProgramOperations, type ProjectCatalog, type ProviderEvents,
+} from "./backend";
+import { notifications, object, results, knownCapabilities } from "./wire";
+import { reopenParams } from "./openOptions";
 
+const kinds: Record<number, Failure> = {
+  [ErrorCode.NoProgram]: "noProgram", [ErrorCode.Cancelled]: "cancelled", [ErrorCode.Timeout]: "timeout",
+  [ErrorCode.NotFound]: "notFound", [ErrorCode.Busy]: "busy", [ErrorCode.ProjectLocked]: "projectLocked",
+  [ErrorCode.StaleSession]: "stale", [ErrorCode.InvalidArgument]: "invalid", [ErrorCode.MethodNotFound]: "unsupported",
+};
+type Method = keyof Methods;
+type Params<M extends Method> = Methods[M]["params"];
+type Result<M extends Method> = Methods[M]["result"];
+type Pending = { sessionId?: string; accept(value: unknown): void; reject(error: Error): void };
+type Hooks = {
+  onEdit?(command: string, params: unknown, result: unknown): void;
+  onSessionChanged?(): void;
+  onRequest?(method: string, params: unknown): void;
+};
 
-type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
-
-export class WebSocketBackend implements Backend {
-  private ws!: WebSocket;
+export class WebSocketBackend implements ApplicationBackend {
+  private ws: WebSocket | undefined;
   private nextId = 1;
+  private sessionId: string | undefined;
+  private sessionRevision = 0;
   private pending = new Map<number, Pending>();
-  onNotification: <N extends keyof Notifications>(method: N, params: Notifications[N]) => void = () => {};
+  private progress = new Map<number, (event: OpenProgress) => void>();
+  private changes = new Set<(sessionId: string, event: ProgramChange) => void>();
+  private errors = new Set<(message: string) => void>();
+  capabilities: ReadonlySet<Capability> = new Set();
+  recovery?: { snapshotIntervalSeconds: number };
 
-  connect(port: number, token: string): Promise<void> {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}/${token}`);
-    this.ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data as string);
-      if (msg.id === undefined) return this.onNotification(msg.method, msg.params);
-      const p = this.pending.get(msg.id);
-      if (!p) return;
-      this.pending.delete(msg.id);
-      msg.error ? p.reject(new RpcError(msg.error.code, msg.error.message)) : p.resolve(msg.result);
+  constructor(private hooks: Hooks = {}) {}
+
+  async connect(port: number, token: string): Promise<void> {
+    const ws = this.ws = new WebSocket(`ws://127.0.0.1:${port}/${token}`);
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new BackendError("connection", "Could not connect to the backend"));
+      ws.onmessage = (ev) => this.receive(ev.data);
+      ws.onclose = () => {
+        const error = new BackendError("connection", "The backend connection closed");
+        reject(error);
+        for (const p of this.pending.values()) p.reject(error);
+        this.pending.clear();
+      };
+    });
+    try {
+      const info = await this.send(this.nextId++, "provider_info", {});
+      this.capabilities = knownCapabilities(info.capabilities);
+      this.recovery = this.capabilities.has("recovery") ? info.recovery : undefined;
+    } catch (error) {
+      ws.close();
+      throw new BackendError("protocol", `Backend discovery failed. A provider supporting protocol version 1 is required. ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  private receive(data: unknown) {
+    let reply: unknown;
+    try { reply = typeof data === "string" ? JSON.parse(data) : null; } catch { reply = null; }
+    if (!object(reply) || reply.jsonrpc !== "2.0") {
+      const error = new BackendError("protocol", "Invalid response from the backend");
+      for (const p of this.pending.values()) p.reject(error);
+      this.pending.clear();
+      for (const listener of this.errors) listener(error.message);
+      this.ws?.close();
+      return;
+    }
+    if (reply.id === undefined) {
+      if (reply.method === "progress" && notifications.progress(reply.params)) {
+        const p = reply.params as Notifications["progress"];
+        this.progress.get(p.openId)?.(p);
+      } else if (reply.method === "program_changed" && notifications.program_changed(reply.params)) {
+        const { sessionId, ...event } = reply.params as Notifications["program_changed"];
+        if (sessionId === this.sessionId) for (const listener of this.changes) listener(sessionId, event);
+      } else if (reply.method === "error" && notifications.error(reply.params)) {
+        for (const listener of this.errors) listener((reply.params as Notifications["error"]).message);
+      }
+      return;
+    }
+    const id = reply.id;
+    if (typeof id !== "number") return;
+    const p = this.pending.get(id);
+    if (!p) return;
+    this.pending.delete(id);
+    if (p.sessionId !== undefined && p.sessionId !== this.sessionId) p.reject(this.stale());
+    else if (object(reply.error) && typeof reply.error.code === "number" && typeof reply.error.message === "string") {
+      p.reject(new BackendError(kinds[reply.error.code] ?? "internal", reply.error.message));
+    } else p.accept(reply.result);
+  }
+
+  private stale() { return new BackendError("stale", "Program session is no longer active"); }
+
+  private adopt(session: ActiveSession | null) {
+    if (session?.sessionId === this.sessionId) return;
+    this.sessionId = session?.sessionId;
+    this.sessionRevision++;
+    for (const [id, p] of this.pending) {
+      if (p.sessionId === undefined || p.sessionId === this.sessionId) continue;
+      this.pending.delete(id);
+      p.reject(this.stale());
+    }
+    this.hooks.onSessionChanged?.();
+  }
+
+  readonly lifecycle: ProgramLifecycle = {
+    open: (path, options, onProgress) => {
+      const id = this.nextId++;
+      this.progress.set(id, onProgress);
+      const result = this.send(id, "open_binary", { ...options, path }).then((session) => {
+        this.adopt(session);
+        return session;
+      }).finally(() => this.progress.delete(id));
+      return { result, cancel: async () => this.progress.has(id) && (await this.send(this.nextId++, "cancel_open", { id })).cancelled };
+    },
+    active: async () => {
+      const revision = this.sessionRevision;
+      const session = await this.send(this.nextId++, "active_session", {});
+      if (revision !== this.sessionRevision) throw this.stale();
+      this.adopt(session);
+      return session;
+    },
+    close: async (session) => {
+      await this.send(this.nextId++, "close_program", {}, session.sessionId);
+      this.adopt(null);
+    },
+  };
+  readonly events: ProviderEvents = {
+    onChange: (listener) => { this.changes.add(listener); return () => this.changes.delete(listener); },
+    onError: (listener) => { this.errors.add(listener); return () => this.errors.delete(listener); },
+  };
+  readonly projects: ProjectCatalog = {
+    list: () => this.request("projects", "list_programs", {}),
+    remove: (params) => this.request("projects", "delete_program", params),
+    reopen: (entry, progress) => {
+      const params = reopenParams(entry);
+      if (!this.capabilities.has("projects") || !params) {
+        const error = params ? this.unsupported("projects") : new BackendError("notFound", `${entry.name} has no stored source path. Use File → Open.`);
+        return { result: Promise.reject(error), cancel: async () => false };
+      }
+      const { path, ...options } = params;
+      return this.lifecycle.open(path, options, progress);
+    },
+  };
+  readonly imports: ImportSelection = {
+    choices: (params) => this.request("importOptions", "import_candidates", params),
+    languages: () => this.request("importOptions", "list_languages", {}),
+  };
+
+  program({ sessionId }: ActiveSession): ProgramOperations {
+    const read = <M extends Method>(method: M, params: Params<M>, cap?: Capability) => this.request(cap, method, params, sessionId);
+    const job = <M extends Method>(cap: Capability, method: M, params: Params<M>, cancelWith: "cancel_search" | "cancel_decompile"): Job<Result<M>> => {
+      const id = this.nextId++;
+      const result = this.capabilities.has(cap)
+        ? this.send(id, method, params, sessionId)
+        : Promise.reject(this.unsupported(cap));
+      return { result, cancel: () => {
+        if (this.pending.has(id)) this.send(this.nextId++, cancelWith, { id }).catch(() => {});
+      } };
     };
-    this.ws.onclose = () => { for (const p of this.pending.values()) p.reject(new Error("socket closed")); this.pending.clear(); };
-    return new Promise((res, rej) => { this.ws.onopen = () => res(); this.ws.onerror = () => rej(new Error("ws connect failed")); });
+    const edit = async <M extends Method>(cap: Capability, command: string, method: M, params: Params<M>) => {
+      const result = await read(method, params, cap);
+      if (sessionId !== this.sessionId) throw this.stale();
+      this.hooks.onEdit?.(command, params, result);
+      return result;
+    };
+
+    return {
+      listing: { info: () => read("listing_info", {}), rows: (p) => read("listing_rows", p) },
+      functions: { list: () => read("list_functions", {}), containing: (p) => read("get_function_at", p) },
+      decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile") },
+      references: {
+        xrefsTo: (p) => read("xrefs_to", p, "references"),
+        xrefsFrom: (p) => read("xrefs_from", p, "references"),
+        xrefsToVariable: (p) => read("xrefs_to_variable", p, "variableReferences"),
+        variableUses: (p) => job("variableReferences", "variable_uses", p, "cancel_decompile"),
+      },
+      searches: {
+        searchSymbols: (p) => job("symbolSearch", "search_symbols", p, "cancel_search"),
+        listSymbols: (p) => job("symbolTable", "list_symbols", p, "cancel_search"),
+        listStrings: (p) => job("strings", "list_strings", p, "cancel_search"),
+        searchMemory: (p) => job("memorySearch", "search_memory", p, "cancel_search"),
+      },
+      types: {
+        listDataTypes: (p) => job("dataTypes", "list_data_types", p, "cancel_search"),
+        dtSources: () => read("dt_sources", {}, "dataTypes"),
+        dtChildren: (p) => read("dt_children", p, "dataTypes"),
+        getDataType: (p) => read("get_data_type", p, "dataTypes"),
+      },
+      typeEdits: {
+        createDataType: (p) => edit("typeEditing", "createDataType", "create_data_type", p),
+        deleteDataType: (p) => edit("typeEditing", "deleteDataType", "delete_data_type", p),
+        renameDataType: (p) => edit("typeEditing", "renameDataType", "rename_data_type", p),
+        editStruct: (p) => edit("typeEditing", "editStruct", "edit_struct", p),
+        editEnum: (p) => edit("typeEditing", "editEnum", "edit_enum", p),
+      },
+      edits: {
+        getComments: (p) => read("get_comments", p, "editing"),
+        renameSymbol: (p) => edit("editing", "renameSymbol", "rename_symbol", p),
+        createLabel: (p) => edit("editing", "createLabel", "create_label", p),
+        setComment: (p) => edit("editing", "setComment", "set_comment", p),
+        createFunction: (p) => edit("editing", "createFunction", "create_function", p),
+        setFunctionSignature: (p) => edit("editing", "setFunctionSignature", "set_function_signature", p),
+        renameVariable: (p) => edit("variableEditing", "renameVariable", "rename_variable", p),
+        retypeVariable: (p) => edit("variableEditing", "retypeVariable", "retype_variable", p),
+        defineData: (p) => edit("typeEditing", "defineData", "define_data", p),
+        clearCode: (p) => edit("editing", "clearCode", "clear_code", p),
+        createStructFromData: (p) => edit("typeEditing", "createStructFromData", "create_struct_from_data", p),
+        autoCreateStructure: (p) => edit("variableEditing", "autoCreateStructure", "auto_create_structure", p),
+      },
+      history: {
+        state: () => read("undo_state", {}, "undo"),
+        undo: () => edit("undo", "undo", "undo", {}),
+        redo: () => edit("undo", "redo", "redo", {}),
+        save: () => edit("save", "save", "save", {}),
+      },
+      coverage: { load: (p) => read("load_coverage", p, "coverage") },
+    };
   }
 
-  call<M extends keyof Methods>(method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
-    return this.send(this.nextId++, method, params);
+  private unsupported(cap: Capability) { return new BackendError("unsupported", `The backend does not support ${cap}`); }
+
+  private request<M extends Method>(cap: Capability | undefined, method: M, params: Params<M>, sessionId?: string) {
+    return cap && !this.capabilities.has(cap)
+      ? Promise.reject(this.unsupported(cap))
+      : this.send(this.nextId++, method, params, sessionId);
   }
 
-  callCancellable<M extends keyof Methods>(method: M, params: Methods[M]["params"]) {
-    // decompile, variable_uses: cancel_decompile; the scan requests (symbols, strings, searches): cancel_search
-    const cancelWith = method === "decompile" || method === "variable_uses" ? "cancel_decompile" : ["list_symbols", "list_strings", "search_symbols", "search_memory", "list_data_types"].includes(method) ? "cancel_search" : null;
-    if (!cancelWith) throw new Error(`${method} is not cancellable`);
-    const id = this.nextId++;
-    return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, cancelWith, { id }).catch(() => {}); } };
-  }
-
-  private send<M extends keyof Methods>(id: number, method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
+  private send<M extends Method>(id: number, method: M, params: Params<M>, sessionId?: string): Promise<Result<M>> {
     return new Promise((resolve, reject) => {
-      if (this.ws.readyState !== WebSocket.OPEN) return reject(new Error("socket closed")); // send() on a closed socket drops silently: the call would never settle
-      this.pending.set(id, { resolve, reject });
-      try { this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params })); } catch (e) { this.pending.delete(id); reject(e); } // closed socket
+      if (sessionId !== undefined && sessionId !== this.sessionId) return reject(this.stale());
+      if (this.ws?.readyState !== WebSocket.OPEN) return reject(new BackendError("connection", "The backend connection closed"));
+      this.pending.set(id, { sessionId, reject, accept: (value) => {
+        if (results[method](value)) resolve(value as Result<M>);
+        else reject(new BackendError("protocol", `Invalid ${method} response from the backend`));
+      } });
+      try {
+        this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params, sessionId }));
+        this.hooks.onRequest?.(method, params);
+      } catch (error) {
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 }

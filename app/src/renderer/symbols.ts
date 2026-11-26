@@ -1,24 +1,30 @@
-import type { Address, SymbolHit } from "../../../protocol";
-import { rpc } from "./client";
+import type { Address } from "../../../protocol";
+import type { FunctionNavigation } from "./backend";
 import { offIn, parseAddr } from "./address";
 
-export type FuncAt = { name: string; entry: Address; size: number; signature: string };
+export type FuncAt = Awaited<ReturnType<FunctionNavigation["containing"]>> & {};
 
-// One-entry cache: listing clicks within the same function must not cost an RPC each. Cleared on open and program_changed.
-let last: (FuncAt & { start: bigint; space: string }) | null = null;
-let gen = 0;
-export const clearFunctionCache = () => { last = null; gen++; };
-
-/** The function containing `address`, or null. */
-export async function containingFunction(address: Address): Promise<FuncAt | null> {
-  const p = parseAddr(address);
-  if (!p) return null;
-  if (last) { const a = offIn(address, last.space); if (a !== null && a >= last.start && a - last.start < BigInt(Math.max(last.size, 1))) return last; }
-  const g = gen;
-  const f = await rpc.call("get_function_at", { address });
-  const fp = f && parseAddr(f.entry);
-  if (g === gen) last = f && fp ? { ...f, start: fp.off, space: fp.space } : null;
-  return f;
+/** Cache exact addresses within the active session. Function bodies may have gaps or be noncontiguous. */
+export function functionLookup(reader: FunctionNavigation) {
+  const last = new Map<string, FuncAt | null>();
+  let generation = 0;
+  return {
+    clear() { last.clear(); generation++; },
+    async containing(address: Address): Promise<FuncAt | null> {
+      const p = parseAddr(address);
+      if (!p) return null;
+      const key = p.space + "/" + p.off;
+      if (last.has(key)) return last.get(key)!;
+      const current = generation;
+      const f = await reader.containing({ address });
+      if (current === generation) {
+        if (last.size >= 128) last.delete(last.keys().next().value!);
+        last.set(key, f);
+        if (f && offIn(f.entry, p.space) !== null && last.size < 128) {
+          last.set(p.space + "/" + offIn(f.entry, p.space), f);
+        }
+      }
+      return f;
+    },
+  };
 }
-
-export const searchSymbols = (query: string, limit = 100): Promise<SymbolHit[]> => rpc.call("search_symbols", { query, limit });

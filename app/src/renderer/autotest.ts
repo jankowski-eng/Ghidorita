@@ -1,7 +1,7 @@
 import type { Address, FunctionInfo } from "../../../protocol";
 import { AddrMap } from "./addrmap";
-import { rpc } from "./client";
-import { RpcError } from "./backend";
+import type { ApplicationBackend, ProgramOperations } from "./backend";
+import type { ImportOptions } from "../../../protocol";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { runEditFlow, runPhase2, runTypesFlow } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
@@ -11,7 +11,15 @@ import { runFocusedFlow } from "./autotestFlows";
 import { runAddrFlow } from "./autotestAddr";
 
 /** What the scripted modes need from the running app. */
-export interface AutotestCtx {
+export interface AutotestControls {
+  requests: { method: string; params: unknown }[];
+  holdDecompile(entry: Address): { started: boolean; cancelled: number };
+  cancelOpenWhen(predicate?: (params: ImportOptions & { path: string }) => boolean): void;
+  openAttempts: (ImportOptions & { path: string })[];
+}
+export interface AutotestCtx extends AutotestControls {
+  backend: ApplicationBackend;
+  program(): ProgramOperations;
   open(path: string): Promise<FunctionInfo[] | undefined>;
   select(entry: Address): Promise<void>;
   /** navigate to any address like Go to Address does */
@@ -29,7 +37,7 @@ export interface AutotestCtx {
   topAddr(): Address;
   editorText(): string;
   editor(): any;
-  menu(id: string): Promise<void>;
+  menu(id: string): Promise<boolean>;
   expect: any;
   funcCount(): number;
   errors: string[];
@@ -79,13 +87,13 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       c.setPath(file);
       if (c.only === "addr") {
         await c.open(file);
-        result.ok = (await runAddrFlow(file, await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+        result.ok = (await runAddrFlow(file, await c.program().functions.list(), c, result)) && c.errors.length === 0;
         result.errors = c.errors;
         return window.host.autotestDone(result);
       }
       if (c.only === "listing") {
         await c.open(file);
-        result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+        result.ok = (await runListingFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
         result.errors = c.errors;
         return window.host.autotestDone(result);
       }
@@ -117,7 +125,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const order = [...fl.filter((f) => f.name === "main"), ...fl.slice(0, 10)];
       let clicked = false;
       for (const f of order) {
-        const r = await rpc.call("decompile", { entry: f.entry });
+        const r = await c.program().decompiler.decompile({ entry: f.entry }).result;
         const tok = r.tokens.find((t) => t.targetFunction && t.targetFunction !== f.entry); // a real call to another function
         if (!tok) continue;
         await c.select(f.entry);
@@ -134,7 +142,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.expectedEntry = (result.clickedToken as any).target;
       result.listingTopAddress = c.topAddr();
       result.editorFirstLine = c.editorText().split("\n")[0];
-      result.functions = fl.length; result.totalBytes = (await rpc.call("listing_info", {})).totalBytes;
+      result.functions = fl.length; result.totalBytes = (await c.program().listing.info()).totalBytes;
       // Back returns to the start function (listing top row = its entry), Forward to the callee again
       const startEntry = fl.find((f) => f.name === result.startFunction)!.entry;
       c.back(); await new Promise((r) => setTimeout(r, 1000));
@@ -156,33 +164,26 @@ export async function runAutotest(file: string, c: AutotestCtx) {
 
       // quickly open two functions back to back: the first decompile must be cancelled, the second one shown
       const [fa, fb] = fl.slice(-2);
-      const cancelled: unknown[] = [], origCC = (rpc as any).callCancellable.bind(rpc);
-      let started = 0;
-      (rpc as any).callCancellable = (m: string, p: any) => { // the first decompile is held back so the second open reliably supersedes it
-        const r = origCC(m, p), hold = started++ === 0;
-        return { result: hold ? r.result.then(async (v: any) => { await sleep(1500); return v; }) : r.result, cancel: () => { cancelled.push(p); r.cancel(); } };
-      };
+      const held = c.holdDecompile(fa.entry);
       const first = c.select(fa.entry);
-      await waitFor(() => started > 0, 5000, "first decompile to start");
+      await waitFor(() => held.started, 5000, "first decompile to start");
       await c.select(fb.entry); await first;
-      await sleep(1700); // the held first result arrives late and must be ignored
-      (rpc as any).callCancellable = origCC;
       await waitFor(() => c.selected() === fb.entry && c.editorText().length > 0, 10000, "second function decompiled");
-      result.quickSwitch = { cancelled: cancelled.length, shown: c.selected() };
-      result.quickSwitchOk = cancelled.length >= 1 && c.selected() === fb.entry;
+      result.quickSwitch = { cancelled: held.cancelled, shown: c.selected() };
+      result.quickSwitchOk = held.cancelled >= 1 && c.selected() === fb.entry;
 
       // ---- save / close (autosave) / welcome / import, all through the real UI ----
       const base = file.split("/").pop()!;
       const dirtyNow = () => c.title().startsWith("• ");
       const dlg = (l: string) => byLabel("dialog", l);
-      const rename = async (i: number) => { const f = fl[i], n = `autotest_${Date.now().toString(36)}_${i}`; await rpc.call("rename_symbol", { address: f.entry, newName: n }); return n; };
+      const rename = async (i: number) => { const f = fl[i], n = `autotest_${Date.now().toString(36)}_${i}`; await c.program().edits.renameSymbol({ address: f.entry, newName: n }); return n; };
       const m0 = c.lastMenu();
       await rename(2);
       await waitFor(() => dirtyNow() && c.lastMenu()?.dirty && c.lastMenu()?.canEdit, 5000, "dirty marker and Save enabled");
       const dirtyShown = true;
       c.command({ type: "edit", action: "save" });
       await waitFor(() => !dirtyNow() && !c.lastMenu()?.dirty, 10000, "clean after Save");
-      const savedClean = !(await rpc.call("undo_state", {})).dirty;
+      const savedClean = !(await c.program().history.state()).dirty;
       result.save = { menuBefore: m0, dirtyShown, savedClean, title: c.title() };
 
       // close with unsaved edits: no prompt, the sidecar autosaves; the rename must survive a reopen from the browser
@@ -191,22 +192,18 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       await waitFor(() => !c.status().opened && !document.querySelector(".main"), 10000, "welcome state after close");
       const noPrompt = !dlg("Save changes?");
       const entry = await waitFor(() => [...document.querySelectorAll<HTMLElement>(".welcome .open")].find((b) => b.textContent!.includes(base)), 10000, "program in browser");
-      const noProgram = await rpc.call("list_functions", {}).then(() => false, (e) => e instanceof RpcError && e.code === -32001);
+      const noProgram = !(await c.backend.lifecycle.active());
       result.close = { noPrompt, titlePlain: !c.title().includes("—"), noProgram, menu: c.lastMenu() };
 
       entry.click(); // open from the welcome pane
       await waitFor(() => c.status().opening, 5000, "open from browser to start");
       await waitFor(() => !c.status().opening && c.status().opened, 300000, "open from browser to finish");
-      const keptHits = await rpc.call("search_symbols", { query: kept, limit: 5 });
-      result.browserOpen = { functions: c.status().funcs, title: c.title(), autosaved: keptHits.some((h) => h.name === kept), cleanAfterReopen: !(await rpc.call("undo_state", {})).dirty };
+      const keptHits = await c.program().searches.searchSymbols({ query: kept, limit: 5 }).result;
+      result.browserOpen = { functions: c.status().funcs, title: c.title(), autosaved: keptHits.some((h) => h.name === kept), cleanAfterReopen: !(await c.program().history.state()).dirty };
 
       // import dialog: record what open_binary is sent. An explicit-options open is answered Cancelled locally (no new analysis).
-      const sent: any[] = [];
-      const orig = (rpc as any).call.bind(rpc);
-      (rpc as any).call = (m: string, p: any) => {
-        if (m === "open_binary") { sent.push(p); if (Object.keys(p).length > 1) return Promise.reject(new RpcError(-32002, "Cancelled")); }
-        return orig(m, p);
-      };
+      const sentStart = c.openAttempts.length;
+      c.cancelOpenWhen((options) => !!options.loader);
       const importDlg = async (path: string) => { c.command({ type: "open-path", path }); return waitFor(() => dlg("Import binary"), 10000, "import dialog"); };
       const openBtn = (d: Element) => d.querySelector<HTMLButtonElement>("button.primary")!;
       let d = await importDlg(file);
@@ -215,7 +212,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const preselectedPreferred = /preferred/.test(loader.selectedOptions[0].textContent!);
       press(loader, "Enter"); // defaults
       await waitFor(() => !dlg("Import binary") && c.status().opened, 300000, "default open");
-      const defaultSent = JSON.stringify(sent[0]);
+      const defaultSent = JSON.stringify(c.openAttempts[sentStart]);
       d = await importDlg(file);
       await waitFor(() => !openBtn(d).disabled, 10000, "import dialog ready 2");
       // Raw Binary is the one stock loader with a base address and a free language choice (real sidecar: Mach-O has neither)
@@ -235,16 +232,16 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       setSelect(d.querySelector<HTMLSelectElement>('select[aria-label="Analysis profile"]')!, "fast"); // sent along with the options
       press(bi, "Enter");
       await waitFor(() => !dlg("Import binary") && !c.status().opening, 10000, "explicit open answered");
-      const explicit = sent[1];
+      const explicit = c.openAttempts[sentStart + 1];
       await sleep(300);
       d = await importDlg("/nonexistent/missing.bin");
       await waitFor(() => d.querySelector('[role="alert"]'), 10000, "import error");
       const errorOk = /not found/i.test(d.querySelector('[role="alert"]')!.textContent!) && openBtn(d).disabled;
       press(d, "Escape");
       await waitFor(() => !dlg("Import binary"), 5000, "import dialog closes on Escape");
-      (rpc as any).call = orig;
+      c.cancelOpenWhen();
       result.importDlg = { preselectedPreferred, defaultSent, explicit, badDisables, tooBigDisables, goodEnables, errorOk };
-      const importOk = preselectedPreferred && defaultSent === JSON.stringify({ path: file }) && explicit?.language === other.value && explicit?.baseAddress === "0x1000" && explicit?.profile === "fast" && typeof explicit?.loader === "string"
+      const importOk = preselectedPreferred && JSON.parse(defaultSent).path === file && JSON.parse(defaultSent).profile === "full" && !JSON.parse(defaultSent).loader && explicit?.language === other.value && explicit?.baseAddress === "0x1000" && explicit?.profile === "fast" && typeof explicit?.loader === "string"
         && badDisables && tooBigDisables && goodEnables && errorOk;
 
       result.importOk = importOk;
@@ -254,10 +251,10 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const bo = result.browserOpen as any, cl = result.close as any;
       result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
-      result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
+      result.navFindOk = await runNavFlow(await c.program().functions.list(), c, result);
       result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
-      if (result.ok) result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
-      if (result.ok) result.ok = (await runAddrFlow(file, await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+      if (result.ok) result.ok = (await runListingFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
+      if (result.ok) result.ok = (await runAddrFlow(file, await c.program().functions.list(), c, result)) && c.errors.length === 0;
       if (result.ok) {
         const ed = await runEditFlow(fl, c, result);
         let ok = ed.ok;
@@ -285,7 +282,7 @@ export async function runBench(file: string, c: AutotestCtx) {
       const t0 = performance.now();
       const fl = await c.open(file);
       result.openMs = Math.round(performance.now() - t0);
-      const info = await rpc.call("listing_info", {});
+      const info = await c.program().listing.info();
       const m = new AddrMap(info.ranges);
       result.functions = fl!.length; result.totalBytes = m.total;
       await sleep(1500);
@@ -321,7 +318,7 @@ export async function runBench(file: string, c: AutotestCtx) {
 
       let done = false; const dl: number[] = [];
       const picks = Array.from({ length: 50 }, () => fl![Math.floor(Math.random() * fl!.length)]);
-      const dec = (async () => { for (const f of picks) { const t = performance.now(); try { await rpc.call("decompile", { entry: f.entry }); } catch (e) { c.errors.push(String(e)); } dl.push(performance.now() - t); } done = true; })();
+      const dec = (async () => { for (const f of picks) { const t = performance.now(); try { await c.program().decompiler.decompile({ entry: f.entry }).result; } catch (e) { c.errors.push(String(e)); } dl.push(performance.now() - t); } done = true; })();
       result.flingDuringDecompile50 = await fling(120000, () => done);
       await dec;
       result.decompileMs = summ(dl);

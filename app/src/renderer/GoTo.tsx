@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { Address } from "../../../protocol";
+import type { Address, SymbolHit } from "../../../protocol";
 import { resolveGoto } from "./parseGoto";
-import { searchSymbols } from "./symbols";
 import { useRestoreFocus } from "./hooks";
 
 /** Go to address bar: Enter navigates, Escape closes, an invalid entry shows an inline error and stays open. */
-export function GoTo({ onGo, onClose }: { onGo: (a: Address) => void; onClose: () => void }) {
+export function GoTo({ search, onGo, onClose }: { search: (q: string) => Promise<SymbolHit[]>; onGo: (a: Address) => void; onClose: () => void }) {
   useRestoreFocus();
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
@@ -13,7 +12,7 @@ export function GoTo({ onGo, onClose }: { onGo: (a: Address) => void; onClose: (
   useEffect(() => ref.current?.focus(), []);
   const submit = async () => {
     try {
-      const r = await resolveGoto(value, (q) => searchSymbols(q, 100));
+      const r = await resolveGoto(value, search);
       if ("error" in r) setError(r.error); else { onGo(r.address); onClose(); }
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };

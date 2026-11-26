@@ -1,6 +1,6 @@
+import type { TypeEdits, TypeReads } from "./backend";
 import { useEffect, useRef, useState } from "react";
 import type { DataTypeDetail, EnumOp, StructOp } from "../../../protocol";
-import { rpc } from "./client";
 import { FormDialog } from "./FormDialog";
 import { hex } from "./dtTree";
 
@@ -23,7 +23,7 @@ function Cell({ value, placeholder, label, disabled, className = "cell", onCommi
 }
 
 /** Struct and union editor: every committed change is one edit_struct call (one Ghidra transaction, one undo step). */
-export function StructEditor({ d, run, reload, onApply }: { d: DataTypeDetail; run: Run; reload: () => void; onApply: () => void }) {
+export function StructEditor({ typeSearch, edit, d, run, reload, onApply }: { typeSearch: TypeReads["listDataTypes"]; edit?: TypeEdits["editStruct"]; d: DataTypeDetail; run: Run; reload: () => void; onApply: () => void }) {
   const comps = d.components ?? [];
   const union = d.kind === "union";
   const [sel, setSel] = useState<number | null>(null);
@@ -31,7 +31,7 @@ export function StructEditor({ d, run, reload, onApply }: { d: DataTypeDetail; r
   const [dlg, setDlg] = useState<null | "add" | "insert">(null);
   useEffect(() => { if (sel !== null && sel >= comps.length) setSel(null); }, [comps.length]); // eslint-disable-line
   useEffect(() => setSel(null), [d.path]);
-  const op = (o: StructOp) => run(() => rpc_edit(d.path, o));
+  const op = (o: StructOp) => run(() => edit!({ path: d.path, op: o }));
   const cur = sel !== null ? comps[sel] : undefined;
   const shown = hideFiller ? comps.filter((c) => !c.undefined) : comps;
   const moveTo = (to: number) => { if (sel !== null && to >= 0 && to < comps.length) void op({ op: "move", ordinal: sel, to }).then((ok) => ok && setSel(to)); };
@@ -71,20 +71,20 @@ export function StructEditor({ d, run, reload, onApply }: { d: DataTypeDetail; r
           </tbody>
         </table>
       </div>
-      {dlg && <FormDialog title={dlg === "add" ? "Add field" : "Insert field"} submit={dlg === "add" ? "Add" : "Insert"}
+      {dlg && <FormDialog typeSearch={typeSearch} title={dlg === "add" ? "Add field" : "Insert field"} submit={dlg === "add" ? "Add" : "Insert"}
         fields={[{ key: "type", label: "Field type", kind: "datatype" }, { key: "name", label: "Field name" }, { key: "comment", label: "Field comment" }]}
         onSubmit={async (v) => { // errors stay in the dialog
           const base = { type: v.type.trim(), name: v.name.trim() || undefined, comment: v.comment || undefined };
-          await rpc_edit(d.path, dlg === "add" ? { op: "add", ...base } : { op: "insert", ordinal: sel!, ...base }); reload(); }}
+          await edit!({ path: d.path, op: dlg === "add" ? { op: "add", ...base } : { op: "insert", ordinal: sel!, ...base } }); reload(); }}
         onClose={() => setDlg(null)} />}
     </div>
   );
 }
 
 /** Enum editor: name/value cells commit like struct cells; a rename keeps the value. */
-export function EnumEditor({ d, run, reload, onApply }: { d: DataTypeDetail; run: Run; reload: () => void; onApply: () => void }) {
+export function EnumEditor({ edit, d, run, reload, onApply }: { edit?: TypeEdits["editEnum"]; d: DataTypeDetail; run: Run; reload: () => void; onApply: () => void }) {
   const [dlg, setDlg] = useState(false);
-  const op = (o: EnumOp) => run(() => rpc_enum(d.path, o));
+  const op = (o: EnumOp) => run(() => edit!({ path: d.path, op: o }));
   return (
     <div className="ed">
       <div className="tools">
@@ -108,10 +108,7 @@ export function EnumEditor({ d, run, reload, onApply }: { d: DataTypeDetail; run
         </table>
       </div>
       {dlg && <FormDialog title="Add enum value" submit="Add" fields={[{ key: "name", label: "Value name" }, { key: "value", label: "Value (decimal or 0x…)" }]}
-        onSubmit={async (v) => { await rpc_enum(d.path, { op: "set", name: v.name.trim(), value: v.value.trim() }); reload(); }} onClose={() => setDlg(false)} />}
+        onSubmit={async (v) => { await edit!({ path: d.path, op: { op: "set", name: v.name.trim(), value: v.value.trim() } }); reload(); }} onClose={() => setDlg(false)} />}
     </div>
   );
 }
-
-const rpc_edit = (path: string, op: StructOp) => rpc.call("edit_struct", { path, op });
-const rpc_enum = (path: string, op: EnumOp) => rpc.call("edit_enum", { path, op });

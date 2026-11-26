@@ -1,13 +1,5 @@
 import type { AnalysisProfile, ImportCandidate, ImportOptions, ProgramEntry } from "../../../protocol";
 
-export const PROFILE_LABEL: Record<AnalysisProfile, string> = { full: "Full", fast: "Fast (skips switch analysis, call-convention ID, stack)" };
-/** shortcut: fixed size threshold; fast first open is ~2.4x quicker on a 66 MB binary (SPIKE_REPORT round 4), upgrade to a time estimate once measured on more binaries. */
-export const FAST_MIN_BYTES = 20 * 1048576;
-export const defaultProfile = (sizeBytes: number): AnalysisProfile => (sizeBytes > FAST_MIN_BYTES ? "fast" : "full");
-
-/** Raw Binary needs no loader recognition. shortcut: assumed to accept a base address (real list comes from import_candidates when it is offered), upgrade if a sidecar says otherwise. */
-export const RAW_CANDIDATE: ImportCandidate = { loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true };
-
 /** Base address input: "" = none; "0x1000" or "1000" -> normalised "0x1000"; must fit 64 bits. */
 export function parseBase(s: string): { ok: true; value: string } | { ok: false; error: string } {
   const t = s.trim();
@@ -23,18 +15,19 @@ export interface ImportChoice { cand: ImportCandidate; language: string | null; 
 
 /** What the user may submit: a language is mandatory, the base address (if any) must parse and be accepted by the loader. */
 export function choiceError(c: ImportChoice): string | null {
-  if (!c.language) return "Choose a language";
+  if (!c.language && c.cand.requiresLanguage !== false) return "Choose a language";
   if (c.cand.acceptsBaseAddress) { const b = parseBase(c.base); if (!b.ok) return b.error; }
   return null;
 }
 
-/** undefined = plain default import (omit every option so the sha256 key is used); else all explicit options. Profile "full" is the sidecar's default and is never sent; "fast" always is. */
+/** Keep the default loader implicit to preserve the provider's default import key. */
 export function buildOptions(c: ImportChoice): ImportOptions | undefined {
   const base = c.cand.acceptsBaseAddress ? parseBase(c.base) : { ok: true as const, value: "" };
-  if (!base.ok || !c.language) return undefined;
-  const profile = c.profile === "fast" ? { profile: "fast" as const } : {};
-  if (c.cand.preferred && c.language === c.cand.language && c.compilerSpec === c.cand.compilerSpec && !base.value) return c.profile === "fast" ? profile : undefined;
-  return { loader: c.cand.loader, language: c.language, ...(c.compilerSpec ? { compilerSpec: c.compilerSpec } : {}), ...(base.value ? { baseAddress: base.value } : {}), ...profile };
+  if (!base.ok || choiceError(c)) return undefined;
+  const profile = c.profile ? { profile: c.profile } : undefined;
+  if (c.cand.preferred && c.language === c.cand.language && c.compilerSpec === c.cand.compilerSpec && !base.value) return profile;
+  return { ...profile, loader: c.cand.loader, ...(c.language ? { language: c.language } : {}),
+    ...(c.compilerSpec ? { compilerSpec: c.compilerSpec } : {}), ...(base.value ? { baseAddress: base.value } : {}) };
 }
 
 /** "Raw Binary · ARM:LE:32:v8 · @0x8000000" for the program browser; "default" for plain imports. */

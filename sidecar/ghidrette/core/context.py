@@ -33,4 +33,5 @@ class Ctx:
             pass
 
     def progress(self, phase, pct, message="", **extra):
-        self.notify("progress", {"phase": phase, "pct": pct, "message": message, **extra})
+        op = self.lanes.opening
+        self.notify("progress", {"openId": op.request_id if op else None, "phase": phase, "pct": pct, "message": message, **extra})

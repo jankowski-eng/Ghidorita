@@ -1,29 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import type { Address, SymbolHit } from "../../../protocol";
-import { searchSymbols } from "./symbols";
+import type { Address, Capability, SymbolHit } from "../../../protocol";
+import type { Searches } from "./backend";
+import { allowsCommand } from "../capabilities";
 import { latest } from "./latest";
 import { matchActions, type CommandAction } from "./commandActions";
 import type { MenuCommand } from "../preload";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
 /** Command bar (Cmd+K): type to search symbols (a hex address goes there), ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
-export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
+export function SearchPanel({ capabilities, searchSymbols, onGo, onRun, onClose }: { capabilities: ReadonlySet<Capability>; searchSymbols?: Searches["searchSymbols"]; onGo: (a: Address) => void; onRun: (c: MenuCommand) => void; onClose: () => void }) {
   useRestoreFocus();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SymbolHit[]>([]);
   const [cur, setCur] = useState(0);
   const [msg, setMsg] = useState("");
   const dq = useDebounced(q, 150);
-  const actionMode = q.startsWith(">");
-  const acts: CommandAction[] = actionMode ? matchActions(q.slice(1)) : [];
+  const actionMode = !searchSymbols || q.startsWith(">");
+  const acts: CommandAction[] = actionMode ? matchActions(q.replace(/^>/, "")).filter(({ cmd }) => allowsCommand(capabilities, cmd)) : [];
   const n = actionMode ? acts.length : hits.length;
   const run = useRef(latest()).current;
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
-    if (!dq.trim() || dq.startsWith(">")) { run(Promise.resolve(null)); setHits([]); setMsg(""); return; }
-    run(searchSymbols(dq, 100)).then((r) => { if (r) { setHits(r); setCur(0); setMsg(r.length ? "" : "no matches"); } }, (e) => { setHits([]); setMsg(e instanceof Error ? e.message : String(e)); });
-  }, [dq]); // eslint-disable-line
+    if (!searchSymbols || !dq.trim() || dq.startsWith(">")) { run(Promise.resolve(null)); setHits([]); setMsg(""); return; }
+    const job = searchSymbols({ query: dq, limit: 100 });
+    run(job.result).then((r) => { if (r) { setHits(r); setCur(0); setMsg(r.length ? "" : "no matches"); } }, (e) => { setHits([]); setMsg(e instanceof Error ? e.message : String(e)); });
+    return () => { void run(Promise.resolve(null)); job.cancel(); };
+  }, [dq, searchSymbols]); // eslint-disable-line
   const go = (h?: SymbolHit) => { if (h) { onGo(h.address); onClose(); } };
   const runAct = (a?: CommandAction) => { if (a) { onClose(); setTimeout(() => onRun(a.cmd), 0); } }; // after the bar unmounts and focus is back in the code pane, which edit actions read
   const enter = () => (actionMode ? runAct(acts[cur]) : go(hits[cur]));
@@ -35,9 +38,9 @@ export function SearchPanel({ onGo, onRun, onClose }: { onGo: (a: Address) => vo
   };
   useEffect(() => { document.getElementById(`sym-${cur}`)?.scrollIntoView({ block: "nearest" }); }, [cur]);
   return (
-    <div className="search" role="dialog" aria-label="Search symbols" onKeyDown={onKey}>
+    <div className="search" role="dialog" aria-label={searchSymbols ? "Search symbols" : "Command bar"} onKeyDown={onKey}>
       <input ref={input} role="combobox" aria-expanded={n > 0} aria-controls="sym-list" aria-activedescendant={n > cur ? `sym-${cur}` : undefined}
-        aria-label="Symbol or action" placeholder="Search symbols or address; > for actions" value={q} onChange={(e) => { setQ(e.target.value); setHits([]); setCur(0); }} />
+        aria-label="Symbol or action" placeholder={searchSymbols ? "Search symbols or address; > for actions" : "Search commands"} value={q} onChange={(e) => { setQ(e.target.value); setHits([]); setCur(0); }} />
       <div id="sym-list" role="listbox" aria-label="Symbols">
         {acts.map((a, i) => (
           <div key={a.label} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}

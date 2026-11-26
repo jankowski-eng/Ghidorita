@@ -1,5 +1,4 @@
 import type { FunctionInfo, ListingRow } from "../../../protocol";
-import { rpc } from "./client";
 import { sleep, waitFor, type AutotestCtx } from "./autotest";
 import { addrAdd } from "./address";
 
@@ -19,8 +18,8 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   const shows = (addr: string, what: string, ms = 10000) => waitFor(() => topIs(addr), ms, `${what}: listing at ${addr} (top ${c.topAddr()})`);
 
   // 1. function header at the entry of a function with callers
-  let f = fl[Math.min(2, fl.length - 1)], callers = await rpc.call("xrefs_to", { address: f.entry, limit: 50 });
-  for (const g of fl.slice(0, 400)) { const x = await rpc.call("xrefs_to", { address: g.entry, limit: 50 }); if (x.length) { f = g; callers = x; break; } }
+  let f = fl[Math.min(2, fl.length - 1)], callers = await c.program().references.xrefsTo({ address: f.entry, limit: 50 });
+  for (const g of fl.slice(0, 400)) { const x = await c.program().references.xrefsTo({ address: g.entry, limit: 50 }); if (x.length) { f = g; callers = x; break; } }
   await c.select(f.entry); await shows(f.entry, "select");
   const row = await waitFor(() => at(f.entry), 5000, "entry row buffered");
   need(row!.header && row!.header.signature.includes(f.name), "function header names " + f.name + ": " + JSON.stringify(row!.header));
@@ -40,7 +39,7 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   // 3. plate comment through an edit: only the intersecting rows are refetched, the view stays
   await waitFor(() => !L().busy(), 5000, "listing idle"); await sleep(300); // the jump's own prefetch must not count as the edit's refetch
   const top0 = c.topAddr(), n0 = lst().length;
-  await rpc.call("set_comment", { address: f.entry, kind: "plate", text: "Autotest plate" });
+  await c.program().edits.setComment({ address: f.entry, kind: "plate", text: "Autotest plate" });
   await waitFor(() => lineText("k-plate").some((t) => t.includes("Autotest plate")), 10000, "plate comment line");
   const fetched = lst().slice(n0);
   need(fetched.length >= 1 && fetched.length <= 2 && fetched.every((x) => x.direction === "forward" && x.count < 100), "edit refetched only its rows: " + JSON.stringify(fetched));
@@ -49,14 +48,14 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
 
   // 4. a navigation ~100 ms after an edit must not be lost (SPIKE_REPORT round 5 "Test timing")
   const other = fl.find((g) => g.entry !== f.entry && at(g.entry) === undefined) ?? fl[fl.length - 1];
-  await rpc.call("set_comment", { address: f.entry, kind: "pre", text: "Autotest pre" });
+  await c.program().edits.setComment({ address: f.entry, kind: "pre", text: "Autotest pre" });
   await sleep(100);
   await c.select(other.entry);
   await shows(other.entry, "navigation after an edit");
   await sleep(800); // the late program_changed refresh must not move it back
   need(topIs(other.entry), "navigation survived the late refresh: top " + c.topAddr());
   R.navAfterEdit = { to: other.entry };
-  await rpc.call("undo", {}); await rpc.call("undo", {}); // both comments
+  await c.program().history.undo(); await c.program().history.undo(); // both comments
   await c.select(f.entry); await shows(f.entry, "after undo");
   await waitFor(() => !lineText("k-plate").some((t) => t.includes("Autotest plate")) && !lineText("k-pre").some((t) => t.includes("Autotest pre")), 10000, "comments gone after undo");
 
@@ -81,11 +80,11 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   L().dragging(false);
 
   // 7. data components: fold / unfold (a program with defined structure or array data in view; the mock has none until one is applied)
-  const info = await rpc.call("listing_info", {});
+  const info = await c.program().listing.info();
   const first = info.ranges[0].start;
   let withParts: ListingRow | undefined, next = info.ranges[0].start;
   for (let k = 0; k < 20 && !withParts; k++) {
-    const rows = await rpc.call("listing_rows", { address: next, count: 500 });
+    const rows = await c.program().listing.rows({ address: next, count: 500 });
     withParts = rows.find((r) => r.parts && r.parts.length);
     if (rows.length < 500) break;
     next = addrAdd(rows[rows.length - 1].address, rows[rows.length - 1].length);

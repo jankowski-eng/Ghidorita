@@ -1,3 +1,4 @@
+import type { TypeReads } from "./backend";
 import { useEffect, useRef, useState } from "react";
 import type { CommentKind, DataTypeHit } from "../../../protocol";
 import { scanner } from "./scan";
@@ -14,7 +15,8 @@ export const COMMENT_KINDS: CommentKind[] = ["eol", "pre", "post", "plate", "rep
  * or a comment box with a kind selector. Enter confirms (Shift+Enter = newline in comments), Escape cancels.
  * No optimistic update: onSubmit calls the edit RPC; its error is shown here and the dialog stays open.
  */
-export function EditDialog({ spec, onSubmit, onClose }: {
+export function EditDialog({ typeSearch, spec, onSubmit, onClose }: {
+  typeSearch?: TypeReads["listDataTypes"];
   spec: EditSpec; onSubmit: (value: string, kind: CommentKind) => Promise<void>; onClose: () => void;
 }) {
   useRestoreFocus();
@@ -33,9 +35,10 @@ export function EditDialog({ spec, onSubmit, onClose }: {
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
   useEffect(() => {
     sc.cancelAll(); // the previous scan is stale
-    if (spec.field !== "datatype" || !dq.trim()) { run(Promise.resolve(null)); setHits([]); return; }
-    run(sc.call("list_data_types", { query: dq.trim(), limit: 20 })).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
+    if (!typeSearch || spec.field !== "datatype" || !dq.trim()) { run(Promise.resolve(null)); setHits([]); return; }
+    run(sc.run(typeSearch({ query: dq.trim(), limit: 20 }))).then((r) => { if (r) { setHits(r); setSel(-1); } }, () => setHits([]));
   }, [dq]); // eslint-disable-line
+  useEffect(() => () => sc.cancelAll(), [sc]);
   const submit = async () => {
     if (busy) return;
     setBusy(true); setError("");

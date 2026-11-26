@@ -37,11 +37,12 @@ class Proc:
 
 class Client:
     """One websocket; notifications are kept in `notes` (with arrival time), replies are matched by id."""
-    def __init__(self, port):
+    def __init__(self, port, token=None):
+        self.token = token
         self.port, self.notes, self.waiters, self.nid, self.t0 = port, [], {}, 0, time.monotonic()
 
     async def __aenter__(self):
-        self.ws = await websockets.connect("ws://127.0.0.1:%d" % self.port, max_size=None)
+        self.ws = await websockets.connect("ws://127.0.0.1:%d%s" % (self.port, "/" + self.token if self.token else ""), max_size=None)
         self.task = asyncio.create_task(self._read())
         return self
 
@@ -57,10 +58,13 @@ class Client:
             else:
                 self.waiters[m["id"]].set_result((time.monotonic(), m))
 
-    async def send(self, method, **params):
+    async def send(self, method, *, session_id=None, **params):
         self.nid += 1
         self.waiters[self.nid] = asyncio.get_running_loop().create_future()
-        await self.ws.send(json.dumps({"jsonrpc": "2.0", "id": self.nid, "method": method, "params": params}))
+        request = {"jsonrpc": "2.0", "id": self.nid, "method": method, "params": params}
+        if session_id is not None:
+            request["sessionId"] = session_id
+        await self.ws.send(json.dumps(request))
         return self.nid
 
     async def reply(self, rid, timeout=300):

@@ -10,6 +10,7 @@ export type Address = string;
 export interface Request<M extends keyof Methods = keyof Methods> {
   jsonrpc: "2.0";
   id: number;
+  sessionId?: string;
   method: M;
   params: Methods[M]["params"];
 }
@@ -32,6 +33,7 @@ export const ErrorCode = {
   NotFound: -32004,
   Busy: -32005,            // open_binary in progress (or a second open_binary)
   ProjectLocked: -32006,   // another sidecar holds the projects dir
+  StaleSession: -32007,
   InvalidArgument: -32602, // bad/missing params, unparsable type or signature, invalid name
   Internal: -32603,
   MethodNotFound: -32601,
@@ -119,10 +121,30 @@ export interface AddrRange {
   size: number; // bytes
 }
 
+export const CAPABILITIES = [
+  "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
+  "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage",
+] as const;
+export type Capability = typeof CAPABILITIES[number];
+export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
+export interface ActiveSession { sessionId: string; programId: string; name: string }
+export interface OpenResult extends ActiveSession { persisted: boolean }
+export interface ImportChoices {
+  candidates: ImportCandidate[];
+  sizeBytes: number;
+  entropy: number[];
+  profiles?: { id: AnalysisProfile; label: string }[];
+  defaultProfile?: AnalysisProfile;
+  note?: string;
+}
+
 export interface Methods {
-  open_binary: { params: { path: string } & ImportOptions; result: { programId: string; name: string; persisted: boolean } };
-  cancel_open: { params: {}; result: { cancelled: boolean } };
-  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number; entropy: number[] } };
+  provider_info: { params: {}; result: ProviderInfo };
+  active_session: { params: {}; result: ActiveSession | null };
+  open_binary: { params: { path: string } & ImportOptions; result: OpenResult };
+  cancel_open: { params: { id?: number }; result: { cancelled: boolean } };
+  import_candidates: { params: { path: string }; result: ImportChoices };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
   list_programs: { params: {}; result: ProgramEntry[] };
@@ -180,7 +202,7 @@ export interface Methods {
   auto_create_structure: { params: { entry: Address; name: string; structName?: string }; result: { path: string } };
   // ---- persistence ----
   // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
-  save: { params: {}; result: { saved: boolean } };
+  save: { params: {}; result: { saved: boolean; undoHistoryCleared: boolean } };
 }
 
 /** All optional. Omit all = Ghidra's default import (preferred LoadSpec); programId stays the plain sha256. Any field present = explicit import, programId = sha256 + "-" + 12 hex of the options hash (protocol.md). */
@@ -191,13 +213,14 @@ export interface ImportOptions {
   baseAddress?: Address;  // hex "0x08000000"; only for candidates with acceptsBaseAddress
   profile?: AnalysisProfile; // not an import option: omitted = SIDECAR_ANALYSIS_DISABLE or full; "fast" skips Call Convention ID, Decompiler Switch Analysis, Stack (own persistence key)
 }
-export type AnalysisProfile = "full" | "fast";
+export type AnalysisProfile = string; // opaque provider profile id
 export interface ImportCandidate {
   loader: string;
   language: string | null;      // null = the loader needs the user to pick one (Raw Binary); see list_languages
   compilerSpec: string | null;
   preferred: boolean;           // exactly one candidate has this set when any candidate exists
   acceptsBaseAddress: boolean;
+  requiresLanguage?: boolean; // defaults to true when language is null
 }
 export interface LanguageInfo { id: string; description: string; compilerSpecs: { id: string; name: string }[] }
 export interface ProgramEntry {
@@ -269,8 +292,8 @@ export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "
 
 export interface Notifications {
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
-  progress: { phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
+  progress: { openId: number; phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
   // ranges null = unknown/broad, refetch everything (also when a change has no address: type edits); start/end inclusive, same space, any space. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); not during open_binary.
-  program_changed: { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
+  program_changed: { sessionId: string; ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }

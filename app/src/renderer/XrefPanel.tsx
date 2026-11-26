@@ -1,6 +1,6 @@
+import type { References } from "./backend";
 import { useEffect, useRef, useState } from "react";
 import type { Address, XrefFrom, XrefTo } from "../../../protocol";
-import { rpc } from "./client";
 import { latest } from "./latest";
 import type { XrefTarget } from "./editActions";
 
@@ -15,7 +15,7 @@ export type UseHit = { name: string };
  * "From" lists what the instruction at the current address references (also stack, register and external references, which have no address).
  * Click or Enter navigates to the referencing / referenced address.
  */
-export function XrefPanel({ address, target, version, onGo, onFollow }: { address: Address | null; target: XrefTarget | null; version: number; onGo: (a: Address, use?: UseHit) => void; onFollow: () => void }) {
+export function XrefPanel({ references, variableReferences, address, target, version, onGo, onFollow }: { references: References; variableReferences: boolean; address: Address | null; target: XrefTarget | null; version: number; onGo: (a: Address, use?: UseHit) => void; onFollow: () => void }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
   const [dir, setDir] = useState<"to" | "from">("to");
@@ -24,27 +24,27 @@ export function XrefPanel({ address, target, version, onGo, onFollow }: { addres
   const at = target?.type === "address" ? target.address : address;
   useEffect(() => {
     const toRows = (r: XrefTo[], use?: string): Row[] => r.map((x) => ({ go: x.from, where: x.from, kind: x.kind, type: x.type, fn: x.function, use }));
-    const pending: { cancel?: () => void } = {};
+    const pending: { cancel?: () => void; done?: boolean } = {};
     const fromRows = (r: XrefFrom[]): Row[] => r.map((x) => ({ go: x.to, where: x.to ?? x.label ?? x.target, kind: x.kind, type: x.type }));
     let q: Promise<Row[] | null>;
-    if (target?.type === "variable") {
+    if (target?.type === "variable" && variableReferences) {
       const { entry, name } = target;
       // a program variable's references; when the program has none (iVar1...), the decompiler's writes and reads of it (a decompile: cancellable)
-      q = run(rpc.call("xrefs_to_variable", { entry, name, limit: LIMIT + 1 }).then(async (r) => {
-        if (r.length) return toRows(r);
-        const c = rpc.callCancellable("variable_uses", { entry, name });
+      q = run(references.xrefsToVariable({ entry, name, limit: LIMIT + 1 }).then(async (r) => {
+        if (r.length || pending.done) return toRows(r);
+        const c = references.variableUses({ entry, name });
         pending.cancel = c.cancel;
         return toRows(await c.result, name);
       }));
     }
     else if (!at) q = run(Promise.resolve(null));
-    else if (mode === "from") q = run(rpc.call("xrefs_from", { address: at }).then(fromRows));
-    else q = run(rpc.call("xrefs_to", { address: at, limit: LIMIT + 1 }).then(toRows));
+    else if (mode === "from") q = run(references.xrefsFrom({ address: at }).then(fromRows));
+    else q = run(references.xrefsTo({ address: at, limit: LIMIT + 1 }).then(toRows));
     if (!at && !target) { setRows([]); setMsg(""); return; }
     setRows([]);
     q.then((r) => { if (r) { setRows(r.slice(0, LIMIT)); setMsg(r.length > LIMIT ? `showing ${LIMIT}, more exist` : r.length ? "" : target?.type === "variable" ? "no references or uses" : "no references"); } },
       (e) => { setRows([]); setMsg(e instanceof Error ? e.message : String(e)); });
-    return () => pending.cancel?.();
+    return () => { pending.done = true; pending.cancel?.(); void run(Promise.resolve(null)); };
   }, [at, target?.type === "variable" ? target.entry + target.name : "", mode, version]); // eslint-disable-line
   const what = target ? target.label : at ?? "-";
   return (

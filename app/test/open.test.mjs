@@ -6,7 +6,7 @@ const load = async (f) => {
   const r = await build({ entryPoints: [new URL(`../src/renderer/${f}`, import.meta.url).pathname], bundle: true, format: "esm", write: false });
   return import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 };
-const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, RAW_CANDIDATE, entropyHint } = await load("openOptions.ts");
+const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, entropyHint } = await load("openOptions.ts");
 const { windowTitle } = await load("session.ts");
 
 test("parseBase: normalises, validates, 64-bit limit", () => {
@@ -20,6 +20,7 @@ test("parseBase: normalises, validates, 64-bit limit", () => {
 });
 
 const macho = { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", preferred: true, acceptsBaseAddress: true };
+const RAW_CANDIDATE = { loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true };
 const alt = { ...macho, language: "x86:LE:64:default", compilerSpec: "gcc", preferred: false };
 const noBase = { ...macho, acceptsBaseAddress: false };
 const ch = (cand, o = {}) => ({ cand, language: cand.language, compilerSpec: cand.compilerSpec, base: "", ...o });
@@ -41,6 +42,11 @@ test("choiceError: language mandatory, base validated only when accepted", () =>
   assert.equal(choiceError(ch(noBase, { base: "0xzz" })), null);
   assert.deepEqual(buildOptions(ch(RAW_CANDIDATE, { language: "ARM:LE:32:v8", base: "0x8000000" })), { loader: "Raw Binary", language: "ARM:LE:32:v8", baseAddress: "0x8000000" });
 });
+test("a provider can supply an import choice with no language", () => {
+  const c = { ...RAW_CANDIDATE, requiresLanguage: false, preferred: false };
+  assert.equal(choiceError(ch(c)), null);
+  assert.deepEqual(buildOptions(ch(c)), { loader: c.loader });
+});
 test("optionsSummary / reopenParams", () => {
   assert.equal(optionsSummary({}), "default");
   assert.equal(optionsSummary({ loader: "Raw Binary", language: "ARM:LE:32:v8", baseAddress: "0x8000000" }), "Raw Binary · ARM:LE:32:v8 · @0x8000000");
@@ -53,16 +59,9 @@ test("windowTitle", () => {
   assert.equal(windowTitle("ls", true), "• ls — Ghidrette");
 });
 
-const { defaultProfile, FAST_MIN_BYTES } = await load("openOptions.ts");
-test("defaultProfile: fast above 20 MB, full otherwise", () => {
-  assert.equal(defaultProfile(4096), "full");
-  assert.equal(defaultProfile(FAST_MIN_BYTES), "full");
-  assert.equal(defaultProfile(FAST_MIN_BYTES + 1), "fast");
-  assert.equal(defaultProfile(66.7 * 1048576), "fast");
-});
-test("buildOptions: profile fast is always sent, full never", () => {
+test("buildOptions: provider-supplied profiles are explicit", () => {
   assert.deepEqual(buildOptions({ ...ch(macho), profile: "fast" }), { profile: "fast" });
-  assert.equal(buildOptions({ ...ch(macho), profile: "full" }), undefined);
+  assert.deepEqual(buildOptions({ ...ch(macho), profile: "full" }), { profile: "full" });
   assert.deepEqual(buildOptions({ ...ch(alt), profile: "fast" }), { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", profile: "fast" });
   assert.deepEqual(buildOptions({ ...ch(macho), base: "0x10", profile: "fast" }), { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", baseAddress: "0x10", profile: "fast" });
 });

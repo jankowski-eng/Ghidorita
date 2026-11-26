@@ -139,7 +139,7 @@ class Events:
                 def at(sp, off):
                     return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
                 out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
-            undo = ses.undo_snap
+            undo, session_id = ses.undo_snap, ses.session_id
         with self.plock:
             if generation == self.generation:
-                self.ctx.notify("program_changed", {"ranges": out, "kinds": kinds, "undo": undo}, generation=generation)
+                self.ctx.notify("program_changed", {"sessionId": session_id, "ranges": out, "kinds": kinds, "undo": undo}, generation=generation)

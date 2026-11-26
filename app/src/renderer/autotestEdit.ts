@@ -1,5 +1,4 @@
 import type { FunctionInfo } from "../../../protocol";
-import { rpc } from "./client";
 import { byLabel, isMock, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Edit flow of the real-sidecar autotest. Everything goes through the UI: key events on the listing / Monaco's input,
@@ -14,7 +13,7 @@ const wordPos = (text: string, w: string) => { // first whole-word hit -> Monaco
 };
 
 export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Record<string, any>): Promise<{ ok: boolean; persist?: unknown }> {
-  fl = await rpc.call("list_functions", {}); // earlier steps of the autotest renamed functions: use current names
+  fl = await c.program().functions.list(); // earlier steps of the autotest renamed functions: use current names
   const R: Record<string, any> = (result.edit = {});
   const lb = () => document.querySelector<HTMLElement>(".lbox")!;
   const fnRow = (e: string) => document.getElementById("fn-" + e)?.textContent ?? "";
@@ -35,7 +34,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
   // 1. pick a function with a local declared with a retypeable type
   let pick: { f: FunctionInfo; v: string; type: string } | null = null, sawVar = false;
   for (const f of fl.slice(0, 80) as FunctionInfo[]) {
-    const r = await rpc.call("decompile", { entry: f.entry });
+    const r = await c.program().decompiler.decompile({ entry: f.entry }).result;
     const lines = r.text.split("\n");
     for (const t of r.tokens) {
       if (t.kind !== "variable" || !t.varName) continue;
@@ -107,11 +106,11 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
   lb().focus();
 
   // 7. Cmd+Z inside a text input stays the input's own undo (program untouched)
-  const before = await rpc.call("undo_state", {});
+  const before = await c.program().history.state();
   press(lb(), "l"); await dialog("Rename");
   const inp = document.querySelector<HTMLInputElement>('[aria-label="New name"]')!; typeInto(inp, "zzz");
   press(inp, "z", { metaKey: true }); await sleep(500);
-  const after = await rpc.call("undo_state", {});
+  const after = await c.program().history.state();
   press(inp, "Escape"); await closed("Rename");
   R.textUndoLeavesProgram = before.undoName === after.undoName && before.canRedo === after.canRedo && !after.canRedo;
   R.escapeRestoresFocus = document.activeElement === lb();
@@ -125,7 +124,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
   await undo(); await wait(() => c.editorText().includes(origVar) && !c.editorText().includes(newVar), "undo variable rename");
   await undo(); await wait(() => fnRow(f.entry).includes(f.name) && !fnRow(f.entry).includes(newFn) && c.editorText() === origText, "undo function rename (original names and text back)");
   R.undoAll = true;
-  const st = await rpc.call("undo_state", {});
+  const st = await c.program().history.state();
   R.afterUndo = st; if (!st.canRedo) throw new Error("redo not available after undo");
 
   // 9. Redo one through the real Edit menu item
@@ -139,7 +138,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
   R.titleDirty = document.title.startsWith("●");
   await c.menu("save");
   await wait(() => !dirtyShown(), "dirty marker to clear after save");
-  R.dirtyCleared = !(await rpc.call("undo_state", {})).dirty && !document.title.startsWith("●");
+  R.dirtyCleared = !(await c.program().history.state()).dirty && !document.title.startsWith("●");
   if (!R.dirtyCleared) throw new Error("dirty not cleared");
   const ok = R.renameFunction && R.renameVariable && R.retype && R.comment && R.createFunction && R.textUndoLeavesProgram && R.escapeRestoresFocus && R.focusBack && R.cursorLineKept && R.undoAll && R.redo && R.dirtyCleared;
   return { ok: !!ok, persist: { entry: f.entry, newName: newFn, origName: f.name, origVar, newVar, newType } };
@@ -151,21 +150,21 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
   c.setPath(file);
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
-  const f = await rpc.call("get_function_at", { address: x.entry });
-  const d = await rpc.call("decompile", { entry: x.entry });
-  const rows = await rpc.call("listing_rows", { address: x.entry, count: 1 });
-  const undo = await rpc.call("undo_state", {});
+  const f = await c.program().functions.containing({ address: x.entry });
+  const d = await c.program().decompiler.decompile({ entry: x.entry }).result;
+  const rows = await c.program().listing.rows({ address: x.entry, count: 1 });
+  const undo = await c.program().history.state();
   result.phase2 = { name: f?.name, hasOrigVar: d.text.includes(x.origVar), hasNewVar: d.text.includes(x.newVar), comment: rows[0]?.comment ?? null, dirty: undo.dirty };
   let typesOk = true;
   if (x.types) { // the struct, its data, the decompiler's use of it and the struct made from data survived save + reopen
-    const t = x.types, st = await rpc.call("get_data_type", { path: "/" + t.name }), fd = await rpc.call("get_data_type", { path: "/" + t.from });
-    const row = (await rpc.call("listing_rows", { address: t.addr, count: 1 }))[0], row2 = (await rpc.call("listing_rows", { address: t.fromAddr, count: 1 }))[0];
-    const dec = await rpc.call("decompile", { entry: t.entry });
+    const t = x.types, st = await c.program().types.getDataType({ path: "/" + t.name }), fd = await c.program().types.getDataType({ path: "/" + t.from });
+    const row = (await c.program().listing.rows({ address: t.addr, count: 1 }))[0], row2 = (await c.program().listing.rows({ address: t.fromAddr, count: 1 }))[0];
+    const dec = await c.program().decompiler.decompile({ entry: t.entry }).result;
     result.phase2.types = { size: st.size, fields: st.components!.filter((c) => !c.undefined).map((c) => c.name), row: row.mnemonic, fromRow: row2.mnemonic, fromFields: fd.components!.filter((c) => !c.undefined).length, inDecompiler: dec.text.includes(t.name) };
     typesOk = st.size === t.size && st.components!.filter((c) => !c.undefined).slice(0, 2).map((c) => c.name).join() === t.fields.join() && row.mnemonic === t.name
       && row2.mnemonic === t.from && fd.components!.filter((c) => !c.undefined).length === 2 && dec.text.includes(t.name);
     if (t.auto) { // the auto-created struct and the variable's new type survived too
-      const as = await rpc.call("get_data_type", { path: "/auto_structs/AutotestAuto" }), ad = await rpc.call("decompile", { entry: t.auto });
+      const as = await c.program().types.getDataType({ path: "/auto_structs/AutotestAuto" }), ad = await c.program().decompiler.decompile({ entry: t.auto }).result;
       result.phase2.types.auto = { size: as.size, inDecompiler: ad.text.includes("AutotestAuto") };
       typesOk = typesOk && as.size > 0 && ad.text.includes("AutotestAuto");
     }
@@ -200,7 +199,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   };
   // program_changed refreshes the listing at its old top row ~100 ms after an edit; navigate only after that has settled
   const goTo = async (addr: string) => { await sleep(800); await c.select(addr as any); };
-  const get = (path: string) => rpc.call("get_data_type", { path });
+  const get = (path: string) => c.program().types.getDataType({ path });
   const rowsText = () => [...document.querySelectorAll(".lrow")].map((x) => x.textContent ?? "");
   const listingHas = (text: string) => rowsText().some((x) => x.includes(text));
   // wait for the listing to (not) show `text` at `addr`; a late program_changed refresh can scroll it back, so navigate again on a miss
@@ -211,10 +210,10 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
       catch (e) { if (n >= 3) throw new Error(`${(e as Error).message}; visible rows: ${rowsText().slice(0, 8).join(" | ")}`); }
     }
   };
-  const base = await rpc.call("undo_state", {});
-  const strings = (await rpc.call("list_strings", { limit: 2, minLength: 1 })).items;
+  const base = await c.program().history.state();
+  const strings = (await c.program().searches.listStrings({ limit: 2, minLength: 1 }).result).items;
   const a = strings[0].address, b = strings[1].address;
-  const fl = await rpc.call("list_functions", {});
+  const fl = await c.program().functions.list();
   const entry = (fl.find((f) => f.entry !== edit?.entry && f.size > 16) ?? fl[0]).entry; // not the function the edit flow checks in phase 2
   const NAME = "AutotestStruct";
   let steps = 0; // undo steps this flow adds (one per transaction)
@@ -262,7 +261,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   await waitFor(() => c.editorText().length > 0, 15000, "decompiler text");
   c.editor().focus(); document.querySelector<HTMLElement>(".monaco-editor textarea")!.focus();
   c.command({ type: "edit", action: "signature" });
-  const sig = (await rpc.call("get_function_at", { address: entry }))!.signature;
+  const sig = (await c.program().functions.containing({ address: entry }))!.signature;
   const box = await waitFor(() => input("Signature"), 5000, "signature input");
   typeInto(box, sig.replace(/\(.*\)\s*;?$/, `(${NAME} *autotest_param)`)); press(box, "Enter"); await closed("Edit function signature"); steps++;
   await waitFor(() => c.editorText().includes(NAME), 15000, "decompiler to show " + NAME);
@@ -271,12 +270,12 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   // 6. undo every step (Cmd+Z on the listing), looking at the visible effect of the first two
   const undo = async () => { lb().focus(); press(lb(), "z", { metaKey: true }); };
   // labels repeat ("Edit S: add" twice), so a step is noticed by the undo state *and* the struct's content changing
-  const depth = async () => JSON.stringify([await rpc.call("undo_state", {}), (await get("/" + NAME).catch(() => null))?.components?.map((x) => [x.type, x.name, x.comment])]);
+  const depth = async () => JSON.stringify([await c.program().history.state(), (await get("/" + NAME).catch(() => null))?.components?.map((x) => [x.type, x.name, x.comment])]);
   await undo(); await waitFor(() => !c.editorText().includes(NAME), 15000, "undo signature");
   await undo(); await listingShows(a, NAME, "undo apply", false);
   for (let i = 2; i < steps; i++) { const n = await depth(); await undo(); await until(async () => (await depth()) !== n, "undo step " + (i + 1)); }
-  await until(async () => (await rpc.call("get_data_type", { path: "/" + NAME }).then(() => false, () => true)), "struct gone after undoing everything");
-  const st = await rpc.call("undo_state", {});
+  await until(async () => (await c.program().types.getDataType({ path: "/" + NAME }).then(() => false, () => true)), "struct gone after undoing everything");
+  const st = await c.program().history.state();
   R.undoAll = st.undoName === base.undoName && st.canRedo;
   if (!R.undoAll) throw new Error(`undo stack not back at baseline: ${JSON.stringify([st, base])}`);
 
@@ -289,33 +288,33 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   R.redoAll = true;
 
   // 8. create a struct from listing data: int + short, selected by cursor + length, applied; one undo removes both
-  await rpc.call("define_data", { address: b, dataType: "int" });
-  await rpc.call("define_data", { address: "0x" + (BigInt(b) + 4n).toString(16), dataType: "short" });
+  await c.program().edits.defineData({ address: b, dataType: "int" });
+  await c.program().edits.defineData({ address: "0x" + (BigInt(b) + 4n).toString(16), dataType: "short" });
   await goTo(b); await sleep(300);
   lb().focus(); c.command({ type: "edit", action: "createStruct" });
   await fillAll("Create structure", { "Structure name": "AutotestFromData", "Length (bytes)": "6" });
-  await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "struct from data");
+  await until(async () => !!(await c.program().types.getDataType({ path: "/AutotestFromData" }).catch(() => null)), "struct from data");
   const f2 = await get("/AutotestFromData");
   R.fromData = f2.components!.filter((x) => !x.undefined).map((x) => `${x.offset}:${x.type}`);
   if (f2.size !== 6 || R.fromData.join() !== "0:int,4:short") throw new Error("unexpected struct from data " + JSON.stringify(R.fromData));
   await listingShows(b, "AutotestFromData", "struct from data in the listing");
-  await undo(); await until(async () => !(await rpc.call("get_data_type", { path: "/AutotestFromData" }).then(() => true, () => false)), "undo struct from data");
+  await undo(); await until(async () => !(await c.program().types.getDataType({ path: "/AutotestFromData" }).then(() => true, () => false)), "undo struct from data");
   await listingShows(b, "AutotestFromData", "listing without the struct from data", false);
-  await c.menu("redo"); await until(async () => !!(await rpc.call("get_data_type", { path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
+  await c.menu("redo"); await until(async () => !!(await c.program().types.getDataType({ path: "/AutotestFromData" }).catch(() => null)), "redo struct from data");
   R.fromDataUndoRedo = true;
 
   // 8b. Auto Create Structure on a decompiler variable (real sidecar only: the mock's variables are not Ghidra's).
   // Find a variable with inferable field accesses by trying the RPC (then undo it), then do it through the UI: cursor on the variable + Edit menu.
   let auto: { entry: string; v: string } | undefined;
-  const hasVars = (await rpc.call("decompile", { entry })).tokens.some((t) => t.kind === "variable" || t.kind === "param");
+  const hasVars = (await c.program().decompiler.decompile({ entry }).result).tokens.some((t) => t.kind === "variable" || t.kind === "param");
   for (const f of (hasVars && !isMock(fl) ? [...fl] : []).sort((x, y) => y.size - x.size).slice(0, 60)) {
     if (f.entry === entry || f.entry === edit?.entry) continue;
-    const r = await rpc.call("decompile", { entry: f.entry }).catch(() => null); // (huge functions may time out)
+    const r = await c.program().decompiler.decompile({ entry: f.entry }).result.catch(() => null); // (huge functions may time out)
     if (!r) continue;
     const vars = [...new Set(r.tokens.filter((t) => (t.kind === "variable" || t.kind === "param") && t.varName).map((t) => t.varName!))];
     for (const v of vars) {
-      const ok = await rpc.call("auto_create_structure", { entry: f.entry, name: v, structName: "AutotestProbe" }).then(() => true, () => false);
-      if (ok) { await rpc.call("undo", {}); auto = { entry: f.entry, v }; break; }
+      const ok = await c.program().edits.autoCreateStructure({ entry: f.entry, name: v, structName: "AutotestProbe" }).then(() => true, () => false);
+      if (ok) { await c.program().history.undo(); auto = { entry: f.entry, v }; break; }
     }
     if (auto) break;
   }
@@ -328,7 +327,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
     c.command({ type: "edit", action: "autoStruct" });
     await fillAll("Auto create structure", { "Structure name (empty = automatic)": "AutotestAuto" });
     await waitFor(() => c.editorText().includes("AutotestAuto"), 15000, "decompiler to show AutotestAuto");
-    const ds = await get("/auto_structs/AutotestAuto").catch(async (e) => { throw new Error(`${e.message}; auto_structs: ${JSON.stringify(await rpc.call("dt_children", { path: "/auto_structs" }).catch(() => null))}; editor: ${c.editorText().split("\n").filter((l) => l.includes("AutotestAuto")).join(" / ")}`); });
+    const ds = await get("/auto_structs/AutotestAuto").catch(async (e) => { throw new Error(`${e.message}; auto_structs: ${JSON.stringify(await c.program().types.dtChildren({ path: "/auto_structs" }).catch(() => null))}; editor: ${c.editorText().split("\n").filter((l) => l.includes("AutotestAuto")).join(" / ")}`); });
     R.autoStruct = { variable: auto.v, size: ds.size, fields: ds.components!.filter((x) => !x.undefined).length };
     if (!ds.size || !R.autoStruct.fields) throw new Error("auto struct has no fields");
     await undo(); await waitFor(() => !c.editorText().includes("AutotestAuto"), 15000, "undo auto struct");
@@ -337,7 +336,7 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
 
   // 9. save through File > Save; the dirty marker clears
   await c.menu("save");
-  await until(async () => !(await rpc.call("undo_state", {})).dirty, "save");
+  await until(async () => !(await c.program().history.state()).dirty, "save");
   const ok = R.created && R.fillerFilled && R.listing && R.decompiler && R.undoAll && R.redoAll && R.fromDataUndoRedo;
   return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b, ...(auto ? { auto: auto.entry } : {}) } };
 }

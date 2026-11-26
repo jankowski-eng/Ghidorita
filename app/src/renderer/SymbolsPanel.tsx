@@ -1,3 +1,4 @@
+import type { Searches } from "./backend";
 import { useRef, useState } from "react";
 import type { Address, SymbolKind, SymbolRow, SymbolSort } from "../../../protocol";
 import { useDebounced } from "./hooks";
@@ -14,13 +15,13 @@ const COLS: Col<SymbolRow>[] = [
 ];
 
 /** Symbol table: server-paged (list_symbols), sortable by every column, name filter and kind filter; click or Enter navigates. */
-export function SymbolsPanel({ version, onGo, onError }: { version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
+export function SymbolsPanel({ listSymbols, version, onGo, onError }: { listSymbols: Searches["listSymbols"]; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const [q, setQ] = useState("");
   const [kinds, setKinds] = useState<SymbolKind[]>([]);
   const [sort, setSort] = useState<Sort>({ key: "address", desc: false });
   const dq = useDebounced(q.trim(), 250);
   const sc = useRef(scanner()).current;
-  const t = usePaged<SymbolRow>((offset, limit) => sc.call("list_symbols", { offset, limit, query: dq, kinds, sort: sort.key as SymbolSort, desc: sort.desc }),
+  const t = usePaged<SymbolRow>((offset, limit) => sc.run(listSymbols({ offset, limit, query: dq, kinds, sort: sort.key as SymbolSort, desc: sort.desc })),
     JSON.stringify([dq, kinds, sort, version]), onError, sc.cancelAll);
   const toggle = (k: SymbolKind) => setKinds((x) => (x.includes(k) ? x.filter((y) => y !== k) : [...x, k]));
   return (

@@ -1,3 +1,4 @@
+import type { Searches } from "./backend";
 import { useEffect, useRef, useState } from "react";
 import type { Address, MemoryHit } from "../../../protocol";
 import { isCancelled, isNoProgram, scanner } from "./scan";
@@ -15,7 +16,7 @@ const PAGE = 1000, CAP = 50_000; // rows per request; the search pauses (Continu
  * Memory search (Ghidra's search over the loaded initialized blocks): hex bytes with `??` wildcards or text (ASCII / UTF-16).
  * Pages are requested one after another and appended (streaming); Cancel stops after the current page and keeps what was found.
  */
-export function MemSearchPanel({ version, onGo, onError }: { version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
+export function MemSearchPanel({ searchMemory, version, onGo, onError }: { searchMemory: Searches["searchMemory"]; version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const [pattern, setPattern] = useState("");
   const [mode, setMode] = useState<Mode>("bytes");
   const [cs, setCs] = useState(true);
@@ -35,7 +36,7 @@ export function MemSearchPanel({ version, onGo, onError }: { version: number; on
     for (;;) {
       let r;
       try {
-        r = await sc.call("search_memory", { pattern: p.pattern, kind: p.mode === "bytes" ? "bytes" : "text", encoding: p.mode === "utf16le" ? "utf16le" : "ascii", caseSensitive: p.cs, start, limit: PAGE });
+        r = await sc.run(searchMemory({ pattern: p.pattern, kind: p.mode === "bytes" ? "bytes" : "text", encoding: p.mode === "utf16le" ? "utf16le" : "ascii", caseSensitive: p.cs, start, limit: PAGE }));
       } catch (e) {
         if (g !== gen.current) return;
         if (isCancelled(e)) setState({ s: "cancelled", resume: start });

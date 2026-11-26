@@ -10,6 +10,13 @@ from ..core.session import undo_state
 from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 
 
+CAPABILITIES = [
+    "importOptions", "decompile", "editing", "variableEditing", "undo", "save", "symbolSearch",
+    "symbolTable", "strings", "memorySearch", "references", "variableReferences", "dataTypes",
+    "typeEditing", "projects", "coverage",
+]
+
+
 class Program:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
@@ -47,6 +54,19 @@ class Program:
                 else:
                     System.setProperty(key, was)
 
+    @rpc(lane="loop")
+    def provider_info(self):
+        interval = float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120"))
+        info = {"provider": "pyghidra", "version": 1, "capabilities": CAPABILITIES[:]}
+        if interval > 0:
+            info["capabilities"].append("recovery")
+            info["recovery"] = {"snapshotIntervalSeconds": interval}
+        return info
+
+    @rpc(lane="loop")
+    def active_session(self):
+        return self.ses.active()
+
     @rpc(lane="project")
     def close_program(self):
         if self.ctx.lanes.opening is not None:
@@ -70,6 +90,7 @@ class Program:
                 raise RuntimeError("save failed before closing the current program: %s" % e) from e
         with self.ses.lock:
             self.ses.program = None
+            self.ses.session_id = self.ses.name = None
             self.ses.epoch += 1
             for j in list(self.ctx.lanes.running):
                 with self.ctx.lanes.mon_lock:
@@ -116,11 +137,11 @@ class Program:
         saved = self._save_program(prog, "save")
         self.ses.refresh_undo(prog)
         if saved:  # Ghidra's save drops the undo/redo stacks and clears dirty: tell the client (empty ranges/kinds = nothing to refetch)
-            self.ctx.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.ses.undo_snap},
+            self.ctx.notify("program_changed", {"sessionId": self.ses.session_id, "ranges": [], "kinds": [], "undo": self.ses.undo_snap},
                             generation=self.ctx.events.generation)
-        return {"saved": saved}
+        return {"saved": saved, "undoHistoryCleared": saved}
 
-    def _publish(self, prog, res, consumer, op, key):
+    def _publish(self, prog, res, consumer, op, key, name):
         from ghidra.app.plugin.core.analysis import AutoAnalysisManager
         with op.lock:  # commit point: after this cancel_open answers false, before it the open still fails with Cancelled
             if op.cancelled:
@@ -132,10 +153,7 @@ class Program:
         self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
         self.ses.results, self.ses.consumer = res, consumer
         self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
-        self.ses.program_id = key
-        with self.ses.lock:
-            self.ses.epoch += 1
-            self.ses.program = prog
+        return self.ses.publish(prog, key, name)
 
     @staticmethod
     def _check_options(loader, language, compilerSpec, baseAddress):
@@ -179,12 +197,13 @@ class Program:
         return opts
 
     @rpc(lane="open")
-    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None):
+    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None, *, _request_id=None):
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
         args = (loader, language, compilerSpec, baseAddress, profile)
-        op = self.ctx.lanes.opening = Opening()
+        op = self.ctx.lanes.opening = Opening(_request_id)
         fut = self.ctx.loop.create_future()
+        self.ctx.progress("import", 0, "starting import")
 
         def body():
             try:
@@ -275,7 +294,7 @@ class Program:
                 self.ctx.project.meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=os.path.getsize(path),
                                  analyzed=True, options=opts)
             try:
-                self._publish(prog, res, consumer, op, key)
+                session = self._publish(prog, res, consumer, op, key, os.path.basename(path))
             except BaseException:
                 self.ctx.events.detach(prog)
                 self.ses.results = self.ses.consumer = None
@@ -283,7 +302,7 @@ class Program:
             self.ctx.progress("ready", 100, "ready")
             self.open_secs = time.monotonic() - t0
             op.finished = True
-            return {"programId": key, "name": os.path.basename(path), "persisted": persisted}
+            return {**session, "persisted": persisted}
         except BaseException as e:  # noqa
             op.finished = True
             if self.ses.program is None:  # not when the old program stayed open because its save failed
@@ -465,5 +484,6 @@ class Program:
         return self._undo_redo(False)
 
     @rpc(lane="loop")
-    def cancel_open(self):
-        return {"cancelled": bool(self.ctx.lanes.opening is not None and self.ctx.lanes.opening.cancel())}
+    def cancel_open(self, id=None):
+        op = self.ctx.lanes.opening
+        return {"cancelled": bool(op is not None and (id is None or id == op.request_id) and op.cancel())}

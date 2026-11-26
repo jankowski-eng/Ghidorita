@@ -1,5 +1,5 @@
+import type { SearchMemoryParams } from "../../../protocol";
 import type { FunctionInfo } from "../../../protocol";
-import { rpc } from "./client";
 import { byLabel, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Navigate-and-find flow of the autotest: the dock windows (symbols, strings, memory search) and the references panel, driven through the real
@@ -27,23 +27,23 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   open("symbols");
   let g = await grid("Symbols");
   let rows = await loaded(g, "symbols");
-  const total = (await rpc.call("list_symbols", { limit: 1 })).total;
+  const total = (await c.program().searches.listSymbols({ limit: 1 }).result).total;
   await waitFor(() => status("Symbol count").startsWith(`${total} symbols`), 10000, "symbol count " + total);
   need(total >= fl.length, "symbol total below function count");
   click("Sort by Name");
-  const byName = await rpc.call("list_symbols", { sort: "name", limit: 3 });
+  const byName = await c.program().searches.listSymbols({ sort: "name", limit: 3 }).result;
   await waitFor(() => cell(rowsOf(g)[0] ?? document.body, "name") === byName.items[0].name && g.querySelector('[aria-sort="ascending"]'), 10000, "name sort first row");
   const first10 = rowsOf(g).slice(0, 10).map((r) => cell(r, "name").toLowerCase());
   need(first10.every((n, i) => i === 0 || first10[i - 1] <= n), "name order " + first10.join(","));
   click("Sort by Address");
   click("Sort by Address"); // second click = descending
   await waitFor(() => g.querySelector('[aria-sort="descending"]'), 5000, "descending");
-  const desc = await rpc.call("list_symbols", { sort: "address", desc: true, limit: 1 });
+  const desc = await c.program().searches.listSymbols({ sort: "address", desc: true, limit: 1 }).result;
   await waitFor(() => cell(rowsOf(g)[0] ?? document.body, "name") === desc.items[0].name, 10000, "descending first row");
   click("Sort by Address"); // back to ascending (a third click toggles)
   const nm = fl[Math.min(5, fl.length - 1)].name;
   typeInto(field("Filter symbols"), nm);
-  const want = await rpc.call("list_symbols", { query: nm, limit: 1 });
+  const want = await c.program().searches.listSymbols({ query: nm, limit: 1 }).result;
   await waitFor(() => status("Symbol count").startsWith(`${want.total} symbols`), 10000, "filtered count " + want.total);
   rows = await loaded(g, "filtered symbols");
   need(rows.every((r) => cell(r, "name").toLowerCase().includes(nm.toLowerCase())), "filter result names");
@@ -55,7 +55,7 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   R.symbols = { total, filter: nm, filtered: want.total, clicked: { addr: tAddr, kind: tKind } };
   typeInto(field("Filter symbols"), "");
   (document.querySelector<HTMLInputElement>('input[aria-label="Kind function"]')!).click();
-  const fnTotal = (await rpc.call("list_symbols", { kinds: ["function"], limit: 1 })).total;
+  const fnTotal = (await c.program().searches.listSymbols({ kinds: ["function"], limit: 1 }).result).total;
   await waitFor(() => status("Symbol count").startsWith(`${fnTotal} symbols`), 20000, "kind filter count " + fnTotal);
   rows = await loaded(g, "function symbols");
   need(rows.every((r) => cell(r, "kind") === "function"), "kind filter rows");
@@ -66,14 +66,14 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   open("strings");
   g = await grid("Strings");
   rows = await loaded(g, "strings");
-  const sTotal = (await rpc.call("list_strings", { limit: 1 })).total;
+  const sTotal = (await c.program().searches.listStrings({ limit: 1 }).result).total;
   await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 20000, "string count " + sTotal);
   const s0 = rows[0], sAddr = cell(s0, "address"), sVal = cell(s0, "value");
   s0.click();
   await navigated(sAddr, "string click");
   const word = sVal.slice(0, Math.min(6, sVal.length));
   typeInto(field("Filter strings"), word.toUpperCase());
-  const sw = await rpc.call("list_strings", { query: word, limit: 1 });
+  const sw = await c.program().searches.listStrings({ query: word, limit: 1 }).result;
   await waitFor(() => status("String count").startsWith(`${sw.total} strings`), 10000, "string filter count " + sw.total);
   rows = await loaded(g, "filtered strings");
   need(rows.every((r) => cell(r, "value").toLowerCase().includes(word.toLowerCase())), "string filter values");
@@ -85,15 +85,15 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
 
   // the panel follows a real edit: clear a string with clear_code (through the RPC, as the listing's C key does), the panel must drop it without
   // being touched, and show it again after undo. The string is picked so that its text matches exactly one string (the filter then reads 1 -> 0 -> 1).
-  const cands = (await rpc.call("list_strings", { minLength: 8, limit: 60 })).items.filter((i) => i.value.length >= 8 && i.value.length <= 40);
+  const cands = (await c.program().searches.listStrings({ minLength: 8, limit: 60 }).result).items.filter((i) => i.value.length >= 8 && i.value.length <= 40);
   let pick: (typeof cands)[number] | undefined;
-  for (const i of cands) if ((await rpc.call("list_strings", { query: i.value, limit: 1 })).total === 1) { pick = i; break; }
+  for (const i of cands) if ((await c.program().searches.listStrings({ query: i.value, limit: 1 }).result).total === 1) { pick = i; break; }
   need(pick, "a string that is unique by its text");
   typeInto(field("Filter strings"), pick!.value);
   await waitFor(() => status("String count").startsWith("1 strings"), 10000, "unique string filter");
-  await rpc.call("clear_code", { address: pick!.address });
+  await c.program().edits.clearCode({ address: pick!.address });
   await waitFor(() => status("String count").startsWith("0 strings"), 10000, "strings panel to drop the cleared string");
-  await rpc.call("undo", {});
+  await c.program().history.undo();
   await waitFor(() => status("String count").startsWith("1 strings"), 10000, "strings panel to show the string again after undo");
   typeInto(field("Filter strings"), "");
   await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 10000, "string count after the edit round trip");
@@ -103,12 +103,12 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   open("memsearch");
   await waitFor(() => byLabel("region", "Memory search"), 5000, "memory search panel");
   const f = fl[Math.min(10, fl.length - 1)];
-  const lr = await rpc.call("listing_rows", { address: f.entry, count: 4 });
+  const lr = await c.program().listing.rows({ address: f.entry, count: 4 });
   const bytes = lr.flatMap((r) => r.bytes.split(" ")).slice(0, 4);
   need(bytes.length === 4, "need 4 bytes at " + f.entry);
-  const count = async (p: Parameters<typeof rpc.call<"search_memory">>[1]) => {
+  const count = async (p: SearchMemoryParams) => {
     let n = 0, start: string | undefined, has = false;
-    for (;;) { const r = await rpc.call("search_memory", { ...p, start, limit: 5000 }); n += r.items.length; has ||= r.items.some((i) => i.address === f.entry); if (!r.next) return { n, has }; start = r.next; }
+    for (;;) { const r = await c.program().searches.searchMemory({ ...p, start, limit: 5000 }).result; n += r.items.length; has ||= r.items.some((i) => i.address === f.entry); if (!r.next) return { n, has }; start = r.next; }
   };
   const setMode = (mode: string) => {
     const sel = document.querySelector<HTMLSelectElement>('select[aria-label="Search type"]')!;
@@ -134,11 +134,11 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   const wild = `${bytes[0]} ?? ${bytes[2]} ${bytes[3]}`;
   const nWild = await search(wild, "bytes"), wRef = await count({ pattern: wild });
   need(nWild === wRef.n && nWild >= nExact && wRef.has, `wildcard search: panel ${nWild} vs rpc ${wRef.n}`);
-  const str = (await rpc.call("list_strings", { minLength: 6, limit: 1 })).items[0];
+  const str = (await c.program().searches.listStrings({ minLength: 6, limit: 1 }).result).items[0];
   let nText = -1;
   if (str && /^[\x20-\x7e]+$/.test(str.value)) {
     nText = await search(str.value, "ascii");
-    const t = await rpc.call("search_memory", { pattern: str.value, kind: "text", limit: 5000 });
+    const t = await c.program().searches.searchMemory({ pattern: str.value, kind: "text", limit: 5000 }).result;
     need(nText === t.items.length && t.items.some((i) => i.address === str.address), "text search for " + str.value);
   }
   const nU16 = await search("ab", "utf16le");
@@ -154,7 +154,7 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   // ---- References: to / from, pinned from a listing row and from a decompiler token ----
   let callee: { entry: string; from: string } | null = null;
   for (const fn of fl.slice(0, 400)) {
-    const x = (await rpc.call("xrefs_to", { address: fn.entry })).find((r) => r.kind === "call");
+    const x = (await c.program().references.xrefsTo({ address: fn.entry })).find((r) => r.kind === "call");
     if (x) { callee = { entry: fn.entry, from: x.from }; break; }
   }
   need(callee, "no called function in the first 400");
@@ -182,7 +182,7 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   // X on a decompiler token: a variable/param if the decompiler has one, else a call target
   let tokPick: { f: FunctionInfo; label: string; line: number; col: number; kind: string; text: string } | null = null;
   for (const fn of fl.slice(0, 80)) {
-    const d = await rpc.call("decompile", { entry: fn.entry });
+    const d = await c.program().decompiler.decompile({ entry: fn.entry }).result;
     const t = d.tokens.find((t) => (t.kind === "variable" || t.kind === "param") && t.varName) ?? d.tokens.find((t) => t.targetFunction && t.targetFunction !== fn.entry);
     if (t) { tokPick = { f: fn, label: t.varName ?? d.text.split("\n")[t.line].slice(t.colStart, t.colEnd), line: t.line + 1, col: t.colStart + 2, kind: t.varName ? "variable" : "call", text: d.text }; break; }
   }

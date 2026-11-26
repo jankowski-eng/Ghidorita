@@ -1,23 +1,23 @@
 import { useRef, useState } from "react";
-import { ErrorCode, type Address, type Token } from "../../../protocol";
-import { rpc } from "./client";
-import { RpcError } from "./backend";
+import type { Address, Token } from "../../../protocol";
+import { BackendError, isFailure, isObsolete, type Decompilation, type Failure } from "./backend";
 import { decompileJobs } from "./decompileJobs";
 import { emptyTabs, openFunction, pinTab, activateTab, closeTab, droppedIds, isLarge, LONG_TIMEOUT_SECS, testTimeout, type Tabs } from "./tabs";
 
 /** "large": not started, waiting for "Decompile anyway" (size warning). error + code Timeout/Cancelled also offer "Decompile anyway". long: running with the long timeout (cancellable). */
-export interface TabData { status: "loading" | "ready" | "error" | "large"; text: string; tokens: Token[]; error?: string; code?: number; size?: number; long?: boolean }
-export const canForce = (d: TabData) => d.status === "large" || (d.status === "error" && (d.code === -32003 || d.code === -32002));
+export interface TabData { status: "loading" | "ready" | "error" | "large"; text: string; tokens: Token[]; error?: string; kind?: Failure; size?: number; long?: boolean }
+export const canForce = (d: TabData) => d.status === "large" || (d.status === "error" && (d.kind === "timeout" || d.kind === "cancelled"));
 
 /**
  * Decompiler tabs + per-tab results. A tab decompiles once; switching back reuses the stored result.
  * Closing or replacing a tab cancels its in-flight decompile; results are applied only if that tab id is still open.
  */
-export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number) => void, sizeOf: (entry: Address) => number) {
+export function useTabs(decompiler: Decompilation | undefined, onError: (e: unknown) => void, onDecompiled: (ms: number) => void, sizeOf: (entry: Address) => number) {
   const [, bump] = useState(0);
   const tabsRef = useRef<Tabs>(emptyTabs);
   const dataRef = useRef<Record<number, TabData>>({});
-  const jobs = useRef(decompileJobs(rpc));
+  const current = useRef(decompiler); current.current = decompiler;
+  const jobs = useRef(decompileJobs({ decompile: (p) => current.current!.decompile(p) }));
   const anyway = useRef(new Set<number>());       // tabs the user confirmed ("Decompile anyway"): long timeout, no size warning
 
   const set = (next: Tabs) => {
@@ -32,6 +32,7 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
   const setData = (id: number, d: TabData) => { dataRef.current = { ...dataRef.current, [id]: d }; bump((n) => n + 1); };
 
   const load = async (id: number, entry: Address, force = false, confirm = false) => {
+    if (!decompiler) return;
     const cur = dataRef.current[id];
     if (cur && cur.status !== "error" && !force) return;
     if (confirm) anyway.current.add(id);
@@ -48,9 +49,9 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
       setData(id, { status: "ready", text: r.text, tokens: r.tokens });
       onDecompiled(Math.round(performance.now() - t0));
     } catch (e) {
-      if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current() || (e instanceof RpcError && e.code === ErrorCode.Cancelled)) return;
-      setData(id, { status: "error", text: "", tokens: [], error: e instanceof Error ? e.message : String(e), code: e instanceof RpcError ? e.code : undefined });
-      if (!(e instanceof RpcError && e.code === ErrorCode.Timeout)) onError(e); // a timeout is shown in the pane with its "Decompile anyway" button
+      if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current() || isFailure(e, "cancelled") || isObsolete(e)) return;
+      setData(id, { status: "error", text: "", tokens: [], error: e instanceof Error ? e.message : String(e), kind: e instanceof BackendError ? e.kind : undefined });
+      if (!isFailure(e, "timeout")) onError(e); // a timeout is shown in the pane with its "Decompile anyway" button
     } finally { job.done(); }
   };
 
@@ -79,7 +80,7 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
     /** user cancel of a running decompile: the tab falls back to its "Decompile anyway" state */
     cancel: (id: number) => {
       jobs.current.drop(id);
-      setData(id, { status: "error", text: "", tokens: [], error: "Decompile cancelled.", code: ErrorCode.Cancelled });
+      setData(id, { status: "error", text: "", tokens: [], error: "Decompile cancelled.", kind: "cancelled" });
     },
     reload: (id: number) => { const t = tabsRef.current.tabs.find((x) => x.id === id); if (t) void load(id, t.entry, true); },
     reset: () => set({ ...emptyTabs, nextId: tabsRef.current.nextId }),

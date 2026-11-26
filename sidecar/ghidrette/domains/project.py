@@ -143,7 +143,7 @@ class Project:
         return out
 
     @rpc(lane="project")
-    def import_candidates(self, path):
+    def import_candidates(self, path, *, _versioned=False):
         from java.io import File
         from ghidra.app.util.importer import LoadSpecChooser
         from ghidra.app.util.opinion import LoaderService
@@ -160,8 +160,14 @@ class Project:
                 chosen = LoadSpecChooser.CHOOSE_THE_FIRST_PREFERRED.choose(lm)
                 size = os.path.getsize(path)
                 ent = entropy_profile(path, size)
+                choices = {"sizeBytes": size, "entropy": ent,
+                           "profiles": [{"id": "full", "label": "Full"},
+                                        {"id": "fast", "label": "Fast (skips switch analysis, call-convention ID, stack)"}],
+                           "defaultProfile": "fast" if size > 20 * 1048576 else "full"}
                 if chosen is None:  # only Raw Binary (always offered, needs a language) applies: "nothing recognises the file"
-                    return {"candidates": [], "sizeBytes": size, "entropy": ent}
+                    raw = {"loader": RAW, "language": None, "compilerSpec": None, "preferred": True, "acceptsBaseAddress": True}
+                    return {**choices, "candidates": [raw] if _versioned else [],
+                            "note": "No loader recognises this file. You can import it as a Raw Binary."}
                 out = []
                 for e in lm.entrySet():
                     loader = str(e.getKey().getName())
@@ -175,7 +181,7 @@ class Project:
                                     "compilerSpec": str(lcs.compilerSpecID) if lcs is not None else None,
                                     "preferred": spec == chosen,
                                     "acceptsBaseAddress": loader == RAW})
-                return {"candidates": out, "sizeBytes": size, "entropy": ent}
+                return {**choices, "candidates": out}
             finally:
                 p.close()
 
