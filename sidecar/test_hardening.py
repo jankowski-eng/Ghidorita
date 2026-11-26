@@ -1,8 +1,8 @@
 """Round 9 (hardening): defects that were reproduced, each with the test that fails on the old code. Real Ghidra on /bin/ls (one analysis, copied per test)."""
 import asyncio
 
-from ghidrette.core.errors import INTERNAL, RpcError
-from ghidrette.domains import search
+from ghidorita.core.errors import INTERNAL, RpcError
+from ghidorita.domains import search
 from testlib import BIN, CANCELLED, Client, INVALID, NOT_FOUND, NO_PROGRAM, Proc, run
 from test_persist import base, projects  # noqa: F401  (fixtures)
 

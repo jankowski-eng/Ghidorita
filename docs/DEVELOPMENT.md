@@ -37,7 +37,11 @@ export GHIDRA_INSTALL_DIR=$PWD/ghidra-install/ghidra_12.3_DEV
 cd app && npm start
 ```
 
-`npm start` launches the PyGhidra sidecar itself (`GHIDRETTE_PROVIDER=fixture` launches the read-only fixture provider instead; see [PROVIDERS.md](../PROVIDERS.md)). Then "Open binary…" (or drop a file on the window), pick a file, wait for analysis.
+`npm start` launches the PyGhidra sidecar itself (`GHIDORITA_PROVIDER=fixture` launches the read-only fixture provider instead; see [PROVIDERS.md](../PROVIDERS.md)). Then "Open binary…" (or drop a file on the window), pick a file, wait for analysis.
+
+On macOS, `npm install` / `npm ci` runs `app/scripts/dev-app.cjs` (postinstall): it renames the dev Electron in `node_modules/electron/dist` to `Ghidorita.app`, sets its name and icon and re-signs it ad hoc, so the dev build shows as "Ghidorita" in the Dock and menu bar. The executable inside stays `Electron` because Electron's `app.isPackaged` is true for any other name.
+
+README screenshots: each is one `AUTOTEST_FLOW=shot-<name>` flow (`app/src/renderer/autotest/autotestShots.ts`); the window capture lands in `app/out/screenshot.png`, scaled to 1600 px wide with `sips --resampleWidth 1600`. Binaries: `shot-overview` on `mysqldump`; `shot-strings`, `shot-actions`, `shot-bar`, `shot-datatypes`, `shot-graph`, `shot-callgraph:<run>` and `shot-coverage:<run A>:<run B>` on `/bin/bash` (coverage files with ranges in `FUN_100001a40` and `FUN_10000254b`); then `shot-start` and `shot-import` (`/usr/bin/zip`) on that same projects dir; `shot-analysis` on `/usr/bin/vim` in a fresh projects dir; `shot-calls`, `shot-bookmarks`, `shot-copy` on `/bin/ls` in another.
 
 Other modes:
 
@@ -69,10 +73,10 @@ Listing rows show function headers, plate/pre/post/EOL/repeatable comments, all 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home GHIDRA_INSTALL_DIR=$PWD/ghidra-install/ghidra_12.3_DEV
 export GHIDRA_SRC=~/Projekte/floss/ghidra    # optional: adds Ghidra's NOTICE file and its HEAD to the bundle
-cd app && npm ci && npm run dist             # -> app/dist/Ghidrette-<ver>-arm64.dmg and app/dist/mac-arm64/Ghidrette.app
+cd app && npm ci && npm run dist             # -> app/dist/Ghidorita-<ver>-arm64.dmg and app/dist/mac-arm64/Ghidorita.app
 ```
 
-Prerequisites: JDK 25 (only `jlink` runs from it), `uv` and network (python-build-standalone), `npm ci` in `app/` (a real `node_modules` that includes `electron-builder`; the worktree symlink to another checkout's `node_modules` lacked it), the Ghidra distribution in `GHIDRA_INSTALL_DIR`. Status: verified on 2026-11-26 (macOS 26.x, Apple Silicon, ad-hoc signed; second full build after the fixes below): `npm run dist` takes 1 min 27 s (warm caches; `npm ci`, the python-build-standalone download and Electron's zip were cached or fast) and gives a 382 MB .dmg (381,806,831 bytes) and an 861 MB .app. Launched from a clean shell (`env -i`, only `HOME` and `PATH=/usr/bin:/bin`, fresh `--user-data-dir`, no `JAVA_HOME`, `GHIDRA_INSTALL_DIR`, `PYTHONPATH` or venv) the autotest on `/bin/ls` passes in both phases (phase 1: 68 s including the one-time Ghidra analysis, 136 functions, listing + decompiler, edits, save, close, import; phase 2 after quit: 7 s, edits and types persisted) and no app, python, decompile or java process is left 10 s after quit. The fixture-only build (`npm run dist:fixture`) opens `app/providers/example.ghidrette.json` the same way without any `GHIDRETTE_PROVIDER` (5 s, no JVM started). Not verified: Developer ID signing and notarization (see Signing), an Intel Mac, macOS below 26, a downloaded (quarantined) copy.
+Prerequisites: JDK 25 (only `jlink` runs from it), `uv` and network (python-build-standalone), `npm ci` in `app/` (a real `node_modules` that includes `electron-builder`; the worktree symlink to another checkout's `node_modules` lacked it), the Ghidra distribution in `GHIDRA_INSTALL_DIR`. Status: verified on 2026-11-26 (macOS 26.x, Apple Silicon, ad-hoc signed; second full build after the fixes below): `npm run dist` takes 1 min 27 s (warm caches; `npm ci`, the python-build-standalone download and Electron's zip were cached or fast) and gives a 382 MB .dmg (381,806,831 bytes) and an 861 MB .app. Launched from a clean shell (`env -i`, only `HOME` and `PATH=/usr/bin:/bin`, fresh `--user-data-dir`, no `JAVA_HOME`, `GHIDRA_INSTALL_DIR`, `PYTHONPATH` or venv) the autotest on `/bin/ls` passes in both phases (phase 1: 68 s including the one-time Ghidra analysis, 136 functions, listing + decompiler, edits, save, close, import; phase 2 after quit: 7 s, edits and types persisted) and no app, python, decompile or java process is left 10 s after quit. The fixture-only build (`npm run dist:fixture`) opens `app/providers/example.ghidorita.json` the same way without any `GHIDORITA_PROVIDER` (5 s, no JVM started). Not verified: Developer ID signing and notarization (see Signing), an Intel Mac, macOS below 26, a downloaded (quarantined) copy.
 
 Found by this run: the sidecar's Python wrote `__pycache__` into `Resources/`, which broke the ad-hoc code-signature seal (`codesign --verify` failed after the first launch). `providers.ts` now sets `PYTHONPYCACHEPREFIX=userData/pycache` when packaged; the seal stays valid after launches.
 
@@ -82,19 +86,19 @@ What the bundle contains (`Contents/Resources/`, sizes of the 2026-11-26 build; 
 - `jdk/` (64 MB): `jlink` runtime with the modules found by `jdeps -s` over every Ghidra jar and `org.jpype.jar` (java.base, desktop, sql, xml, naming, rmi, management, scripting, net.http, jdk.compiler, jdk.unsupported, …) plus `jdk.zipfs jdk.crypto.ec jdk.management jdk.charsets java.prefs`.
 - `ghidra/` (426 MB): copy of the distribution minus the FunctionID databases vs2012 and vsOlder_x64, docs, Extensions, Debug (debugger), GhidraServer, BSim, x86_64/other-OS natives, `*-src.zip`, unused `support/` launchers (sizes in `app/bundle/trim-log.txt`). The `os/mac_arm_64` decompiler binary is kept and `chmod +x`'d; electron-builder preserves the mode. Function ID: the databases cover MSVC runtimes for Windows PE (x86/x64) only. The bundle keeps vs2015, vs2017, vs2019 (93 MB) and `vsOlder_x86` (39 MB) and cuts vs2012 and `vsOlder_x64` (63 MB). On `WinHelloCPP.exe` the full install names 222 functions, the bundle 222 (without `vsOlder_x86`: 28); x64 binaries built with older MSVC were not tried, so `vsOlder_x64` (27 MB) may be worth keeping. Kept although large: `Features/Base/data/typeinfo` (124 MB), all processors.
 - `python/` (59 MB): python-build-standalone 3.12 with websockets, jpype1, packaging, typing_extensions, pyghidra (wheel from the Ghidra build). tkinter, Tcl/Tk, idle, pip's console scripts with absolute shebangs, `direct_url.json` and the build prefix in `_sysconfigdata` are removed so no path of the build machine ends up in the bundle. Links only against system libs.
-- `sidecar/main.py` and the `sidecar/ghidrette/` package (code layout: [sidecar/ARCHITECTURE.md](../sidecar/ARCHITECTURE.md)), plus `sidecar/jscans/out/` with the Java helpers compiled by `prepare.sh`.
+- `sidecar/main.py` and the `sidecar/ghidorita/` package (code layout: [sidecar/ARCHITECTURE.md](../sidecar/ARCHITECTURE.md)), plus `sidecar/jscans/out/` with the Java helpers compiled by `prepare.sh`.
 - `sidecar/` is about 1 MB; Electron itself (`Frameworks/`) is 263 MB.
-- `providers/fixture.cjs` (the fixture provider; `providers/example.ghidrette.json` is not bundled, open the file from the repo).
+- `providers/fixture.cjs` (the fixture provider; `providers/example.ghidorita.json` is not bundled, open the file from the repo).
 - `THIRD_PARTY_NOTICES/` (license texts copied from the sources by `prepare.sh`; index: `packaging/THIRD_PARTY_NOTICES.md`) and `BUILD_INFO.json` (Ghidra commit and build date, JDK, Python, Electron and app versions).
 
-`npm run dist:fixture` (`fixture.builder.cjs`, output `app/dist/fixture/mac-arm64/Ghidrette.app`, 312 MB, no dmg) packages Electron and the fixture provider only. Its `package.json` carries `ghidretteProvider: "fixture"` (`extraMetadata`), which `providers.ts` reads as the default provider when packaged; `GHIDRETTE_PROVIDER`, `MOCK` and `SIDECAR_CMD` still win, and the full build has no such key (default `pyghidra`).
+`npm run dist:fixture` (`fixture.builder.cjs`, output `app/dist/fixture/mac-arm64/Ghidorita.app`, 312 MB, no dmg) packages Electron and the fixture provider only. Its `package.json` carries `ghidoritaProvider: "fixture"` (`extraMetadata`), which `providers.ts` reads as the default provider when packaged; `GHIDORITA_PROVIDER`, `MOCK` and `SIDECAR_CMD` still win, and the full build has no such key (default `pyghidra`).
 
 The PyGhidra launch configuration (`app/src/main/providers.ts`) uses these when `app.isPackaged` (JAVA_HOME, GHIDRA_INSTALL_DIR, PYTHONNOUSERSITE, PYTHONPYCACHEPREFIX set; the shell's values are ignored); in dev it still uses the env vars and `sidecar/.venv`. `SIDECAR_MAXMEM`, `SIDECAR_ANALYSIS_DISABLE`, `SIDECAR_PROJECTS_DIR` (default `userData/projects`) pass through. `userData` of the packaged app is `~/Library/Application Support/ghidra-desktop-spike-app` (the `name` in `package.json`, not the product name; dev uses the same folder). Autotest output in the packaged app goes to `userData/out` (asar is read-only). `MOCK`/`AUTOTEST`/`BENCH` work as before.
 
 Checking a build from a clean environment (what the 2026-11-26 run did):
 ```bash
-env -i HOME="$HOME" PATH=/usr/bin:/bin AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=$(mktemp -d) app/dist/mac-arm64/Ghidrette.app/Contents/MacOS/Ghidrette
-# then the same with AUTOTEST_PHASE=2 and the same SIDECAR_PROJECTS_DIR; the fixture: GHIDRETTE_PROVIDER=fixture AUTOTEST_FLOW=browsing AUTOTEST=app/providers/example.ghidrette.json
+env -i HOME="$HOME" PATH=/usr/bin:/bin AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=$(mktemp -d) app/dist/mac-arm64/Ghidorita.app/Contents/MacOS/Ghidorita
+# then the same with AUTOTEST_PHASE=2 and the same SIDECAR_PROJECTS_DIR; the fixture: GHIDORITA_PROVIDER=fixture AUTOTEST_FLOW=browsing AUTOTEST=app/providers/example.ghidorita.json
 ```
 Both phases print `AUTOTEST_RESULT {"ok":true,…}`. The processes of a run (`ps`) are the app's helpers, `Resources/python/bin/python3` and, below it, `Resources/ghidra/.../os/mac_arm_64/decompile` and `demangler_gnu`; the JVM lives inside the python process (JPype, `Resources/jdk`).
 
@@ -102,7 +106,7 @@ Both phases print `AUTOTEST_RESULT {"ok":true,…}`. The processes of a run (`ps
 Round 4 on a 66 MB binary: JVM 3.5–4.1 GB peak plus up to 5.6 GB in the native decompiler (≈ 10 GB together). **Minimum 8 GB** (small and medium binaries; the default heap is half of RAM, so 4 GB on an 8 GB Mac; very large binaries will swap), **recommended 16 GB or more** for binaries in the 50+ MB range.
 
 ### Signing (current: ad-hoc)
-The default build is ad-hoc signed with the hardened runtime off (`mac.identity: "-"`, `hardenedRuntime: false`). A downloaded copy carries the quarantine attribute and macOS refuses to open it (`spctl` reports `rejected`; the app does not start). On macOS 15 and later the "right-click → Open" override is gone: open System Settings → Privacy & Security, scroll to the message about Ghidrette and click "Open Anyway" (then confirm with the login password). Or remove the attribute before the first launch: `xattr -dr com.apple.quarantine /Applications/Ghidrette.app`. Files copied without a browser (scp, a local build) have no quarantine and open directly. `spctl -a -t exec` reports `rejected` for the ad-hoc build even without quarantine (expected; a local launch from Terminal or Finder works). First launch of a freshly copied .app: the JVM is up 5.2 s after exec; the Gatekeeper dialog for a quarantined copy was not captured on screen.
+The default build is ad-hoc signed with the hardened runtime off (`mac.identity: "-"`, `hardenedRuntime: false`). A downloaded copy carries the quarantine attribute and macOS refuses to open it (`spctl` reports `rejected`; the app does not start). On macOS 15 and later the "right-click → Open" override is gone: open System Settings → Privacy & Security, scroll to the message about Ghidorita and click "Open Anyway" (then confirm with the login password). Or remove the attribute before the first launch: `xattr -dr com.apple.quarantine /Applications/Ghidorita.app`. Files copied without a browser (scp, a local build) have no quarantine and open directly. `spctl -a -t exec` reports `rejected` for the ad-hoc build even without quarantine (expected; a local launch from Terminal or Finder works). First launch of a freshly copied .app: the JVM is up 5.2 s after exec; the Gatekeeper dialog for a quarantined copy was not captured on screen.
 
 Developer ID + notarization (the hook and the flow are in place; run with a real identity by the credential holder, not exercised yet):
 - `app/scripts/sign-nested.cjs` is the `afterSign` hook. With `SIGN_IDENTITY` unset it does nothing (the default `npm run dist`). With it set, it signs every nested Mach-O under `Contents/Resources` (found by magic number, so `jdk/**`, `python/**` including the universal `_jpype.so`, `ghidra/**/os/mac_arm_64/*`, every `*.dylib` and `*.so`) with `--options runtime --timestamp --entitlements packaging/entitlements.mac.plist`, then re-signs the app bundle (its seal covers Resources). `SIGN_IDENTITY=-` runs the same flow ad-hoc (no timestamp): the hardened-runtime build launched and passed the autotest, so the JIT/library-validation entitlements are sufficient for the JVM, JPype and the decompiler.
@@ -115,9 +119,9 @@ export APPLE_ID=<apple id e-mail> APPLE_APP_SPECIFIC_PASSWORD=<app-specific pass
 export JAVA_HOME=... GHIDRA_INSTALL_DIR=... GHIDRA_SRC=...
 cd app && npm run dist:signed
 # the .app is notarized and stapled by electron-builder; notarize the .dmg too and staple it:
-xcrun notarytool submit dist/Ghidrette-<ver>-arm64.dmg --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-xcrun stapler staple dist/Ghidrette-<ver>-arm64.dmg
-spctl -a -t exec -vv dist/mac-arm64/Ghidrette.app      # expect: accepted, source=Notarized Developer ID
+xcrun notarytool submit dist/Ghidorita-<ver>-arm64.dmg --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+xcrun stapler staple dist/Ghidorita-<ver>-arm64.dmg
+spctl -a -t exec -vv dist/mac-arm64/Ghidorita.app      # expect: accepted, source=Notarized Developer ID
 ```
 If notarization rejects the upload, `xcrun notarytool log <submission-id> --apple-id … --team-id …` names the unsigned or unhardened file.
 
@@ -125,7 +129,7 @@ If notarization rejects the upload, `xcrun notarytool log <submission-id> --appl
 - jlink runtime and python-build-standalone per OS/arch; the python path becomes `python/python.exe` on Windows.
 - Ghidra: keep `os/linux_x86_64` or `os/win_x86_64` natives instead of `mac_arm_64` (and decompile binaries become `.exe` on Windows); the `GPL/` demangler natives likewise.
 - Packaging targets (AppImage/deb or NSIS/MSI), no dmg, Windows executable bits not needed; signing via signtool/GPG rather than codesign.
-- `userData` path, default `SIDECAR_PROJECTS_DIR` fallback in `sidecar/ghidrette/domains/project.py` (`~/Library/Application Support/…`) and the macOS menu/dock code.
+- `userData` path, default `SIDECAR_PROJECTS_DIR` fallback in `sidecar/ghidorita/domains/project.py` (`~/Library/Application Support/…`) and the macOS menu/dock code.
 
 ## Navigate and find
 View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Memory… (Cmd+Shift+F) open a dock under the panes; each window is server-paged (a click or Enter navigates the listing and the decompiler). Search Memory takes hex bytes with `??` wildcards or ASCII / UTF-16 text and streams pages until done; Cancel keeps what was found, Continue resumes. `X` on a listing row or a decompiler token (also Go > Show References To, and the decompiler context menu) pins the References panel to it ("follow cursor" unpins); its "from…" button lists what the current instruction references.
@@ -133,7 +137,7 @@ View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Mem
 Data types: View > Data Type Manager (Cmd+Shift+T) or "Data Type Manager" in the command bar (Cmd+K, `>`); Edit > Create Structure from Data… on the listing cursor row. Struct/enum edits are undoable like any edit. The autotest also covers this flow (`AUTOTEST_PHASE=2` checks the struct survived).
 
 ## Round 9 additions
-- `sidecar/jscans/GhidretteScans.java`: the strings scan and the symbol kind filter/sort run in Java. `ghidrette/core/jscans.py` compiles it with `$JAVA_HOME/bin/javac` at start when the class is missing or older (`prepare.sh` ships it precompiled). Do not name a directory `java` next to `main.py` (the sidecar directory): it shadows JPype's `java` package.
+- `sidecar/jscans/GhidoritaScans.java`: the strings scan and the symbol kind filter/sort run in Java. `ghidorita/core/jscans.py` compiles it with `$JAVA_HOME/bin/javac` at start when the class is missing or older (`prepare.sh` ships it precompiled). Do not name a directory `java` next to `main.py` (the sidecar directory): it shadows JPype's `java` package.
 - Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron and needs a display. Its focused flows are `AUTOTEST_FLOW=locked|big`; `sidecar/test_provider_ui.py` runs the browsing, replacement and open-preserve flows against each provider. Set `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` to exercise the decompile timeout.
 - Benchmarks wait for a quiet machine (`bench/common.py: wait_quiet`) and exit 3 instead of measuring under load. `bench/run_round9.sh` runs the repeats.
 - A failed replacement open preserves the active program and undo history (protocol.md).

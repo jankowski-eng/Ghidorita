@@ -3,7 +3,7 @@ import socket, threading, queue
 
 import pytest
 
-from ghidrette.core.gdb import Gdb, GdbError, frame
+from ghidorita.core.gdb import Gdb, GdbError, frame
 
 
 def serve(script):

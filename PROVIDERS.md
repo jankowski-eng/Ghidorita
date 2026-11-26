@@ -1,4 +1,4 @@
-# Ghidrette providers
+# Ghidorita providers
 
 ## Run either backend
 
@@ -15,26 +15,26 @@ Launch PyGhidra with the development virtual environment and the Ghidra installa
 ```sh
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 export GHIDRA_INSTALL_DIR="$PWD/../ghidra-install/ghidra_12.3_DEV"
-GHIDRETTE_PROVIDER=pyghidra ./node_modules/.bin/electron .
+GHIDORITA_PROVIDER=pyghidra ./node_modules/.bin/electron .
 ```
 
 Launch the read-only provider from the same build:
 
 ```sh
-GHIDRETTE_PROVIDER=fixture ./node_modules/.bin/electron .
+GHIDORITA_PROVIDER=fixture ./node_modules/.bin/electron .
 ```
 
-Open `app/providers/example.ghidrette.json` and select `overlay_return`. The listing jumps to `overlay::fedcba9876543060`. The provider runs on Electron's bundled Node runtime and needs no Ghidra, JVM, Python, or project. PyGhidra remains the default. `MOCK=1` and `SIDECAR_CMD` retain their development roles. An explicit `GHIDRETTE_PROVIDER` takes precedence.
+Open `app/providers/example.ghidorita.json` and select `overlay_return`. The listing jumps to `overlay::fedcba9876543060`. The provider runs on Electron's bundled Node runtime and needs no Ghidra, JVM, Python, or project. PyGhidra remains the default. `MOCK=1` and `SIDECAR_CMD` retain their development roles. An explicit `GHIDORITA_PROVIDER` takes precedence.
 
-On macOS, the full distribution includes both providers. From `app/`, run `npm run dist` to build it. Select the fixture provider by setting `GHIDRETTE_PROVIDER=fixture` when running the app executable. For a package that contains only the fixture provider, run `npm run dist:fixture` and launch it with:
+On macOS, the full distribution includes both providers. From `app/`, run `npm run dist` to build it. Select the fixture provider by setting `GHIDORITA_PROVIDER=fixture` when running the app executable. For a package that contains only the fixture provider, run `npm run dist:fixture` and launch it with:
 
 ```sh
-GHIDRETTE_PROVIDER=fixture ./dist/fixture/mac-arm64/Ghidrette.app/Contents/MacOS/Ghidrette
+GHIDORITA_PROVIDER=fixture ./dist/fixture/mac-arm64/Ghidorita.app/Contents/MacOS/Ghidorita
 ```
 
 ## Fixture format
 
-The top-level JSON object has `format: "ghidrette-listing-v1"`, `ranges` and `functions`. A range has a canonical `start` address and an array of contiguous rows. Each row has `bytes` (one to sixteen lowercase hex bytes separated by spaces), `mnemonic`, and optional `operands`. The byte count determines the row length. Start another range for a gap or a different space. Keep ranges ordered, disjoint and grouped by space.
+The top-level JSON object has `format: "ghidorita-listing-v1"`, `ranges` and `functions`. A range has a canonical `start` address and an array of contiguous rows. Each row has `bytes` (one to sixteen lowercase hex bytes separated by spaces), `mnemonic`, and optional `operands`. The byte count determines the row length. Start another range for a gap or a different space. Keep ranges ordered, disjoint and grouped by space.
 
 Each function has `name`, `entry`, `size` in bytes, and `signature`. Its entry must be the start of a row, and the entire function must fit in one range. Functions may not overlap. Empty function and range arrays are supported. A fixture must be a regular file up to 2 MiB.
 

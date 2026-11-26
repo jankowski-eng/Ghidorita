@@ -1,7 +1,7 @@
 // electron-builder afterSign hook: sign every nested Mach-O in Resources (jdk, python, ghidra natives, *.dylib, *.so) with the hardened runtime
 // and the JIT entitlements, then re-sign the app bundle (its seal covers Resources). electron-builder only signs the Electron parts it knows about.
 // No-op unless SIGN_IDENTITY is set, e.g. SIGN_IDENTITY="Developer ID Application: Name (TEAMID)". SIGN_IDENTITY=- tests the flow ad-hoc (no timestamp).
-// Standalone: node scripts/sign-nested.cjs path/to/Ghidrette.app
+// Standalone: node scripts/sign-nested.cjs path/to/Ghidorita.app
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");

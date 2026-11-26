@@ -146,8 +146,8 @@ def test_function_calls_on_ls(env):
 # ---- call_graph on the scan lane: bounded, cancellable, never on R (in-process, a hand-built two-function program: f1 calls f2) ----
 import asyncio, threading, time
 
-from ghidrette.core.errors import RpcError
-from ghidrette.domains import xrefs as xrefs_mod
+from ghidorita.core.errors import RpcError
+from ghidorita.domains import xrefs as xrefs_mod
 from testlib import BASE, CANCELLED, X86, blob, inproc
 
 

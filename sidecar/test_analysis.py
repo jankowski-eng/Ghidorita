@@ -200,8 +200,8 @@ import contextlib, threading
 
 import pytest
 
-from ghidrette.core.errors import RpcError
-from ghidrette.domains import analysis as analysis_mod, highvars
+from ghidorita.core.errors import RpcError
+from ghidorita.domains import analysis as analysis_mod, highvars
 from testlib import BASE, CANCELLED, X86, inproc
 
 STALE = -32007

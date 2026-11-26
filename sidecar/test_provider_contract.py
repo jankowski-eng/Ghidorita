@@ -11,7 +11,7 @@ from websockets.exceptions import InvalidStatus
 from testlib import BIN, CANCELLED, Client, Proc, run
 
 ROOT = Path(__file__).resolve().parent.parent
-SAMPLE = ROOT / "app/providers/example.ghidrette.json"
+SAMPLE = ROOT / "app/providers/example.ghidorita.json"
 TOKEN = "browsing-contract-test"
 STALE = -32007
 
@@ -105,7 +105,7 @@ def test_browsing_protocol(provider, tmp_path):
 
             if name == "fixture":
                 empty = tmp_path / "no-functions.json"
-                empty.write_text('{"format":"ghidrette-listing-v1","ranges":[],"functions":[]}')
+                empty.write_text('{"format":"ghidorita-listing-v1","ranges":[],"functions":[]}')
                 third = await c.ok("open_binary", path=str(empty))
                 assert await c.ok("list_functions", session_id=third["sessionId"]) == []
                 assert await c.ok("listing_info", session_id=third["sessionId"]) == {"ranges": [], "totalBytes": 0}

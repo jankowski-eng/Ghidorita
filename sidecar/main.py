@@ -3,9 +3,9 @@
 thread model: ARCHITECTURE.md). This file only checks the environment, starts the JVM and serves."""
 import asyncio, os, signal, sys, threading, time
 
-from ghidrette.app import App
-from ghidrette.core import jscans
-from ghidrette.core.errors import log
+from ghidorita.app import App
+from ghidorita.core import jscans
+from ghidorita.core.errors import log
 
 
 def max_heap():

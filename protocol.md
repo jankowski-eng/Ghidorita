@@ -199,7 +199,7 @@ On every stop the sidecar reads the registers the program's language knows (name
 ## Errors
 Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -32001, Cancelled -32002, Timeout -32003, NotFound -32004, Busy -32005 (open in progress / second `open_binary` / an edit while the analysis runs, message "analysis running"), ProjectLocked -32006, StaleSession -32007, Target -32008 (the debug target: refused, lost, unknown architecture, not attached), InvalidArgument -32602, MethodNotFound -32601, Internal -32603.
 
-`ProjectLocked` (-32006): another sidecar (another Ghidrette) holds the projects dir; message `projects dir in use by another Ghidrette (<dir>)`. Returned by every request that touches the project (`open_binary`, `import_candidates`, `list_programs`, `delete_program`); the sidecar stays up and the next call retries, so it works once the other instance has quit. `list_languages` and the rest are unaffected.
+`ProjectLocked` (-32006): another sidecar (another Ghidorita) holds the projects dir; message `projects dir in use by another Ghidorita (<dir>)`. Returned by every request that touches the project (`open_binary`, `import_candidates`, `list_programs`, `delete_program`); the sidecar stays up and the next call retries, so it works once the other instance has quit. `list_languages` and the rest are unaffected.
 
 ## Concurrency
 - **Thread R** (the event loop dispatches to it) handles the cheap program reads (`list_functions`, `listing_*`, xrefs, ...) and ALL writes, `undo` and `redo`, in arrival order.

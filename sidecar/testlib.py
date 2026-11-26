@@ -151,8 +151,8 @@ import contextlib
 @contextlib.asynccontextmanager
 async def inproc(tmp_path, monkeypatch):
     """An App with its own projects dir; yields (ctx, call). call(method, sid=None, rid=None, **params): sid given = a protocol-v1 request."""
-    from ghidrette.app import App
-    from ghidrette.core.rpc import Dispatcher
+    from ghidorita.app import App
+    from ghidorita.core.rpc import Dispatcher
     monkeypatch.setenv("SIDECAR_PROJECTS_DIR", str(tmp_path / "projects"))
     app = App(start=False)
     ctx = app.ctx

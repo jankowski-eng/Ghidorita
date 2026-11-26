@@ -43,12 +43,12 @@ async function openPreserveFlow(file: string, c: AutotestCtx, result: Record<str
     && c.title().includes(title) && undo.canUndo && during === 0;
 }
 
-// Another Ghidrette holds the projects dir: the welcome pane must say so (the sidecar answers ProjectLocked to list_programs).
+// Another Ghidorita holds the projects dir: the welcome pane must say so (the sidecar answers ProjectLocked to list_programs).
 async function lockedFlow(c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const alert = await waitFor(() => document.querySelector<HTMLElement>('.welcome [role="alert"]'), 15000, "an alert in the programs pane");
   const code = await c.backend.projects.list().then(() => null, (e) => (isFailure(e, "projectLocked") ? "projectLocked" : "unexpected"));
   result.locked = { text: alert.textContent, code, programsListed: document.querySelectorAll(".welcome .prog").length, openEnabled: !document.querySelector<HTMLButtonElement>('button[aria-label="Open binary"]')?.disabled };
-  return /projects dir in use by another Ghidrette/.test(alert.textContent ?? "") && code === "projectLocked" && result.locked.programsListed === 0;
+  return /projects dir in use by another Ghidorita/.test(alert.textContent ?? "") && code === "projectLocked" && result.locked.programsListed === 0;
 }
 
 // A real file over 20 MB, its analysis already stored (fast profile, see test_ui.py): default-Fast rule, size warning, "Decompile anyway", cancel, and a real Timeout.
@@ -201,7 +201,7 @@ async function replacementFlow(c: AutotestCtx, result: Record<string, unknown>) 
   await waitFor(() => c.title().startsWith("•") && c.lastMenu()?.dirty, 10000, "dirty marker");
   await c.open("/program-b"); // the mock fails one autosave, retaining A
   const kept = await c.backend.lifecycle.active();
-  const retained = old?.sessionId === kept?.sessionId && c.title() === "• program-a — Ghidrette" &&
+  const retained = old?.sessionId === kept?.sessionId && c.title() === "• program-a — Ghidorita" &&
     tabs() === oldTabs && !!oldTabs && c.selected() === entry && c.lastMenu()?.dirty &&
     !c.requests.some(({ method }) => method === "close_program");
   if (!retained) throw new Error("failed replacement did not preserve A, its tabs and its dirty state");

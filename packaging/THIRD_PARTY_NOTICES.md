@@ -1,6 +1,6 @@
 # Third-party notices
 
-Ghidrette bundles the components below. The license texts in this folder were copied from each component's own distribution at build time (`packaging/prepare.sh`). `../BUILD_INFO.json` records the exact versions.
+Ghidorita bundles the components below. The license texts in this folder were copied from each component's own distribution at build time (`packaging/prepare.sh`). `../BUILD_INFO.json` records the exact versions.
 
 | Component | License | Where |
 |---|---|---|
@@ -25,4 +25,4 @@ The Ghidra `GPL/` folder (`../ghidra/GPL/`) contains the GNU demangler (`demangl
 - Ghidra, including `GPL/`: https://github.com/NationalSecurityAgency/ghidra at the commit in `../BUILD_INFO.json` (`ghidraCommit`).
 - OpenJDK: https://github.com/openjdk/jdk, the tag matching `jdk` in `../BUILD_INFO.json`.
 
-The Ghidrette maintainers still have to decide whether to add a written offer for the source (for example in the release notes or the download page); this file only records where the source is.
+The Ghidorita maintainers still have to decide whether to add a written offer for the source (for example in the release notes or the download page); this file only records where the source is.

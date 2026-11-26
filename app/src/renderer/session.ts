@@ -2,9 +2,9 @@ import type { ActiveSession, FunctionInfo, ListingRow, OpenResult } from "../../
 import type { OpenJob, ProgramLifecycle, ProgramOperations } from "./backend";
 import { AddrMap } from "./addrmap";
 
-/** Window title: "• name — Ghidrette" while there are unsaved changes. */
+/** Window title: "• name — Ghidorita" while there are unsaved changes. */
 export const windowTitle = (name: string | null, dirty: boolean): string =>
-  (name ? `${dirty ? "• " : ""}${name} — ` : "") + "Ghidrette";
+  (name ? `${dirty ? "• " : ""}${name} — ` : "") + "Ghidorita";
 
 export type Replacement =
   | { kind: "opened"; session: OpenResult }

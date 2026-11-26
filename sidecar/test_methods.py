@@ -1,7 +1,7 @@
 """The RPC method table and each method's lane, locked down (no JVM). A new method means a new line here, in protocol.ts and in protocol.md."""
 import os, re
 
-from ghidrette.app import App
+from ghidorita.app import App
 
 # lane: R (thread R), edit (prepare on S, commit on R), file (parse off R), scan (S pool), decomp (D pool), project (R, Busy during an open),
 # project+busy_ok (same, but answered during an open), loop (asyncio loop), loop+scoped (asyncio loop after the session check), open (own thread O)

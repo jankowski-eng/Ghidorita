@@ -1,12 +1,12 @@
-<p align="center"><img src="assets/logo.svg" alt="Ghidrette" width="480"></p>
+<p align="center"><img src="assets/logo.svg" alt="Ghidorita" width="480"></p>
 
-# Ghidrette
+# Ghidorita
 
-Ghidrette is a fast desktop reverse-engineering workspace on top of [Ghidra](https://github.com/NationalSecurityAgency/ghidra)'s analysis engine: Electron (TypeScript, React, Monaco) talking over a WebSocket JSON-RPC protocol to a headless Python sidecar (PyGhidra on the Ghidra JVM).
+Ghidorita is a fast desktop reverse-engineering workspace on top of [Ghidra](https://github.com/NationalSecurityAgency/ghidra)'s analysis engine: Electron (TypeScript, React, Monaco) talking over a WebSocket JSON-RPC protocol to a headless Python sidecar (PyGhidra on the Ghidra JVM).
 
-> **Status: early spike.** It works end to end on real binaries, but expect rough edges and breaking changes. Ghidrette is an independent project and is not affiliated with or endorsed by the Ghidra project or the NSA.
+> **Status: early spike.** It works end to end on real binaries, but expect rough edges and breaking changes. Ghidorita is an independent project and is not affiliated with or endorsed by the Ghidra project or the NSA.
 
-![Ghidrette showing function list, listing with xrefs and the decompiler side by side](screenshots/overview.png)
+![Ghidorita showing function list, listing with xrefs and the decompiler side by side](screenshots/overview.png)
 
 <sub>Function list with the binary map, listing with cross-references, references panel and decompiler on `mysqldump` (arm64, 1,891 functions).</sub>
 
@@ -54,7 +54,7 @@ View > Call Graph (or the command bar) swaps the decompiler for the functions ar
 ![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
 
 ### Debugger (QEMU)
-Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb -kernel fw.bin -S -gdb tcp::1234 -display none`, open the same image in Ghidrette (a raw image at the base address it runs at: program addresses are runtime addresses), then Debug > Attach to QEMU… (host:port, default `localhost:1234`). The target stops where it is; the listing and decompiler jump to the stop and highlight the current row and line (the instructions behind that line are tinted in the listing), the **Registers** tab lists the program language's registers and marks the ones that changed since the last stop, and the status bar says `running`, `stopped at <address>` or `detached` (with why: target exited, connection lost). `F9` toggles a breakpoint on the listing cursor row or the decompiler line's first address (a click in the gutter does the same; they can be set before attaching), `F5` continues, `F6` pauses, Debug > Detach lets go.
+Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb -kernel fw.bin -S -gdb tcp::1234 -display none`, open the same image in Ghidorita (a raw image at the base address it runs at: program addresses are runtime addresses), then Debug > Attach to QEMU… (host:port, default `localhost:1234`). The target stops where it is; the listing and decompiler jump to the stop and highlight the current row and line (the instructions behind that line are tinted in the listing), the **Registers** tab lists the program language's registers and marks the ones that changed since the last stop, and the status bar says `running`, `stopped at <address>` or `detached` (with why: target exited, connection lost). `F9` toggles a breakpoint on the listing cursor row or the decompiler line's first address (a click in the gutter does the same; they can be set before attaching), `F5` continues, `F6` pauses, Debug > Detach lets go.
 
 **Stepping.** `F7` steps one C statement over calls: the target runs instruction by instruction until the program counter reaches the start of another decompiler line (the same address mapping the coverage tint uses), runs called functions to their return, and stops early at a breakpoint or when the function returns (you land in the caller). `F10` steps into a call, `Shift+F10` runs out of the function, `F8` steps one instruction. Where the function has no decompiler lines, `F7` steps one instruction. Breakpoints can be toggled while the target runs.
 
@@ -62,7 +62,7 @@ Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb
 
 **History.** Every stop is recorded. `Shift+F7` / `Shift+F8` move the registers, listing, decompiler and values back and forward through the recorded stops (the status bar says "recorded stop 2 of 5" and where the target really is); any step or continue returns to the live stop. This is a view of what happened, not reverse execution: the target does not move back.
 
-**Offset.** The attach dialog takes a load offset (hex, runtime address minus program address, default 0) for an image that runs somewhere else than it was imported. Errors are plain words: connection refused, unknown architecture (the target is not the program's processor), the target exited. Not part of this slice: relocation by module, recording and real reverse execution. `sidecar/testdata/fw/` (Cortex-M3) and `fw64/` (AArch64) hold the small test programs the tests debug. How this relates to Ghidra's own debugger, and why Ghidrette talks to the gdb stub itself: [docs/DEBUGGER.md](docs/DEBUGGER.md).
+**Offset.** The attach dialog takes a load offset (hex, runtime address minus program address, default 0) for an image that runs somewhere else than it was imported. Errors are plain words: connection refused, unknown architecture (the target is not the program's processor), the target exited. Not part of this slice: relocation by module, recording and real reverse execution. `sidecar/testdata/fw/` (Cortex-M3) and `fw64/` (AArch64) hold the small test programs the tests debug. How this relates to Ghidra's own debugger, and why Ghidorita talks to the gdb stub itself: [docs/DEBUGGER.md](docs/DEBUGGER.md).
 
 ![Stopped in scale() under QEMU: breakpoint, the statement's instructions tinted, values after the lines, Locals tab with what changed](screenshots/debugger.png)
 

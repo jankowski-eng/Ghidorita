@@ -5,6 +5,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "build": "electron-vite build && node scripts/build-fixture.mjs",
+    "postinstall": "node scripts/dev-app.cjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
@@ -33,8 +34,8 @@
     "react-dom": "^19.3.1"
   },
   "build": {
-    "appId": "li.jankowski.ghidrette",
-    "productName": "Ghidrette",
+    "appId": "li.jankowski.ghidorita",
+    "productName": "Ghidorita",
     "directories": {
       "output": "dist",
       "buildResources": "build"

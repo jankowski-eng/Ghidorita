@@ -73,7 +73,7 @@ def attach(dbg, sc, g, pc):
 
 
 def test_values_and_typed_memory_above_2_63(sc, dbg):
-    from ghidrette.core.lanes import Scan
+    from ghidorita.core.lanes import Scan
     mem = {HI + 0x100 + k: b for k, b in enumerate(bytes.fromhex("8877665544332211"))}  # little endian 0x1122334455667788
     attach(dbg, sc, FakeG(mem, [(HI, "T05")]), HI)
     v = dbg.debug_values(H(0), scan=Scan(sc.ses.epoch))
@@ -150,7 +150,7 @@ def test_a_live_breakpoint_toggle_applies_deferred_changes_first(sc, dbg):
 
 
 def test_continue_that_times_out_stepping_off_a_breakpoint_publishes_running(sc, dbg):
-    from ghidrette.core.gdb import GdbError
+    from ghidorita.core.gdb import GdbError
     g = FakeG({}, [(HI, "T05")])
 
     def slow(payload, wait=False, timeout=5.0, before=None):
@@ -159,14 +159,14 @@ def test_continue_that_times_out_stepping_off_a_breakpoint_publishes_running(sc,
     g.resume = slow
     attach(dbg, sc, g, HI)
     dbg.bps = [HI]
-    from ghidrette.core.errors import RpcError
+    from ghidorita.core.errors import RpcError
     with pytest.raises(RpcError):
         dbg.debug_continue()
     assert dbg.state == "running"  # pausable until its stop arrives
 
 
 def test_frame_ended_only_by_a_return_that_was_taken():
-    from ghidrette.domains.debug import Debug
+    from ghidorita.domains.debug import Debug
 
     class Off:
         def __init__(self, v): self.v = v

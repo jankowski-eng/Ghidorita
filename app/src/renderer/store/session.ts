@@ -90,7 +90,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
       const outcome = await resolveOpen(job, lifecycle);
       if (outcome.kind === "unknown") {
         dispatch({ type: "unavailable" });
-        setNotice("Could not confirm the active program. Restart Ghidrette to reconnect.");
+        setNotice("Could not confirm the active program. Restart Ghidorita to reconnect.");
         fail(outcome.reconciliationError);
         return;
       }
