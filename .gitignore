@@ -16,3 +16,5 @@ app/bundle/
 # Local tooling / scratch
 .claude/worktrees/
 .DS_Store
+bench/r7/
+bench/r7b/

@@ -144,7 +144,7 @@ class Program:
                             generation=self.ctx.events.generation)
         return {"saved": saved, "undoHistoryCleared": saved}
 
-    def _publish(self, prog, res, consumer, key, name):
+    def _publish(self, prog, res, consumer, key, name, analyzing=False):
         from ghidra.app.plugin.core.analysis import AutoAnalysisManager
         # Run on R. The staged replacement is ready before we save and release the old program.
         # follow-on analysis would write from the manager's own thread, outside R and outside our transactions
@@ -154,6 +154,7 @@ class Program:
         self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
         self.ses.results, self.ses.consumer = res, consumer
         self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
+        self.ses.analyzing = analyzing  # set before the program is visible: no edit can slip in before the analysis starts
         return self.ses.publish(prog, key, name)  # keep this last: nothing after attach may raise, or the listener would stay on a program we release
 
     @staticmethod
@@ -286,7 +287,7 @@ class Program:
                                             analyzed=blocking, analysis=rec, analysisProfile=prof, options=opts)
             # Claim the commit before queueing it, so shutdown waits for the whole swap.
             op.begin_commit()
-            session = self.ctx.lanes.on_r(lambda: self._publish(prog, res, consumer, key, os.path.basename(path)))
+            session = self.ctx.lanes.on_r(lambda: self._publish(prog, res, consumer, key, os.path.basename(path), rec != "done"))
             published, res, prog, consumer = prog, None, None, None  # the session now owns the staged program
             self.ctx.analysis.reset(rec, prof)
             if rec != "done":  # background open of a new import, or of an interrupted analysis: resume

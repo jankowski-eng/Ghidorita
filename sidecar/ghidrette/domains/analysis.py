@@ -169,7 +169,7 @@ class Analysis:
             if profile in (None, "fast") or prof == "full":
                 return self.state()  # already analyzed at least that well
             return self.start(prog, self.ses.program_id, [], "full", upgrade=True)
-        want = profile or prof
+        want = "full" if "full" in (profile, prof) else "fast"  # never downgrade the recorded profile of a partial full analysis
         return self.start(prog, self.ses.program_id, FAST_PROFILE if want == "fast" else [], want)
 
     # ---- running ----
@@ -192,20 +192,25 @@ class Analysis:
     def _run(self, prog, key, epoch, mon, disabled, profile, upgrade):
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.util.task import TaskMonitor
-        poller = Poller(mon, lambda an, done, pct, msg: self._publish(analyzer=an, done=done, pct=pct))
-        err = None
+        err, poller = None, None
         t0 = time.monotonic()
-        GhidraScriptUtil.acquireBundleHostReference()
-        tx = prog.startTransaction("Analysis")
         try:
-            execute(prog, mon, disabled, upgrade)
+            poller = Poller(mon, lambda an, done, pct, msg: self._publish(analyzer=an, done=done, pct=pct))
+            GhidraScriptUtil.acquireBundleHostReference()
+            try:
+                tx = prog.startTransaction("Analysis")
+                try:
+                    execute(prog, mon, disabled, upgrade)
+                finally:
+                    prog.endTransaction(tx, True)  # keeps what was found, also after cancel or failure (like Ghidra's BackgroundCommandTask)
+            finally:
+                GhidraScriptUtil.releaseBundleHostReference()
         except BaseException as e:  # noqa
             err = e
             log("analysis failed:", repr(e))
         finally:
-            prog.endTransaction(tx, True)  # keeps what was found, also after cancel or failure (like Ghidra's BackgroundCommandTask)
-            GhidraScriptUtil.releaseBundleHostReference()
-            poller.stop()
+            if poller is not None:
+                poller.stop()
         completed = err is None and not mon.isCancelled()
         try:
             prog.clearUndo()  # the analysis is not undoable (Ghidra's GUI cannot undo it while it runs either)
@@ -215,15 +220,21 @@ class Analysis:
                 self.ses.refresh_undo(prog)
         except Exception as e:  # noqa
             log("analysis save failed:", repr(e))
-            err = err or e
-        self.ctx.project.meta_update(key, analysis="done" if completed else "partial", analysisProfile=profile, analyzed=completed)
-        log("analysis %s in %.1fs" % ("done" if completed else "cancelled" if err is None else "failed", time.monotonic() - t0))
-        self.ses.analyzing = False
-        self.ctx.events.bulk = False
-        self.ctx.events.record(set(ALL_KINDS), None)  # one last refresh of everything the client shows
-        self._publish(state="done" if completed else "failed" if err is not None else "cancelled", analysis="done" if completed else "partial",
-                      analyzer="", pct=100 if completed else -1, **({"error": str(err)} if err is not None else {}))
-        self.ended.set()
+            err, completed = err or e, False  # unsaved: not done
+        finally:  # whatever failed above, edits become possible again and stop() is released
+            try:
+                self.ctx.project.meta_update(key, analysis="done" if completed else "partial", analysisProfile=profile, analyzed=completed)
+            except Exception as e:  # noqa
+                log("analysis meta update failed:", repr(e))
+            log("analysis %s in %.1fs" % ("done" if completed else "cancelled" if err is None else "failed", time.monotonic() - t0))
+            self.ses.analyzing = False
+            self.ctx.events.bulk = False
+            try:
+                self.ctx.events.record(set(ALL_KINDS), None)  # one last refresh of everything the client shows
+                self._publish(state="done" if completed else "failed" if err is not None else "cancelled", analysis="done" if completed else "partial",
+                              analyzer="", pct=100 if completed else -1, **({"error": str(err)} if err is not None else {}))
+            finally:
+                self.ended.set()
 
     def stop(self, timeout=STOP_SECS):
         """Cancel a running analysis and wait until its thread is gone and has saved (close, save, shutdown; thread R). False = still running."""
