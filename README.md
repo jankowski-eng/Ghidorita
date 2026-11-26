@@ -99,3 +99,10 @@ View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Mem
 Backend gaps: listing shows EOL comments only (no pre/plate/post, function headers, xref columns); no way to read non-EOL comments (comment dialog prefills EOL only); `rename_symbol` cannot create a label where none exists.
 
 Data types: Types button / View > Data Type Manager (Cmd+Shift+T); Edit > Create Structure from Data… on the listing cursor row. Struct/enum edits are undoable like any edit. The autotest also covers this flow (`AUTOTEST_PHASE=2` checks the struct survived).
+
+## Round 6 additions
+- `sidecar/jscans/GhidretteScans.java`: the strings scan and the symbol kind filter/sort run in Java. `main.py` compiles it with `$JAVA_HOME/bin/javac` at start when the class is missing or older (`prepare.sh` ships it precompiled). Do not name a directory `java` next to `main.py`: it shadows JPype's `java` package.
+- Tests needing the big binary (`sidecar/test_big.py`, `sidecar/test_ui.py -k big`) skip unless its fast-profile analysis is stored: `SPIKE_BIG_BINARY`, `SPIKE_BIG_PROJECTS` (create it with `bench_open.py` and `SIDECAR_ANALYSIS_DISABLE="Call Convention ID;Decompiler Switch Analysis;Stack"`, 10-17 min). `test_ui.py` starts Electron (needs a display): `AUTOTEST_FLOW=locked|big`, `AUTOTEST_DECOMPILE_TIMEOUT=<secs>` (test hook for a real Timeout).
+- Benchmarks wait for a quiet machine (`bench/common.py: wait_quiet`) and exit 3 instead of measuring under load. `bench/run_round6.sh` runs the repeats.
+- A failed `open_binary` always leaves no program open (protocol.md).
+- `MANUAL_TEST.md`: the 30-minute checklist for what scripts cannot do.
