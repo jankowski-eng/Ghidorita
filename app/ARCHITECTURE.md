@@ -24,6 +24,8 @@ src/renderer/
     coverage.ts        load / clear coverage runs and repaint
     exports.ts         File > Export (symbol map, C header, Ghidra archive)
     copy.ts            useCopy: copy address / bytes (hex, C array) / decompiled text from the focused pane; clipboard.ts has the writer (navigator.clipboard, then the validated IPC)
+    debug.ts           useDebug: jump to every stop, the first address F9 uses, the attach dialog (the pure helpers are in ../debug.ts; the state is `debug` in the program store, the actions are session.debugAction)
+    exports.ts         File > Export
     reactions.ts       useProgramReactions: program_changed -> tabs, listing rows, xrefs, function list (the decisions are in changes.ts); tabs reset with the program
     bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, Space, focus), quit-save, the autotest driver
   useTabs.ts tabs.ts   decompiler tabs and their results (tabs.ts is the pure part)

@@ -10,10 +10,11 @@ import { requestOpen } from "./dialogs";
 import { exportAs } from "./exports";
 import type { CoverageActions } from "./coverage";
 import type { CopyWhat } from "./copy";
+import type { DebugFeature } from "./debug";
 
 export interface MenuTargets {
   back(): void; forward(): void; goTab(entry: Address | null): void; closeActive(): Address | null;
-  edit(a: EditAction): Promise<void> | void; showXrefs(): void; coverage: CoverageActions; copy(what: CopyWhat): Promise<void> | void;
+  edit(a: EditAction): Promise<void> | void; showXrefs(): void; coverage: CoverageActions; copy(what: CopyWhat): Promise<void> | void; debug: DebugFeature;
 }
 
 /** Every menu command (and the command bar's actions, and the autotest's `command`) ends here. */
@@ -36,6 +37,12 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "xrefs") t.showXrefs();
   else if (c.type === "copy") void t.copy(c.what);
   else if (c.type === "export") void exportAs(s, c.kind);
+  else if (c.type === "debug") {
+    if (!opened()) return;
+    if (c.action === "attach") t.debug.attachDialog();
+    else if (c.action === "breakpoint") { const a = t.debug.breakpointAddress(); if (a) void s.debugAction("breakpoint", a); else s.flash("No address here for a breakpoint."); }
+    else void s.debugAction(c.action);
+  }
   else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn, callGraphOn: false }); }
   else if (c.type === "callgraph") { if (opened()) set({ callGraphOn: !views.getState().callGraphOn, graphOn: false }); }
   else if (c.type === "datatypes") { if (opened()) set({ typesOpen: !views.getState().typesOpen }); }

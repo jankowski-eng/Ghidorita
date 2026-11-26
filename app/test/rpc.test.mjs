@@ -84,3 +84,21 @@ test("discovery and listing validate replies before publishing data", async () =
   await assert.rejects(program.decompiler.decompile({ entry: "0x1" }).result, { kind: "unsupported" });
   assert.equal(ws.sent.at(-1).method, "listing_rows");
 });
+
+test("debug: calls need the capability, the state notification reaches the active session only", async () => {
+  const { backend, ws } = await setup(["debugger"]);
+  const a = backend.program(await open(backend, ws, "A"));
+  const seen = [];
+  backend.events.onDebug((id, st) => seen.push([id, st.state, st.stop]));
+  const attach = a.debug.attach({ host: "localhost", port: 1234 });
+  assert.deepEqual([ws.sent.at(-1).method, ws.sent.at(-1).params, ws.sent.at(-1).sessionId], ["debug_attach", { host: "localhost", port: 1234 }, "A"]);
+  ws.reply(ws.sent.at(-1), {});
+  await attach;
+  const state = { state: "stopped", target: "localhost:1234", stop: 1, offset: "0x0", breakpoints: ["0x8"], address: "0x28", registers: [{ name: "pc", value: "0x00000028" }] };
+  ws.notify("debug_state", { sessionId: "A", ...state });
+  ws.notify("debug_state", { sessionId: "B", ...state });
+  ws.notify("debug_state", { sessionId: "A", ...state, state: "flying" }); // not a state: dropped
+  assert.deepEqual(seen, [["A", "stopped", 1]]);
+  const bare = await setup([]); // a provider without the capability
+  await assert.rejects(bare.backend.program(await open(bare.backend, bare.ws, "X")).debug.step(), { kind: "unsupported" });
+});

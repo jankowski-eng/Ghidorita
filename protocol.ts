@@ -34,6 +34,7 @@ export const ErrorCode = {
   Busy: -32005,            // open_binary in progress (or a second open_binary); "analysis running": an edit, undo or redo while the analysis runs; "analysis already running": start_analysis
   ProjectLocked: -32006,   // another sidecar holds the projects dir
   StaleSession: -32007,
+  Target: -32008,          // the debug target: connection refused, lost, unknown architecture, not attached (plain words in the message)
   InvalidArgument: -32602, // bad/missing params, unparsable type or signature, invalid name
   Internal: -32603,
   MethodNotFound: -32601,
@@ -131,7 +132,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -169,6 +170,14 @@ export interface Methods {
   function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
   // Call graph (thread R): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
   call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
+  // Debugger (thread R; the new state arrives as `debug_state`, results are empty except debug_status). debug_attach connects to a GDB remote stub (QEMU's -gdb), reads its register description, stops there and installs the breakpoints; Target error if refused, lost or of another architecture than the program. Breakpoint toggles, continue, step and pause need the target stopped (resp. running for pause): Busy otherwise.
+  debug_attach: { params: { host?: string; port?: number }; result: {} };
+  debug_detach: { params: {}; result: {} };
+  debug_status: { params: {}; result: DebugState };
+  debug_breakpoint: { params: { address: Address }; result: {} };
+  debug_continue: { params: {}; result: {} };
+  debug_step: { params: {}; result: {} };
+  debug_pause: { params: {}; result: {} };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
@@ -347,7 +356,21 @@ export interface AnalysisState {
   error?: string;               // state "failed"
 }
 
+/** State of the debugger (also the `debug_state` notification). Addresses are program addresses (runtime address minus `offset`); register values stay runtime values. */
+export interface DebugState {
+  state: "detached" | "running" | "stopped";
+  target: string;                 // "host:port" while attached
+  stop: number;                   // counts the stops: a repeated state with the same number (a breakpoint toggled while stopped) is not a new stop
+  offset: string;                 // runtime address = program address + offset ("0x0": a raw image loaded where it runs)
+  breakpoints: Address[];         // kept while detached and installed on the next attach
+  address?: Address;              // state "stopped": the program counter as a program address
+  registers?: { name: string; value: string }[]; // state "stopped": the program language's names, target order, "0x" + hex of the register's width
+  error?: string;                 // state "detached": why the connection ended (target exited, connection lost)
+}
+
 export interface Notifications {
+  // Whenever the debug state changes (attach, every stop, continue, breakpoint toggle, detach, target exit, lost connection). The methods' results are empty: this is how a client learns the state.
+  debug_state: DebugState & { sessionId: string };
   // Sent when an analysis starts, about every 250 ms while the analyzer/done/pct change, and once at the end (done/cancelled/failed).
   analysis_state: AnalysisState & { sessionId: string }; // of the program session it belongs to; a client ignores other sessions'
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.

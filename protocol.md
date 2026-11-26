@@ -48,6 +48,7 @@ Advertise only implemented groups. Operations in the following reference belong 
 | `bookmarks` | `list_bookmarks`, `set_bookmark`, `remove_bookmark`. Listing rows then also carry `bookmarks`. |
 | `controlFlowGraph`, `suggestions`, `export`, `exportGzf` | `function_graph` (needs `decompile`), `top_symbols`, `export_symbols` / `export_header`, and `export_gzf` respectively. |
 | `callGraph` | `call_graph`. |
+| `debugger` | `debug_attach`, `debug_detach`, `debug_status`, `debug_breakpoint`, `debug_continue`, `debug_step`, `debug_pause` and the `debug_state` notification. |
 | `projects`, `recovery`, `coverage` | Project listing and removal, recovery snapshots, and coverage parsing respectively. |
 
 ### PyGhidra compatibility
@@ -168,14 +169,30 @@ Row building stays on thread R and costs a few Ghidra calls per row; bench numbe
 - **`save`, `close_program`, shutdown during analysis** cancel it first (waiting for it to stop), then save as usual.
 - The `fast` profile and the persistence key are unchanged: `start_analysis {profile: "full"}` on a fast program keeps its `programId`.
 
+## Debugger
+`debugger` capability. The sidecar speaks the GDB Remote Serial Protocol over TCP itself (QEMU's `-gdb tcp::1234` stub): `qSupported`, `qXfer:features:read` (target.xml and what it includes), `?`, `p`, `Z0`/`z0`, `c`, `s`, Ctrl-C, `D`. State: `DebugState` (`protocol.ts`), announced as `debug_state`; the methods' results are empty (`debug_status` returns the state).
+
+| Method | Params | Notes |
+|---|---|---|
+| `debug_attach` | `{host?="localhost", port?=1234}` | Connects, reads the register description, stops the target (QEMU started with `-S` is already stopped) and installs the breakpoints. `Target` error: `Connection refused by host:port…`, `Unknown architecture…` (the target's architecture is not the program's processor, or the program counter is not among its registers), `The target is not stopped`. `Busy` if already attached. |
+| `debug_detach` | `{}` | Detaches (`D`) and closes. The breakpoints stay. |
+| `debug_breakpoint` | `{address}` | Toggles a breakpoint at the program address (`Z0`/`z0` at address + offset when attached and stopped; otherwise only remembered and installed on the next attach). `Busy` while running ("Pause the target before changing breakpoints"). |
+| `debug_continue` | `{}` | Resumes (first one instruction off a breakpoint at the pc, like gdb). `state` `running` is announced, the next stop arrives as `stopped`. |
+| `debug_step` | `{}` | One instruction, then `stopped` is announced. |
+| `debug_pause` | `{}` | Ctrl-C; the stop arrives as `stopped`. `Busy` if not running. |
+| `debug_status` | `{}` | The current `DebugState`. |
+
+On every stop the sidecar reads the registers the program's language knows (names from Ghidra, numbers from target.xml; registers wider than 128 bits are left out) and announces `stopped` with `address` (the pc minus `offset`) and `registers`. The target exiting (`W`/`X` stop reply) or the socket closing announces `detached` with an `error`. `offset` is 0 for now: program addresses are runtime addresses. The state belongs to the program session: another session drops the connection. Debug requests on thread R.
+
 ## Notifications (server → client, no id)
+- `debug_state {sessionId, state, target, stop, offset, breakpoints, address?, registers?, error?}` — see Debugger.
 - `analysis_state {state, analysis, profile, analyzer, done, pct, error?}` — an analysis started, progressed (about every 250 ms when something changed) or ended (`done`, `cancelled`, `failed`).
 - `progress {openId, phase, pct, message, analyzer?, done?, total?}` — phase order: `import` → `analysis` → `saving` → `ready` (only while `open_binary` runs; a persisted program goes straight to `ready`). `pct` is 0–100 or -1 (indeterminate). During `analysis` `pct` is -1 because Ghidra's AutoAnalysisManager has no global total; `analyzer` is the current analyzer name; `pct` is the per-analyzer progress/max when that analyzer reports a maximum (else -1); `done` is the number of analyzer runs finished so far; `total` is omitted.
 - `program_changed {sessionId, ranges, kinds, undo}` — the program was modified. `ranges` is `[{start,end}]` (Ghidra address ranges, space-qualified, `end` inclusive, both ends in one space) or `null` = unknown/broad, refetch everything. Type changes (`kinds` has `type`) always carry `null`: Ghidra's type events have no address. A client refetches only the listing rows that intersect `ranges`. `kinds` ⊆ symbol|comment|function|data|code|type|bookmark|other tells the client what to refetch. `undo` is the new `UndoState` (including `dirty`). Events from edits and `undo`/`redo` are coalesced over ~50 ms. A save sends `ranges: []`, `kinds: []` with the new undo state. Events already queued for the active program can arrive while `open_binary` stages a replacement. Closing or replacing that program drops its remaining pending events.
 - `error {message}` — non-fatal, out-of-band.
 
 ## Errors
-Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -32001, Cancelled -32002, Timeout -32003, NotFound -32004, Busy -32005 (open in progress / second `open_binary` / an edit while the analysis runs, message "analysis running"), ProjectLocked -32006, StaleSession -32007, InvalidArgument -32602, MethodNotFound -32601, Internal -32603.
+Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -32001, Cancelled -32002, Timeout -32003, NotFound -32004, Busy -32005 (open in progress / second `open_binary` / an edit while the analysis runs, message "analysis running"), ProjectLocked -32006, StaleSession -32007, Target -32008 (the debug target: refused, lost, unknown architecture, not attached), InvalidArgument -32602, MethodNotFound -32601, Internal -32603.
 
 `ProjectLocked` (-32006): another sidecar (another Ghidrette) holds the projects dir; message `projects dir in use by another Ghidrette (<dir>)`. Returned by every request that touches the project (`open_binary`, `import_candidates`, `list_programs`, `delete_program`); the sidecar stays up and the next call retries, so it works once the other instance has quit. `list_languages` and the rest are unaffected.
 

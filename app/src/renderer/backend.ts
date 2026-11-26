@@ -2,10 +2,10 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
+  BookmarkItem, CallGraph, ChangeKind, DebugState, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
 } from "../../../protocol";
 
-export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "connection" | "protocol" | "internal";
+export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
 export class BackendError extends Error {
   constructor(public kind: Failure, message: string) { super(message); }
 }
@@ -28,6 +28,7 @@ export interface ProviderEvents {
   onChange(listener: (sessionId: string, change: ProgramChange) => void): () => void;
   onError(listener: (message: string) => void): () => void;
   onAnalysis(listener: (sessionId: string, state: AnalysisState) => void): () => void;
+  onDebug(listener: (sessionId: string, state: DebugState) => void): () => void;
 }
 
 export interface ListingReads {
@@ -140,6 +141,17 @@ export interface AnalysisControl {
   cancel(): Promise<{ cancelled: boolean }>;
 }
 
+/** `debugger` capability: a GDB remote stub (QEMU). The calls return nothing: the state arrives through `events.onDebug`. */
+export interface DebugControl {
+  attach(params: { host?: string; port?: number }): Promise<{}>;
+  detach(): Promise<{}>;
+  breakpoint(params: { address: Address }): Promise<{}>;
+  continue(): Promise<{}>;
+  step(): Promise<{}>;
+  pause(): Promise<{}>;
+  status(): Promise<DebugState>;
+}
+
 /** Operations bound to one active session. A retained callback continues to address that session. */
 export interface ProgramOperations {
   listing: ListingReads;
@@ -155,6 +167,7 @@ export interface ProgramOperations {
   coverage: CoverageReads;
   exports: Exports;
   analysis: AnalysisControl;
+  debug: DebugControl;
 }
 export interface ApplicationBackend {
   capabilities: ReadonlySet<Capability>;

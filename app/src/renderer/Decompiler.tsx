@@ -14,14 +14,17 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+  pcLine?: number | null; pcSeq?: number; bpLines?: number[]; onGutter?: (line1: number) => void; // debugger: the stop line (0-based) and which stop it is, the breakpoint lines, a click in the glyph margin
   tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
   canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const covDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
-  const hlKey = useRef("");
+  const pcDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
+  const hlKey = useRef(""), pcKey = useRef("");
+  const gutterRef = useRef(onGutter); gutterRef.current = onGutter;
   const monacoRef = useRef<Monaco | null>(null);
   const clickRef = useRef(onCallClick); clickRef.current = onCallClick;
   const editRef = useRef(onEdit); editRef.current = onEdit;
@@ -49,7 +52,8 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     decorations.current = editor.createDecorationsCollection();
     hlDecor.current = editor.createDecorationsCollection();
     covDecor.current = editor.createDecorationsCollection();
-    editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
+    pcDecor.current = editor.createDecorationsCollection();
+    editor.onMouseDown((e) => { if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) { gutterRef.current?.(e.target.position.lineNumber); return; } if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
   };
   useEffect(() => () => { for (const m of monacoRef.current?.editor.getModels() ?? []) if (/tab-\d+$/.test(m.uri.path)) m.dispose(); }, []);
   useEffect(() => { // dispose models of closed tabs
@@ -94,6 +98,13 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
       return c ? [{ range: { startLineNumber: line + 1, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, options: { isWholeLine: true, className: "d" + c } }] : [];
     }));
   }, [tokens, text, tabId, covVersion]);
+  useEffect(() => { // the stop line and the breakpoint glyphs; the view follows a new stop (once per stop)
+    const whole = (line0: number, options: object) => ({ range: { startLineNumber: line0 + 1, startColumn: 1, endLineNumber: line0 + 1, endColumn: 1 }, options });
+    pcDecor.current?.set([...(bpLines ?? []).map((l) => whole(l, { glyphMarginClassName: "dbp" })), ...(pcLine != null ? [whole(pcLine, { isWholeLine: true, className: "dpc" })] : [])]);
+    const key = pcLine != null ? `${tabId}:${pcLine}:${pcSeq}` : "";
+    if (key && key !== pcKey.current) editorRef.current?.revealLineInCenterIfOutsideViewport(pcLine! + 1);
+    pcKey.current = key;
+  }, [pcLine, pcSeq, (bpLines ?? []).join(","), text, tabId]); // eslint-disable-line
   useEffect(() => { // the token(s) of the use clicked in the references panel; scrolled into view once per new highlight
     const rng = (t: Token) => ({ startLineNumber: t.line + 1, startColumn: t.colStart + 1, endLineNumber: t.line + 1, endColumn: t.colEnd + 1 });
     hlDecor.current?.set(highlight.map((t) => ({ range: rng(t), options: { inlineClassName: "use-token" } })));
@@ -103,6 +114,6 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   }, [highlight, text, tabId]); // eslint-disable-line
   return (
     <Editor language="c" theme="vs-dark" path={`tab-${tabId ?? 0}`} value={text} onMount={onMount}
-      options={{ readOnly: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }} />
+      options={{ readOnly: true, glyphMargin: !!onGutter, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }} />
   );
 }

@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger",
 } as const;
 
 export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCommand, { type: "edit" }>["action"]): boolean {
@@ -24,6 +24,7 @@ export function allowsCommand(caps: ReadonlySet<Capability>, cmd: MenuCommand): 
     case "coverage-path": case "coverage-load": case "coverage-clear": return caps.has("coverage");
     case "graph": return caps.has("controlFlowGraph") && caps.has("decompile");
     case "callgraph": return caps.has("callGraph");
+    case "debug": return caps.has("debugger");
     case "export": return caps.has(cmd.kind === "gzf" ? "exportGzf" : "export");
     case "copy": return cmd.what === "address" || caps.has(cmd.what === "decompiled" ? "decompile" : "bytes");
     case "xrefs": return caps.has("references");

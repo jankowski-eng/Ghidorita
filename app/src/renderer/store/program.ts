@@ -1,5 +1,6 @@
-import type { ActiveSession, AnalysisState, FunctionInfo, ListingRow, UndoState } from "../../../../protocol";
+import type { ActiveSession, AnalysisState, DebugState, FunctionInfo, ListingRow, UndoState } from "../../../../protocol";
 import type { AddrMap } from "../addrmap";
+import { changedRegs, regValues, type DebugView } from "../debug";
 import type { ProgramOperations } from "../backend";
 import type { Progress } from "../OpenDialog";
 import type { Stats } from "../StatusBar";
@@ -26,6 +27,9 @@ export interface ProgramState {
   undo: UndoState;
   /** `analysis` capability: the background analysis of the open program (null = none known) */
   analysis: AnalysisState | null;
+  /** `debugger` capability: the last debug_state (null = none yet) with the registers that changed at its stop; `debugLast` = the registers of the previous stop */
+  debug: DebugView | null;
+  debugLast: Record<string, string>;
   saving: boolean;
   stats: Stats;
   /** `error` is the last failure (status bar), `notice` the welcome pane's line, `flash` a five second status bar hint */
@@ -34,7 +38,7 @@ export interface ProgramState {
 
 export const initialProgram: ProgramState = {
   program: null, opening: null, progress: null, closing: false, unavailable: false, funcs: [], map: null, initialRows: [], reading: false, browseError: "",
-  undo: noUndo, analysis: null, saving: false, stats: {}, error: "", notice: "", flash: "",
+  undo: noUndo, analysis: null, debug: null, debugLast: {}, saving: false, stats: {}, error: "", notice: "", flash: "",
 };
 
 export type ProgramAction =
@@ -48,13 +52,14 @@ export type ProgramAction =
   | { type: "funcs"; funcs: FunctionInfo[] }
   | { type: "undo"; u: UndoState }
   | { type: "analysis"; state: AnalysisState | null }
+  | { type: "debug"; state: DebugState }
   | { type: "saving"; on: boolean }
   | { type: "stats"; patch: Stats }
   | { type: "error"; message: string } | { type: "notice"; message: string } | { type: "flash"; message: string };
 
 export function programReducer(s: ProgramState, a: ProgramAction): ProgramState {
   switch (a.type) {
-    case "program": return { ...s, program: a.program, funcs: [], map: null, initialRows: [], undo: noUndo, analysis: null, stats: {}, reading: false, browseError: "" };
+    case "program": return { ...s, program: a.program, funcs: [], map: null, initialRows: [], undo: noUndo, analysis: null, debug: null, debugLast: {}, stats: {}, reading: false, browseError: "" };
     case "openStarted": return { ...s, error: "", notice: "", progress: null, opening: { path: a.path, startedAt: a.startedAt, cancelling: false } };
     case "openEnded": return { ...s, opening: null, progress: null };
     case "progress": return !s.opening || s.opening.cancelling ? s : { ...s, progress: a.p }; // late progress after cancel is dropped
@@ -68,6 +73,13 @@ export function programReducer(s: ProgramState, a: ProgramAction): ProgramState 
     case "funcs": return { ...s, funcs: a.funcs };
     case "undo": return { ...s, undo: a.u };
     case "analysis": return { ...s, analysis: a.state };
+    case "debug": {
+      const st = a.state, prev = s.debug;
+      if (st.state !== "stopped") return { ...s, debug: { ...st, changed: prev?.changed ?? {} }, debugLast: st.state === "detached" ? {} : s.debugLast };
+      if (prev?.state === "stopped" && prev.stop === st.stop) return { ...s, debug: { ...st, changed: prev.changed } }; // the same stop again (a breakpoint toggled)
+      const regs = st.registers ?? [];
+      return { ...s, debug: { ...st, changed: changedRegs(s.debugLast, regs) }, debugLast: regValues(regs) };
+    }
     case "saving": return { ...s, saving: a.on };
     case "stats": return { ...s, stats: { ...s.stats, ...a.patch } };
     case "error": return { ...s, error: a.message };

@@ -44,6 +44,11 @@ View > Call Graph (or the command bar) swaps the decompiler for the functions ar
 
 ![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
 
+### Debugger (QEMU)
+Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb -kernel fw.bin -S -gdb tcp::1234 -display none`, open the same image in Ghidrette (a raw image at the base address it runs at: program addresses are runtime addresses), then Debug > Attach to QEMU… (host:port, default `localhost:1234`). The target stops where it is; the listing and decompiler jump to the stop and highlight the current row and line, the **Registers** tab lists the program language's registers and marks the ones that changed since the last stop, and the status bar says `running`, `stopped at <address>` or `detached` (with why: target exited, connection lost). `F9` toggles a breakpoint on the listing cursor row or the decompiler line's first address (a click in the gutter does the same; they can be set before attaching), `F5` continues, `F6` pauses, `F7` steps one instruction, Debug > Detach lets go. Errors are plain words: connection refused, unknown architecture (the target is not the program's processor), the target exited. Statement stepping, memory views and recording are not part of this first slice; `sidecar/testdata/fw/` holds the small Cortex-M test program the tests debug.
+
+![Stopped in work_a under QEMU: breakpoint, current row and line, changed registers](screenshots/debugger.png)
+
 ### Strings, symbols, memory search
 View > Defined Strings (`Cmd+Shift+E`) lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default, and a minimum length and a text filter narrow it. Symbol Table (`Cmd+Shift+Y`) filters by name (`*` and `?` wildcards) and kind and shows each symbol's namespace and source. Search Memory (`Cmd+Shift+F`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text and streams results; **Cancel** keeps what was found, **Continue** resumes. All of them open in the dock under the panes; a click or Enter goes to the address.
 

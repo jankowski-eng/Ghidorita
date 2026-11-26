@@ -8,7 +8,7 @@ export type MenuCommand =
   | { type: "open-path"; path: string } | { type: "coverage-path"; path: string } | { type: "coverage-clear" } | { type: "coverage-load" }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" } | { type: "datatypes" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
-  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" } | { type: "xrefs" } | { type: "graph" } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" } | { type: "copy"; what: "address" | "bytes" | "carray" | "decompiled" }
+  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" } | { type: "debug"; action: "attach" | "detach" | "continue" | "pause" | "step" | "breakpoint" } | { type: "xrefs" } | { type: "graph" } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" } | { type: "copy"; what: "address" | "bytes" | "carray" | "decompiled" }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "bookmark" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {

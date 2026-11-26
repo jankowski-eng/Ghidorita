@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { ActiveSession, AnalysisState, Address, ImportOptions, ListingRow, ProgramEntry } from "../../../../protocol";
+import type { ActiveSession, AnalysisState, Address, DebugState, ImportOptions, ListingRow, ProgramEntry } from "../../../../protocol";
 import { readBrowsing, resolveOpen } from "../session";
 import { isFailure, isObsolete, type AnalysisMode, type ApplicationBackend, type OpenJob, type OpenProgress, type ProgramChange } from "../backend";
 import { coverage } from "../coverage";
@@ -123,6 +123,19 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
   });
   const analysisChanged = (sessionId: string, state: AnalysisState) => { if (get().program?.session.sessionId === sessionId) dispatch({ type: "analysis", state }); };
 
+  /** The debug menu (attach is a dialog, features/debug.ts): detach, continue, pause, step, toggle a breakpoint at `address`. The result is the debug_state that follows. */
+  const debugChanged = (sessionId: string, state: DebugState) => { if (get().program?.session.sessionId === sessionId) dispatch({ type: "debug", state }); };
+  const debugAction = (a: "detach" | "continue" | "pause" | "step" | "breakpoint", address?: Address) => send(async () => {
+    const current = get().program;
+    if (!current) return;
+    const d = current.api.debug, st = get().debug?.state ?? "detached";
+    if (a === "breakpoint") await d.breakpoint({ address: address! });
+    else if (st === "detached") flash("Not attached to a target. Use Debug > Attach to QEMU…");
+    else if (a === "detach") await d.detach();
+    else if (a === "pause") { if (st === "running") await d.pause(); }
+    else if (st === "stopped") await (a === "continue" ? d.continue() : d.step());
+  });
+
   const closeProgram = async () => {
     const current = get().program;
     if (!current || blocked()) return;
@@ -181,7 +194,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
 
   const session = {
     backend, caps, store, views, refs, errors, opts, menu: { current: null as import("../../preload/index").MenuState | null },
-    blocked, fail, flash, setNotice, send, selectSession, loadBrowsing, open, openStored, analysisAction, analysisChanged, closeProgram, cancelOpen, refreshFunctions, refreshUndo, save, undoRedo, programChanged,
+    blocked, fail, flash, setNotice, send, selectSession, loadBrowsing, open, openStored, analysisAction, analysisChanged, debugAction, debugChanged, closeProgram, cancelOpen, refreshFunctions, refreshUndo, save, undoRedo, programChanged,
     /** the program the UI shows right now (null if none) */
     program: () => get().program,
     onReset: (f: () => void) => { resetSubs.add(f); return () => { resetSubs.delete(f); }; },

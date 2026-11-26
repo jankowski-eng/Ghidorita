@@ -193,3 +193,13 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .ctxmenu [role=menuitem] { padding: 4px 14px; cursor: default; white-space: nowrap; }
 .ctxmenu [role=menuitem]:hover { background: #094771; }
 .lrow .bm { color: #e5c07b; font-style: normal; margin-right: 3px; }
+/* debugger: breakpoint dot and current row in the listing, glyph margin and current line in the decompiler, the registers tab */
+.lrow.bp::after { content: ""; position: absolute; left: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: #e51400; }
+.lrow.pc { background: #3b3a12; box-shadow: inset 3px 0 0 #ffd866; } .lrow.pc.cursor { background: #094771; }
+.dpc { background: #3b3a12; box-shadow: inset 3px 0 0 #ffd866; }
+.dbp { background: #e51400; border-radius: 50%; width: 8px !important; height: 8px !important; margin: 5px 0 0 4px; }
+.regs { flex: 1; overflow: auto; padding: 6px 12px; font-family: Menlo, Consolas, monospace; font-size: 12px; }
+.regs-h { color: #888; padding-bottom: 6px; }
+.regs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 18px; }
+.reg { display: flex; gap: 10px; padding: 1px 4px; border-radius: 2px; } .reg .rn { min-width: 6ch; color: #9cdcfe; }
+.reg.changed { background: #4d3a12; color: #ffd866; } .reg.changed .rn { color: #ffd866; font-weight: 700; } .reg.stale { opacity: .5; }

@@ -1,0 +1,63 @@
+"""core/gdb.py against a fake gdbstub on a local socket: framing, requests, a resume with its stop reply, a lost connection. No QEMU, no JVM."""
+import socket, threading, queue
+
+import pytest
+
+from ghidrette.core.gdb import Gdb, GdbError, frame
+
+
+def serve(script):
+    """One-connection server; script(read_packet, send) drives it."""
+    srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
+
+    def run():
+        c, _ = srv.accept()
+        buf = b""
+
+        def read():
+            nonlocal buf
+            while True:
+                i = buf.find(b"#")
+                if buf.startswith(b"+") or buf.startswith(b"-"):
+                    buf = buf[1:]; continue
+                if buf[:1] == b"\x03":
+                    buf = buf[1:]; return "\x03"
+                if i >= 0 and len(buf) >= i + 3:
+                    body, buf = buf[1:i].decode(), buf[i + 3:]; return body
+                d = c.recv(4096)
+                if not d:
+                    return None
+                buf += d
+        script(read, lambda p: c.sendall(frame(p)), c)
+        c.close(); srv.close()
+    threading.Thread(target=run, daemon=True).start()
+    return srv.getsockname()[1]
+
+
+def test_request_resume_interrupt_and_lost():
+    def script(read, send, c):
+        assert read() == "?"; send("T05core:01;")
+        assert read() == "p0"; send("2a000000")
+        assert read() == "c"; send("O68656c6c6f")  # console output is not a stop
+        assert read() == "\x03"; send("T02")
+        assert read() == "s"; send("T05")
+        assert read() == "p0"; c.close()  # dies mid-request
+    port = serve(script)
+    stops = queue.Queue()
+    lost = queue.Queue()
+    g = Gdb("127.0.0.1", port, stops.put, lambda: lost.put(1))
+    assert g.request("?") == "T05core:01;"
+    assert g.request("p0") == "2a000000"
+    g.resume("c")
+    g.interrupt()
+    assert stops.get(timeout=3) == "T02"
+    assert g.resume("s", wait=True) == "T05"
+    with pytest.raises(GdbError, match="Lost"):
+        g.request("p0")
+    assert lost.get(timeout=3) == 1
+
+
+def test_connection_refused_in_plain_words():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    with pytest.raises(GdbError, match="refused"):
+        Gdb("127.0.0.1", port, print, print)

@@ -78,6 +78,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: "CmdOrCtrl+Shift+J", click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: "CmdOrCtrl+Shift+B", click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
+        { id: "registers", label: "Registers", enabled: state.hasProgram && caps.has(dockCapability.registers), click: () => send({ type: "dock", panel: "registers" }) },
         { id: "memsearch", label: "Search Memory…", enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },
@@ -91,6 +92,11 @@ export function createMenu({ getWin, pick }: Deps) {
         // the key is only a hint in the label (a real accelerator would swallow a typed x): Listing and Decompiler handle X themselves
         { id: "xrefs", label: `Show References To   (X)`, enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },
+      { label: "Debug", submenu: ([
+        ["Attach to QEMU…", "", "attach"], ["Detach", "", "detach"], [null, "", ""],
+        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Instruction", "F7", "step"], ["Toggle Breakpoint", "F9", "breakpoint"],
+      ] as const).map(([label, key, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
+        : { id: "debug-" + action, label, accelerator: key || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
       { role: "windowMenu" },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));

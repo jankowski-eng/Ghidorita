@@ -1,4 +1,4 @@
-import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type Methods, type Notifications } from "../../../protocol";
+import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type DebugState, type Methods, type Notifications } from "../../../protocol";
 import {
   BackendError, type AnalysisMode, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenProgress, type ProgramChange,
   type ProgramLifecycle, type ProgramOperations, type ProjectCatalog, type ProviderEvents,
@@ -9,7 +9,7 @@ import { reopenParams } from "./openOptions";
 const kinds: Record<number, Failure> = {
   [ErrorCode.NoProgram]: "noProgram", [ErrorCode.Cancelled]: "cancelled", [ErrorCode.Timeout]: "timeout",
   [ErrorCode.NotFound]: "notFound", [ErrorCode.Busy]: "busy", [ErrorCode.ProjectLocked]: "projectLocked",
-  [ErrorCode.StaleSession]: "stale", [ErrorCode.InvalidArgument]: "invalid", [ErrorCode.MethodNotFound]: "unsupported",
+  [ErrorCode.StaleSession]: "stale", [ErrorCode.Target]: "target", [ErrorCode.InvalidArgument]: "invalid", [ErrorCode.MethodNotFound]: "unsupported",
 };
 type Method = keyof Methods;
 type Params<M extends Method> = Methods[M]["params"];
@@ -31,6 +31,7 @@ export class WebSocketBackend implements ApplicationBackend {
   private changes = new Set<(sessionId: string, event: ProgramChange) => void>();
   private errors = new Set<(message: string) => void>();
   private analyses = new Set<(sessionId: string, state: AnalysisState) => void>();
+  private debugs = new Set<(sessionId: string, state: DebugState) => void>();
   capabilities: ReadonlySet<Capability> = new Set();
   recovery?: { snapshotIntervalSeconds: number };
 
@@ -80,6 +81,9 @@ export class WebSocketBackend implements ApplicationBackend {
       } else if (reply.method === "analysis_state" && notifications.analysis_state(reply.params)) {
         const { sessionId, ...state } = reply.params as Notifications["analysis_state"];
         if (sessionId === this.sessionId) for (const listener of this.analyses) listener(sessionId, state);
+      } else if (reply.method === "debug_state" && notifications.debug_state(reply.params)) {
+        const { sessionId, ...state } = reply.params as Notifications["debug_state"];
+        if (sessionId === this.sessionId) for (const listener of this.debugs) listener(sessionId, state);
       } else if (reply.method === "error" && notifications.error(reply.params)) {
         for (const listener of this.errors) listener((reply.params as Notifications["error"]).message);
       }
@@ -136,6 +140,7 @@ export class WebSocketBackend implements ApplicationBackend {
     onChange: (listener) => { this.changes.add(listener); return () => this.changes.delete(listener); },
     onError: (listener) => { this.errors.add(listener); return () => this.errors.delete(listener); },
     onAnalysis: (listener) => { this.analyses.add(listener); return () => this.analyses.delete(listener); },
+    onDebug: (listener) => { this.debugs.add(listener); return () => this.debugs.delete(listener); },
   };
   readonly projects: ProjectCatalog = {
     list: () => this.request("projects", "list_programs", {}),
@@ -236,6 +241,11 @@ export class WebSocketBackend implements ApplicationBackend {
         status: () => read("analysis_status", {}, "analysis"),
         start: (profile) => read("start_analysis", profile ? { profile } : {}, "analysis"),
         cancel: () => read("cancel_analysis", {}, "analysis"),
+      },
+      debug: {
+        attach: (p) => read("debug_attach", p, "debugger"), detach: () => read("debug_detach", {}, "debugger"), breakpoint: (p) => read("debug_breakpoint", p, "debugger"),
+        continue: () => read("debug_continue", {}, "debugger"), step: () => read("debug_step", {}, "debugger"), pause: () => read("debug_pause", {}, "debugger"),
+        status: () => read("debug_status", {}, "debugger"),
       },
     };
   }

@@ -12,6 +12,7 @@ sidecar/
     app.py             wiring: builds Ctx, Project, Program and DOMAINS, registers their RPCs, sets the shutdown hooks
     core/              runtime, no Ghidra API except Opening.monitor / Events listener / Session.edit
       errors.py        RpcError, error codes, INVALID_JAVA, java_error(), log()
+      gdb.py           GDB Remote Serial Protocol client (framing, reader thread, resume/stop replies, target.xml); no Ghidra
       args.py          hx, lim, text_arg, name_arg
       lanes.py         Job, Scan, Opening, Worker; Lanes = the queues and threads, run(), on_r(), scanning(), cancel()
       session.py       Session = the open program: program, epoch, program_id, session_id (fresh per open, via publish()), undo snapshot, need(), addr(), edit(), cmd(), function()
@@ -34,6 +35,7 @@ sidecar/
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
       xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from, call_graph, function_calls (scan lane)
       bookmarks.py     list_bookmarks, set_bookmark, remove_bookmark (BookmarkManager; set/remove are edits that announce their address)
+      debug.py         debug_attach, debug_detach, debug_status, debug_breakpoint, debug_continue, debug_step, debug_pause: GDB remote client (core/gdb.py) to QEMU's gdbstub, `debug_state` notifications; one reader thread, a worker per stop
       datatypes.py     list_data_types and the data-type-manager RPCs
   jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
   test_*.py, testlib.py, conftest.py    tests: mostly one file per domain, black box over WebSocket against real Ghidra on /bin/ls

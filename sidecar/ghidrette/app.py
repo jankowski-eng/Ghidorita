@@ -6,6 +6,7 @@ from .core.server import Server
 from .domains.analysis import Analysis
 from .domains.bookmarks import Bookmarks
 from .domains.datatypes import DataTypes
+from .domains.debug import Debug
 from .domains.decompile import Decompile
 from .domains.edits import Edits
 from .domains.exports import Exports
@@ -16,7 +17,7 @@ from .domains.project import Project
 from .domains.search import Search
 from .domains.xrefs import Xrefs
 
-DOMAINS = (Listing, Decompile, Edits, HighVars, Search, Xrefs, DataTypes, Exports, Bookmarks)  # Project and Program are built first, the others only need ctx
+DOMAINS = (Listing, Decompile, Edits, HighVars, Search, Xrefs, DataTypes, Exports, Bookmarks, Debug)  # Project and Program are built first, the others only need ctx
 
 
 class App:
