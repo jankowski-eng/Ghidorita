@@ -29,8 +29,9 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
   useEffect(() => { // fit the whole graph when it changes
     const el = box.current;
     if (!L || !el) return;
-    const k = Math.min(1, (el.clientWidth - 24) / Math.max(L.width, 1), (el.clientHeight - 24) / Math.max(L.height, 1));
-    setView({ k, x: (el.clientWidth - L.width * k) / 2, y: 12 });
+    const top = 28; // below the legend row, so the first block never covers it
+    const k = Math.min(1, (el.clientWidth - 24) / Math.max(L.width, 1), (el.clientHeight - top - 12) / Math.max(L.height, 1));
+    setView({ k, x: (el.clientWidth - L.width * k) / 2, y: top });
   }, [L]);
   useEffect(() => {
     const el = box.current!;
