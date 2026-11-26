@@ -14,6 +14,27 @@ class Program:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
 
+    def start(self):
+        if float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120")) > 0:
+            threading.Thread(target=self._snapshot_loop, daemon=True).start()
+
+    def _snapshot_loop(self):
+        """Crash safety: every SIDECAR_SNAPSHOT_SECS, unsaved edits go to Ghidra's recovery file (what the GUI does). Unlike save it
+        keeps the undo history; the next open of the program restores them (_consume). Runs on thread R, like every program write."""
+        secs = float(os.environ.get("SIDECAR_SNAPSHOT_SECS", "120"))
+        while True:
+            time.sleep(secs)
+            try:
+                self.ctx.lanes.on_r(self._snapshot)
+            except Exception as e:  # noqa
+                log("recovery snapshot failed:", repr(e))
+
+    def _snapshot(self):
+        prog = self.ses.program
+        if prog is not None and prog.isChanged():
+            with self.ses.save_lock:
+                prog.getDomainFile().takeRecoverySnapshot()
+
     @rpc(lane="project")
     def close_program(self):
         if self.ctx.lanes.opening is not None:
@@ -97,7 +118,7 @@ class Program:
         AutoAnalysisManager.getAnalysisManager(prog).setIgnoreChanges(True)
         self.ctx.events.attach(prog)  # only now: progress covers the initial analysis
         self.ses.results, self.ses.consumer = res, consumer
-        self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}  # just cleared and saved; no Program read on thread O
+        self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": bool(prog.isChanged())}  # clean after import/save; dirty when edits were recovered
         self.ses.program_id = key
         with self.ses.lock:
             self.ses.epoch += 1
@@ -175,7 +196,6 @@ class Program:
 
     def _do_open(self, path, op, opts, disabled):
         """Thread O. On cancel or any error: nothing is saved, the program is released, the project stays usable."""
-        import pyghidra
         res = prog = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
@@ -195,10 +215,10 @@ class Program:
             if persisted:
                 self.ctx.progress("import", 100, "loading persisted analysis")
                 try:
-                    prog, consumer = pyghidra.consume_program(proj, "/" + key)
+                    prog, consumer = self._consume(proj, "/" + key)
                 except Exception as e:  # noqa
                     # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
-                    if op.cancelled or re.search(r"lock|in use|already open|upgrade", repr(e), re.I):
+                    if op.cancelled or self._not_corruption(e):
                         raise  # not corruption: never delete a program that may hold saved edits
                     log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
                     proj.getProjectData().getFile("/" + key).delete()
@@ -246,6 +266,34 @@ class Program:
             raise RpcError(INTERNAL, "open failed: %s" % e)
         finally:
             self.ctx.project.lock.release()
+
+    @staticmethod
+    def _not_corruption(e):
+        """True for load failures that say nothing about the file being damaged: locked, a Ghidra version mismatch (older or newer
+        build than the one that saved it), or the JVM running out of memory."""
+        if re.search(r"lock|in use|already open|upgrade", repr(e), re.I) or isinstance(e, MemoryError):
+            return True
+        try:
+            name = str(e.getClass().getSimpleName())
+            return name == "OutOfMemoryError" or (name == "VersionException" and int(e.getVersionIndicator()) in (1, 2))  # OLDER, NEWER
+        except Exception:
+            return False
+
+    @staticmethod
+    def _consume(proj, path):
+        """pyghidra.consume_program, but with okToRecover: unsaved edits of a crashed session (see _snapshot_loop) come back."""
+        from java.lang import Object
+        from ghidra.program.model.listing import Program
+        from ghidra.util.task import TaskMonitor
+        consumer = Object()
+        df = proj.getProjectData().getFile(path)
+        if df is None:
+            raise FileNotFoundError(path)
+        dobj = df.getDomainObject(consumer, True, True, TaskMonitor.DUMMY)
+        if not Program.class_.isAssignableFrom(dobj.getClass()):
+            dobj.release(consumer)
+            raise TypeError("%s is not a Program" % path)
+        return dobj, consumer
 
     def _import_and_analyze(self, path, key, proj, op, opts, disabled):
         from ghidra.app.util.importer import ProgramLoader

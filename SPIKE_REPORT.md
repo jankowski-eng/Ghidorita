@@ -282,3 +282,5 @@ sidecar/
 - `Events.reset()` (like the old `_close`) leaves the coalescer's `armed` flag as it is (already noted in Round 3).
 
 **Next conflict hotspots (out of scope here)**: `protocol.md` and `protocol.ts` (one file each, every feature adds to them), the mock `app/mock/server.mjs`, and the renderer's `App.tsx` and `autotest*.ts`.
+
+**Rebased onto `main` 57dd24b** (two audit commits touched `sidecar/main.py`): their changes were re-applied in the modules, not merged textually: recovery snapshots (`program.py`), `_consume`/`_not_corruption` (`program.py`), `list_data_types` on the scan lane (`datatypes.py`, golden table updated), uncached string filter (`search.py`), local range in `define_data` (`edits.py`), the dirty flag after recovery (`program.py`). The intermediate step commits between `main` and the port commit do not contain these; only the tip does. pytest at the tip: 48 passed, 1 failed (`test_snapshot_survives_sigkill`), which also fails on plain `main` in this environment (no recovery snapshot is found after SIGKILL; not investigated). `npm test`/autotests were not rerun after the rebase.

@@ -8,23 +8,26 @@ class DataTypes:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
 
-    @rpc(lane="R")
-    def list_data_types(self, query, limit=100):
+    @rpc(lane="scan")
+    def list_data_types(self, query, limit=100, scan=None):
+        """Scan worker (thread S): walks every program and built-in type, so it must not hold up listing fetches on R."""
         from ghidra.program.model.data import BuiltInDataTypeManager
-        prog = self.ses.need()
-        text_arg(query, "query")
-        limit, q = lim(limit, 100, 1000), query.strip().lower()
-        hits, seen = [], set()
-        for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
-            for dt in dtm.getAllDataTypes():
-                n = str(dt.getName())
-                if q in n.lower() and str(dt.getPathName()) not in seen:
-                    seen.add(str(dt.getPathName()))
-                    hits.append((0 if n.lower().startswith(q) else 1, len(n), dict(self._dt_node(dt), source=src)))
-        hits.sort(key=lambda h: h[:2])
-        return [h[2] for h in hits[:limit]]
+        with self.ctx.lanes.scanning(scan) as prog:
+            text_arg(query, "query")
+            limit, q = lim(limit, 100, 1000), query.strip().lower()
+            hits, seen, n = [], set(), 0
+            for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
+                for dt in dtm.getAllDataTypes():
+                    n += 1
+                    if n & 255 == 0:
+                        scan.check()
+                    name = str(dt.getName())
+                    if q in name.lower() and str(dt.getPathName()) not in seen:
+                        seen.add(str(dt.getPathName()))
+                        hits.append((0 if name.lower().startswith(q) else 1, len(name), dict(self._dt_node(dt), source=src)))
+            hits.sort(key=lambda h: h[:2])
+            return [h[2] for h in hits[:limit]]
 
-    # ---- data types: tree, detail, editors (reads on R; edits are one transaction each) ----
     @staticmethod
     def _dt_kind(dt):
         from ghidra.program.model.data import Array, Enum, FunctionDefinition, Pointer, Structure, TypeDef, Union

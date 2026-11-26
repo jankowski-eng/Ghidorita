@@ -215,7 +215,7 @@ class Search:
             items = self.snap(("str", minLength), lambda: self._scan_strings(prog, minLength, scan))
             q = query.strip().lower()
             if q:
-                items = self.snap(("str", minLength, q), lambda: [i for i in items if q in i["value"].lower()])
+                items = [i for i in items if q in i["value"].lower()]  # not cached: one snapshot per typed prefix would evict the symbol snapshots from the LRU
             return {"total": len(items), "items": items[offset:offset + limit]}
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}

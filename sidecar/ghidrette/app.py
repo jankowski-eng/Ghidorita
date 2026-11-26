@@ -29,3 +29,4 @@ class App:
         self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)
         if start:
             ctx.lanes.start()
+            program.start()

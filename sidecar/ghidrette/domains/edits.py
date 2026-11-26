@@ -81,6 +81,8 @@ class Edits:
         if not prog.getMemory().contains(a):
             raise RpcError(INVALID, "address %s is not in memory" % address)
 
+        out = {}
+
         def go(p):
             dtm = p.getDataTypeManager()
             dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
@@ -93,9 +95,9 @@ class Edits:
                 raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
             dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
             self.ses.cmd(CreateDataCmd(a, True, False, dt))(p)
-            self._data_ranges = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
+            out["range"] = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
         self.ses.edit("Define data", go)
-        self.ctx.events.record({"data"}, [self._data_ranges])
+        self.ctx.events.record({"data"}, [out["range"]])
         return {}
 
     @rpc(lane="R")

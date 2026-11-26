@@ -40,11 +40,13 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 |---|---|---|
 | `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
 | `R`, `job=True` | R | the cancellable variable edits: a `Job` is registered under the request id (unique id required), passed as `job=`, reachable by `cancel_decompile` |
-| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | symbol table, strings, memory search. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
+| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | symbol table, strings, memory search, `list_data_types`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
 | `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile` only. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `project` | R | `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
 | `loop` | the asyncio loop | `cancel_*`: quick, only flip flags |
 | `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | import + analysis + save; calls back onto R with `lanes.on_r()` for the program swap |
+
+One more thread: the recovery-snapshot loop (`program.py`, every `SIDECAR_SNAPSHOT_SECS`) only sleeps; the snapshot itself runs on R via `lanes.on_r()`.
 
 Locks: `session.lock` guards the program swap (`program`, `epoch`) together with `lanes.running` / `lanes.active`; `lanes.mon_lock` the
 `Job`/`Scan` monitor hand-over; `project.lock` is held by thread O for a whole open and briefly by R for list/delete/candidates, so they
