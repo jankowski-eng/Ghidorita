@@ -115,6 +115,8 @@ class Sidecar:
         self.proj_lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
         self.program_id = None
         self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
+        self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
+        self.sd_lock, self.sd_started = threading.Lock(), False
         self.strings = None          # list_strings scan cache, reset on any program change
         self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
         self.plock = threading.Lock()
@@ -352,21 +354,16 @@ class Sidecar:
         self._close()
         return {}
 
-    def save(self):
-        from ghidra.util.task import TaskMonitor
-        prog = self.need()
-        if prog.isChanged():
-            prog.getDomainFile().save(TaskMonitor.DUMMY)
-        prog.flushEvents()
-        self.undo_snap = self.undo_state(prog)
-        self.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.undo_snap})
-        return {}
-
     # ---- program lifecycle ----
     def _close(self):
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
         prog, res, consumer, lst = self.program, self.results, self.consumer, self.listener
+        if prog is not None:  # autosave: closing must never lose edits (see protocol.md, Persistence and crash safety)
+            try:
+                self._save_program(prog, "close")
+            except Exception as e:  # noqa
+                log("close save FAILED, edits lost:", repr(e))
         with self.pool_lock:
             self.program = None
             self.epoch += 1
@@ -399,6 +396,27 @@ class Sidecar:
                 prog.release(consumer)
         self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
         self.program_id = None
+
+    def _save_program(self, prog, why):
+        """Write prog to its project file if it has unsaved changes (thread R; no transaction may be open).
+        Safe while decompiles run (they only read). Returns whether anything was written."""
+        from ghidra.util.task import TaskMonitor
+        with self.save_lock:
+            if not prog.isChanged():
+                return False
+            t0 = time.monotonic()
+            prog.getDomainFile().save(TaskMonitor.DUMMY)
+            if why != "save":
+                log("%s save took %.2fs" % (why, time.monotonic() - t0))
+            return True
+
+    def save(self):
+        prog = self.need()
+        saved = self._save_program(prog, "save")
+        self.undo_snap = self.undo_state(prog)
+        if saved:  # Ghidra's save drops the undo/redo stacks and clears dirty: tell the client (empty ranges/kinds = nothing to refetch)
+            self.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.undo_snap})
+        return {"saved": saved}
 
     def _publish(self, prog, res, consumer, op, key):
         from ghidra.app.plugin.core.analysis import AutoAnalysisManager
@@ -510,11 +528,20 @@ class Sidecar:
             persisted = proj.getProjectData().getFile("/" + key) is not None
             if persisted:
                 self.progress("import", 100, "loading persisted analysis")
-                prog, consumer = pyghidra.consume_program(proj, "/" + key)
-                op.check()
-                self._meta_touch(key)
-                log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
-            else:
+                try:
+                    prog, consumer = pyghidra.consume_program(proj, "/" + key)
+                except Exception as e:  # noqa
+                    # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
+                    if op.cancelled:
+                        raise
+                    log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
+                    proj.getProjectData().getFile("/" + key).delete()
+                    persisted = False
+                else:
+                    op.check()
+                    self._meta_touch(key)
+                    log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
+            if not persisted:
                 res, prog, consumer = self._import_and_analyze(path, key, proj, op, opts), None, None
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
@@ -988,6 +1015,58 @@ class Sidecar:
             raise RpcError(INTERNAL, "function was not created")
         return {"entry": hx(a.getOffset()), "name": str(f.getName())}
 
+    def define_data(self, address, dataType):
+        from ghidra.app.cmd.data import CreateDataCmd
+        from ghidra.program.model.data import DataTypeConflictHandler
+        from ghidra.util.data import DataTypeParser
+        from ghidra.util.data.DataTypeParser import AllowedDataTypes
+        prog = self.need()
+        text_arg(dataType, "dataType")
+        a = self.addr(address)
+        if not prog.getMemory().contains(a):
+            raise RpcError(INVALID, "address %s is not in memory" % address)
+
+        def go(p):
+            dtm = p.getDataTypeManager()
+            dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
+            if dt is None:
+                try:
+                    dt = DataTypeParser(dtm, dtm, None, AllowedDataTypes.ALL).parse(dataType)
+                except Exception as e:  # noqa  (ParseException, or anything the parser throws on junk)
+                    raise RpcError(INVALID, "unknown data type %r: %s" % (dataType, e))
+            if dt is None or dt.getLength() <= 0:
+                raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
+            dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
+            self._cmd(CreateDataCmd(a, True, False, dt))(p)
+            self._data_ranges = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
+        self.edit("Define data", go)
+        self._record({"data"}, [self._data_ranges])
+        return {}
+
+    def clear_code(self, address, length=None):
+        from ghidra.app.plugin.core.clear import ClearCmd
+        from ghidra.program.model.address import AddressSet
+        prog = self.need()
+        a, mem, listing = self.addr(address), prog.getMemory(), prog.getListing()
+        if not mem.contains(a):
+            raise RpcError(INVALID, "address %s is not in memory" % address)
+        if length is None:
+            cu = listing.getCodeUnitContaining(a)
+            lo, hi = cu.getMinAddress(), cu.getMaxAddress()
+        else:
+            n = int(length)
+            if n < 1:
+                raise RpcError(INVALID, "length must be >= 1")
+            lo = a
+            hi = a.getAddressSpace().getMaxAddress() if a.getOffset() + n - 1 > a.getAddressSpace().getMaxAddress().getOffset() else a.add(n - 1)
+        view = AddressSet(lo, hi).intersect(mem)
+        # ClearCmd.applyTo returns true even when it did nothing; an empty transaction would not be undoable
+        if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
+            raise RpcError(INVALID, "no instructions or defined data in range")
+        self.edit("Clear code", lambda p: self._cmd(ClearCmd(view))(p))
+        self._record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
+        return {}
+
     def _function(self, entry):
         prog = self.need()
         f = prog.getFunctionManager().getFunctionAt(self.addr(entry))
@@ -1214,7 +1293,8 @@ class Sidecar:
 
     R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "search_symbols", "xrefs_to",
                  "xrefs_from", "list_strings", "list_data_types", "undo_state", "rename_symbol", "set_comment",
-                 "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo", "save")
+                 "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
+                 "define_data", "clear_code", "save")
     # run on R, but never behind/alongside an open: Busy instead of NoProgram
     P_METHODS = ("close_program", "import_candidates", "list_languages", "list_programs", "delete_program")
 
@@ -1284,6 +1364,11 @@ class Sidecar:
             self.ws = None
 
     def shutdown(self):
+        """stdin EOF / SIGTERM. Never exits while a save is running; the close on thread R saves unsaved edits."""
+        with self.sd_lock:
+            if self.sd_started:
+                return
+            self.sd_started = True
         if self.opening is not None:
             self.opening.cancel()
         with self.pool_lock:
@@ -1295,15 +1380,15 @@ class Sidecar:
             j.cancelled = True
 
         op = self.opening
-        end = time.monotonic() + 2.0
-        while op is not None and op.saving and not op.finished and time.monotonic() < end:
+        while op is not None and op.saving and not op.finished:
             time.sleep(0.02)  # never exit mid-save: a half-written project file would load as "persisted"
+        t0 = time.monotonic()
         f = concurrent.futures.Future()
-        self.jobs.put((self._close, f))  # close on thread R, like every other program change
-        try:
-            f.result(timeout=max(0.1, end + 0.5 - time.monotonic()))  # a stuck R must not block exit (Electron SIGKILLs at 3 s)
-        except Exception:
-            pass
+        self.jobs.put((self._close, f))  # close (and autosave) on thread R, like every other program change
+        # R may be busy with a long edit; give up only if it is not saving (Electron's SIGKILL is the backstop)
+        while not f.done() and (time.monotonic() - t0 < 45 or self.save_lock.locked()):
+            time.sleep(0.02)
+        log("shutdown: close finished in %.2fs" % (time.monotonic() - t0))
         os._exit(0)
 
 
@@ -1353,7 +1438,7 @@ def main():
         sc.shutdown()
 
     threading.Thread(target=watch_stdin, daemon=True).start()
-    signal.signal(signal.SIGTERM, lambda *_: sc.shutdown())
+    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=sc.shutdown, daemon=True).start())
     asyncio.run(serve())
 
 

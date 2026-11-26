@@ -51,3 +51,8 @@ BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompi
 Never modify the Ghidra source checkout; everything here lives in this repo.
 
 Analyzed programs persist in a Ghidra project under `$SIDECAR_PROJECTS_DIR` (the app uses its userData dir, `~/Library/Application Support/<app>/projects`), keyed by file sha256. Delete that dir to force re-analysis.
+
+## Editing (Ghidra's default keys)
+Listing (row cursor: click or arrows): `L` rename label/function, `;` comment (kind selectable, EOL prefilled), `F` create function, `T` define data, `C` clear code. Decompiler (cursor on a token; also the context menu): `L` rename variable/param/function/label, `Cmd+L` retype variable, Edit menu > Edit Function Signature, `;` comment (pre). `Cmd+Z` / `Cmd+Shift+Z` program undo/redo (a text input keeps its own undo), `Cmd+S` save. Edits autosave when another binary is opened and on quit; saving drops Ghidra's undo history.
+Autotest edit flow: `AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=<fresh dir> npm start`, then `AUTOTEST_PHASE=2` with the same dir to check the edit persisted.
+Backend gaps: listing shows EOL comments only (no pre/plate/post, function headers, xref columns); no way to read non-EOL comments (comment dialog prefills EOL only); `rename_symbol` cannot create a label where none exists.

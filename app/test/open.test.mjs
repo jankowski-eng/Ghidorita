@@ -7,7 +7,7 @@ const load = async (f) => {
   return import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 };
 const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, RAW_CANDIDATE } = await load("openOptions.ts");
-const { windowTitle, needsPrompt } = await load("session.ts");
+const { windowTitle } = await load("session.ts");
 
 test("parseBase: normalises, validates, 64-bit limit", () => {
   assert.deepEqual(parseBase(""), { ok: true, value: "" });
@@ -47,11 +47,8 @@ test("optionsSummary / reopenParams", () => {
   assert.equal(reopenParams({ programId: "x", name: "n", sizeBytes: 1, analyzed: true, options: {} }), null);
   assert.deepEqual(reopenParams({ programId: "x", name: "n", sourcePath: "/a/n", sizeBytes: 1, analyzed: true, options: { loader: "L" } }), { path: "/a/n", loader: "L" });
 });
-test("windowTitle / needsPrompt", () => {
+test("windowTitle", () => {
   assert.equal(windowTitle(null, false), "Ghidra desktop spike");
   assert.equal(windowTitle("ls", false), "ls — Ghidra desktop spike");
   assert.equal(windowTitle("ls", true), "• ls — Ghidra desktop spike");
-  assert.equal(needsPrompt(true, true), true);
-  assert.equal(needsPrompt(true, false), false);
-  assert.equal(needsPrompt(false, true), false); // no program: nothing to lose
 });

@@ -78,7 +78,6 @@ export interface Methods {
   cancel_open: { params: {}; result: { cancelled: boolean } };
   import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[] } };
   list_languages: { params: {}; result: LanguageInfo[] };
-  save: { params: {}; result: {} };
   close_program: { params: {}; result: {} };
   list_programs: { params: {}; result: ProgramEntry[] };
   delete_program: { params: { programId: string }; result: {} };
@@ -104,6 +103,13 @@ export interface Methods {
   retype_variable: { params: { entry: Address; name: string; dataType: string }; result: {} };
   undo: { params: {}; result: UndoState };
   redo: { params: {}; result: UndoState };
+  // define_data: Ghidra's CreateDataCmd (clears conflicting code/data at the target); dataType is a name or path ("int", "char[4]", "/dword"). InvalidArgument for unknown/dynamic types or no room.
+  define_data: { params: { address: Address; dataType: string }; result: {} };
+  // clear_code: Ghidra's ClearCmd (code, data, references; not symbols/comments); `length` bytes from `address` (default: the code unit at address).
+  clear_code: { params: { address: Address; length?: number }; result: {} };
+  // ---- persistence ----
+  // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
+  save: { params: {}; result: { saved: boolean } };
 }
 
 /** All optional. Omit all = Ghidra's default import (preferred LoadSpec); programId stays the plain sha256. Any field present = explicit import, programId = sha256 + "-" + 12 hex of the options hash (protocol.md). */

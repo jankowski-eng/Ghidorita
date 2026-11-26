@@ -5,7 +5,7 @@ import { addRecent, clearRecent, getRecent } from "./recent";
 type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null> };
 
 export function createMenu({ getWin, pick }: Deps) {
-  let state: MenuState = { canBack: false, canForward: false, canOpen: true, canSave: false, canClose: false };
+  let state: MenuState = { canBack: false, canForward: false, canOpen: true, canEdit: false, undoLabel: null, redoLabel: null, dirty: false, canClose: false };
 
   const send = (cmd: MenuCommand) => {
     const w = getWin();
@@ -30,14 +30,23 @@ export function createMenu({ getWin, pick }: Deps) {
           if (p) send({ type: "open-path", path: p });
         } },
         { label: "Open Recent", enabled: state.canOpen, submenu: recentItems },
-        { type: "separator" },
-        { label: "Save", accelerator: "CmdOrCtrl+S", enabled: state.canSave, click: () => send({ type: "save" }) },
-        { label: "Close Program", enabled: state.canClose, click: () => send({ type: "close-program" }) },
+        { id: "save", label: "Save", accelerator: "CmdOrCtrl+S", enabled: state.canEdit && state.dirty, click: () => send({ type: "edit", action: "save" }) },
+        { id: "close-program", label: "Close Program", enabled: state.canClose, click: () => send({ type: "close-program" }) },
         { type: "separator" },
         { label: "Close Tab", accelerator: "CmdOrCtrl+W", click: () => send({ type: "close-tab" }) },
         ...(mac ? [] : [{ type: "separator" } as MenuItemConstructorOptions, { role: "quit" } as MenuItemConstructorOptions]),
       ] },
-      { role: "editMenu" },
+      { label: "Edit", submenu: [
+        // registerAccelerator:false = shown but not intercepted, so Cmd+Z / letters still reach text inputs (the renderer routes them)
+        { id: "undo", label: state.undoLabel ?? "Undo", accelerator: "CmdOrCtrl+Z", registerAccelerator: false, enabled: state.canEdit && !!state.undoLabel, click: () => send({ type: "edit", action: "undo" }) },
+        { id: "redo", label: state.redoLabel ?? "Redo", accelerator: "CmdOrCtrl+Shift+Z", registerAccelerator: false, enabled: state.canEdit && !!state.redoLabel, click: () => send({ type: "edit", action: "redo" }) },
+        { type: "separator" },
+        { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
+        { type: "separator" },
+        ...(([["Rename…", "L", "rename"], ["Retype Variable…", "CmdOrCtrl+L", "retype"], ["Set Comment…", ";", "comment"], ["Create Function", "F", "createFunction"],
+          ["Define Data…", "T", "defineData"], ["Clear Code Bytes", "C", "clear"], ["Edit Function Signature…", "", "signature"]] as const).map(([label, key, action]): MenuItemConstructorOptions =>
+          ({ label, ...(key ? { accelerator: key, registerAccelerator: false } : {}), enabled: state.canEdit, click: () => send({ type: "edit", action }) }))),
+      ] },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
         { type: "separator" }, { role: "toggleDevTools" },

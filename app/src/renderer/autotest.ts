@@ -3,6 +3,7 @@ import { AddrMap } from "./addrmap";
 import { rpc } from "./client";
 import { RpcError } from "./rpc";
 import type { MenuCommand, MenuState } from "../preload/index";
+import { runEditFlow, runPhase2 } from "./autotestEdit";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -16,37 +17,46 @@ export interface AutotestCtx {
   selected(): Address | null;
   topAddr(): Address;
   editorText(): string;
+  editor(): any;
+  menu(id: string): Promise<void>;
+  expect: any;
+  funcCount(): number;
   errors: string[];
   fail(e: unknown): void;
   setPath(p: string): void;
   /** the same handler the application menu's commands end in (main only forwards the click) */
-  menu(c: MenuCommand): void;
+  command(c: MenuCommand): void;
   lastMenu(): MenuState | null;
   title(): string;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
   const t0 = Date.now();
   for (;;) { const v = f(); if (v) return v; if (Date.now() - t0 > ms) throw new Error("timeout waiting for " + what); await sleep(50); }
 }
 // real-UI helpers: find by role/label, set a React-controlled input the way a user's typing does, dispatch real key events
-const byLabel = <E extends HTMLElement>(role: string, label: string) => document.querySelector<E>(`[role="${role}"][aria-label="${label}"]`);
+export const byLabel = <E extends HTMLElement>(role: string, label: string) => document.querySelector<E>(`[role="${role}"][aria-label="${label}"]`);
 const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-const typeInto = (el: HTMLInputElement, text: string) => {
+export const typeInto = (el: HTMLInputElement | HTMLTextAreaElement, text: string) => {
   el.focus();
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, text);
+  Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(el, text);
   el.dispatchEvent(new Event("input", { bubbles: true }));
 };
 const setSelect = (el: HTMLSelectElement, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
   el.dispatchEvent(new Event("change", { bubbles: true }));
 };
-const clickText = (root: ParentNode, text: string) => { const b = [...root.querySelectorAll("button")].find((x) => x.textContent === text); if (!b) throw new Error("no button " + text); b.click(); };
-const press = (el: HTMLElement, key: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+export const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
 
 export async function runAutotest(file: string, c: AutotestCtx) {
     const result: Record<string, unknown> = { ok: false };
+    if (c.expect) { // second launch of the edit autotest: did the saved edit survive the quit?
+      try { await runPhase2(file, c, result); } catch (e) { c.fail(e); }
+      result.errors = c.errors; if (c.errors.length) result.ok = false;
+      return window.host.autotestDone(result);
+    }
+    let persist: unknown;
     try {
       c.setPath(file);
       if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again, all through the UI
@@ -114,38 +124,34 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.search = { query: q, address: hit, listingTop: c.topAddr(), focusRestored: document.activeElement === sbtn };
       result.searchOk = c.topAddr() === hit && document.activeElement === sbtn;
 
-      // ---- save / close / welcome / import / quit, all through the real UI ----
+      // ---- save / close (autosave) / welcome / import, all through the real UI ----
       const base = file.split("/").pop()!;
       const dirtyNow = () => c.title().startsWith("• ");
       const dlg = (l: string) => byLabel("dialog", l);
-      const rename = async (i: number) => { const f = fl[i]; await rpc.call("rename_symbol", { address: f.entry, newName: `autotest_${Date.now().toString(36)}_${i}` }); };
+      const rename = async (i: number) => { const f = fl[i], n = `autotest_${Date.now().toString(36)}_${i}`; await rpc.call("rename_symbol", { address: f.entry, newName: n }); return n; };
       const m0 = c.lastMenu();
       await rename(2);
-      await waitFor(() => dirtyNow() && c.lastMenu()?.canSave, 5000, "dirty marker and Save enabled");
+      await waitFor(() => dirtyNow() && c.lastMenu()?.dirty && c.lastMenu()?.canEdit, 5000, "dirty marker and Save enabled");
       const dirtyShown = true;
-      c.menu({ type: "save" });
-      await waitFor(() => !dirtyNow() && !c.lastMenu()?.canSave, 10000, "clean after Save");
+      c.command({ type: "edit", action: "save" });
+      await waitFor(() => !dirtyNow() && !c.lastMenu()?.dirty, 10000, "clean after Save");
       const savedClean = !(await rpc.call("undo_state", {})).dirty;
       result.save = { menuBefore: m0, dirtyShown, savedClean, title: c.title() };
 
-      await rename(3); await waitFor(dirtyNow, 5000, "dirty again");
-      c.menu({ type: "close-program" });
-      const sp = await waitFor(() => dlg("Save changes?"), 5000, "save prompt on close");
-      const promptOk = sp.getAttribute("aria-modal") === "true" && document.activeElement?.textContent === "Save";
-      press(sp, "Escape"); // Cancel: program stays
-      await waitFor(() => !dlg("Save changes?"), 5000, "prompt to close on Escape");
-      const stayed = c.status().opened && dirtyNow();
-      c.menu({ type: "close-program" });
-      clickText(await waitFor(() => dlg("Save changes?"), 5000, "save prompt again"), "Don't Save");
+      // close with unsaved edits: no prompt, the sidecar autosaves; the rename must survive a reopen from the browser
+      const kept = await rename(3); await waitFor(dirtyNow, 5000, "dirty again");
+      c.command({ type: "close-program" });
       await waitFor(() => !c.status().opened && !document.querySelector(".main"), 10000, "welcome state after close");
+      const noPrompt = !dlg("Save changes?");
       const entry = await waitFor(() => [...document.querySelectorAll<HTMLElement>(".welcome .open")].find((b) => b.textContent!.includes(base)), 10000, "program in browser");
       const noProgram = await rpc.call("list_functions", {}).then(() => false, (e) => e instanceof RpcError && e.code === -32001);
-      result.close = { promptOk, stayed, titlePlain: !c.title().includes("—"), noProgram, menu: c.lastMenu() };
+      result.close = { noPrompt, titlePlain: !c.title().includes("—"), noProgram, menu: c.lastMenu() };
 
       entry.click(); // open from the welcome pane
       await waitFor(() => c.status().opening, 5000, "open from browser to start");
       await waitFor(() => !c.status().opening && c.status().opened, 300000, "open from browser to finish");
-      result.browserOpen = { functions: c.status().funcs, title: c.title() };
+      const keptHits = await rpc.call("search_symbols", { query: kept, limit: 5 });
+      result.browserOpen = { functions: c.status().funcs, title: c.title(), autosaved: keptHits.some((h) => h.name === kept), cleanAfterReopen: !(await rpc.call("undo_state", {})).dirty };
 
       // import dialog: record what open_binary is sent. An explicit-options open is answered Cancelled locally (no new analysis).
       const sent: any[] = [];
@@ -154,7 +160,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
         if (m === "open_binary") { sent.push(p); if (Object.keys(p).length > 1) return Promise.reject(new RpcError(-32002, "Cancelled")); }
         return orig(m, p);
       };
-      const importDlg = async (path: string) => { c.menu({ type: "open-path", path }); return waitFor(() => dlg("Import binary"), 10000, "import dialog"); };
+      const importDlg = async (path: string) => { c.command({ type: "open-path", path }); return waitFor(() => dlg("Import binary"), 10000, "import dialog"); };
       const openBtn = (d: Element) => d.querySelector<HTMLButtonElement>("button.primary")!;
       let d = await importDlg(file);
       await waitFor(() => !openBtn(d).disabled, 10000, "import dialog ready");
@@ -193,27 +199,17 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const importOk = preselectedPreferred && defaultSent === JSON.stringify({ path: file }) && explicit?.language === other.value && explicit?.baseAddress === "0x1000" && typeof explicit?.loader === "string"
         && badDisables && tooBigDisables && goodEnables && errorOk;
 
-      // quit through the real window-close handler: prompt, Cancel keeps the app, then Don't Save quits
-      await c.open(file);
-      await rename(4); await waitFor(dirtyNow, 5000, "dirty before quit");
-      await window.host.autotestClose();
-      const qp = await waitFor(() => dlg("Save changes?"), 5000, "quit prompt");
-      clickText(qp, "Cancel");
-      await waitFor(() => !dlg("Save changes?"), 5000, "quit prompt to close");
-      const alive = (await rpc.call("undo_state", {})).dirty === true && c.status().opened;
-      result.quit = { alive };
-      result.saveOk = dirtyShown && savedClean && !m0?.canSave;
-      result.closeOk = promptOk && stayed && (result.close as any).noProgram && (result.close as any).titlePlain && (result.browserOpen as any).functions > 0;
+      await c.open(file); // the edit flow below needs the default import open again
+      result.saveOk = dirtyShown && savedClean && !m0?.dirty;
+      const bo = result.browserOpen as any, cl = result.close as any;
+      result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
       result.importOk = importOk;
-      result.quitOk = alive;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
-      result.ok = result.navOk && result.searchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.quitOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
-    } catch (e) { c.fail(e); }
+      result.ok = result.navOk && result.searchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
+    } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;
-    if (result.ok) { // end through the real close path: Don't Save answers the quit prompt (main exits with the result's status)
-      void window.host.autotestDone(result, true);
-      try { clickText(await waitFor(() => byLabel("dialog", "Save changes?"), 10000, "final quit prompt"), "Don't Save"); } catch (e) { console.error(e); }
-    } else window.host.autotestDone(result);
+    if (persist && result.ok) { (result as any).persist = persist; window.host.autotestQuit(result); } else window.host.autotestDone(result); // quit through the real before-quit path (saves, stops the sidecar)
 }
 
 // BENCH=1 AUTOTEST=<file>: listing scroll + decompile measurements in the real renderer (step 6 of the spike)
