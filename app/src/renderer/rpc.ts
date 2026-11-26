@@ -1,15 +1,12 @@
 import type { Methods, Notifications } from "../../../protocol";
+import { RpcError, type Backend } from "./backend";
 
-export class RpcError extends Error {
-  constructor(public code: number, message: string) { super(message); }
-}
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
-export class Rpc {
+export class WebSocketBackend implements Backend {
   private ws!: WebSocket;
   private nextId = 1;
-  lastId = 0; // id of the most recent call(); read synchronously after call() to target cancel_decompile
   private pending = new Map<number, Pending>();
   onNotification: <N extends keyof Notifications>(method: N, params: Notifications[N]) => void = () => {};
 
@@ -28,7 +25,17 @@ export class Rpc {
   }
 
   call<M extends keyof Methods>(method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
-    const id = this.lastId = this.nextId++;
+    return this.send(this.nextId++, method, params);
+  }
+
+  callCancellable<M extends keyof Methods>(method: M, params: Methods[M]["params"]) {
+    // shortcut: only decompile is cancellable server-side (cancel_decompile); extend when the sidecar cancels more
+    if (method !== "decompile") throw new Error(`${method} is not cancellable`);
+    const id = this.nextId++;
+    return { result: this.send(id, method, params), cancel: () => { this.send(this.nextId++, "cancel_decompile", { id }).catch(() => {}); } };
+  }
+
+  private send<M extends keyof Methods>(id: number, method: M, params: Methods[M]["params"]): Promise<Methods[M]["result"]> {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));

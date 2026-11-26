@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FunctionInfo, Address, ImportOptions, ProgramEntry } from "../../../protocol";
-import { rpc } from "./client";
+import { rpc, ws } from "./client";
 import { AddrMap } from "./addrmap";
 import { Listing } from "./Listing";
 import { FunctionList } from "./FunctionList";
@@ -15,7 +15,7 @@ import { reopenParams } from "./openOptions";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
 import { XrefPanel } from "./XrefPanel";
-import { RpcError } from "./rpc";
+import { RpcError } from "./backend";
 import { onProgramChanged } from "./changes";
 import { latest } from "./latest";
 import { StatusBar, type Stats } from "./StatusBar";
@@ -318,7 +318,7 @@ export function App() {
   useEffect(() => {
     (async () => {
       const cfg = await window.host.getConfig();
-      await rpc.connect(cfg.port, cfg.token);
+      await ws.connect(cfg.port, cfg.token);
       setConnected(true);
       rpc.onNotification = (m, p) => {
         if (m === "progress") { if (openingRef.current && !cancellingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped

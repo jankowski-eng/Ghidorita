@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import type { Address, Token } from "../../../protocol";
+import { ErrorCode, type Address, type Token } from "../../../protocol";
 import { rpc } from "./client";
-import { RpcError } from "./rpc";
+import { RpcError } from "./backend";
+import { decompileJobs } from "./decompileJobs";
 import { emptyTabs, openFunction, pinTab, activateTab, closeTab, droppedIds, type Tabs } from "./tabs";
 
 export interface TabData { status: "loading" | "ready" | "error"; text: string; tokens: Token[]; error?: string }
@@ -14,12 +15,11 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
   const [, bump] = useState(0);
   const tabsRef = useRef<Tabs>(emptyTabs);
   const dataRef = useRef<Record<number, TabData>>({});
-  const jobs = useRef(new Map<number, number>()); // tab id -> rpc id in flight
+  const jobs = useRef(decompileJobs(rpc));
 
   const set = (next: Tabs) => {
     for (const id of droppedIds(tabsRef.current, next)) {
-      const job = jobs.current.get(id);
-      if (job !== undefined) { rpc.call("cancel_decompile", { id: job }).catch(() => {}); jobs.current.delete(id); }
+      jobs.current.drop(id);
       delete dataRef.current[id];
     }
     tabsRef.current = next;
@@ -30,24 +30,20 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
   const load = async (id: number, entry: Address, force = false) => {
     const cur = dataRef.current[id];
     if (cur && cur.status !== "error" && !force) return;
-    const prev = jobs.current.get(id);
-    if (prev !== undefined) rpc.call("cancel_decompile", { id: prev }).catch(() => {}); // superseded by this request
     // a forced reload keeps showing the old text until the new one arrives
     if (!(force && cur?.status === "ready")) setData(id, { status: "loading", text: "", tokens: [] });
     const t0 = performance.now();
-    const p = rpc.call("decompile", { entry });
-    const myJob = rpc.lastId;
-    jobs.current.set(id, myJob);
+    const job = jobs.current.start(id, entry);
     try {
-      const r = await p;
-      if (!tabsRef.current.tabs.some((t) => t.id === id) || jobs.current.get(id) !== myJob) return; // closed or superseded
+      const r = await job.result;
+      if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current()) return; // closed or superseded
       setData(id, { status: "ready", text: r.text, tokens: r.tokens });
       onDecompiled(Math.round(performance.now() - t0));
     } catch (e) {
-      if (!tabsRef.current.tabs.some((t) => t.id === id) || jobs.current.get(id) !== myJob || (e instanceof RpcError && e.code === -32002)) return;
+      if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current() || (e instanceof RpcError && e.code === ErrorCode.Cancelled)) return;
       setData(id, { status: "error", text: "", tokens: [], error: e instanceof Error ? e.message : String(e) });
       onError(e);
-    } finally { if (jobs.current.get(id) === myJob) jobs.current.delete(id); }
+    } finally { job.done(); }
   };
 
   const show = (entry: Address, pin = false): Promise<void> => {

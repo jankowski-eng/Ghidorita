@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
 import { rpc } from "./client";
-import { RpcError } from "./rpc";
+import { RpcError } from "./backend";
 import { trapTab, useRestoreFocus } from "./hooks";
 import { RAW_CANDIDATE, buildOptions, choiceError, parseBase } from "./openOptions";
 

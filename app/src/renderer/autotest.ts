@@ -1,7 +1,7 @@
 import type { Address, FunctionInfo } from "../../../protocol";
 import { AddrMap } from "./addrmap";
 import { rpc } from "./client";
-import { RpcError } from "./rpc";
+import { RpcError } from "./backend";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { runEditFlow, runPhase2 } from "./autotestEdit";
 
