@@ -164,15 +164,15 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   click("Follow cursor");
   await waitFor(() => !xr().querySelector('button[aria-label="Follow cursor"]'), 5000, "follow cursor unpins");
   // X on a decompiler token: a variable/param if the decompiler has one, else a call target
-  let tokPick: { f: FunctionInfo; label: string; line: number; col: number; kind: string } | null = null;
+  let tokPick: { f: FunctionInfo; label: string; line: number; col: number; kind: string; text: string } | null = null;
   for (const fn of fl.slice(0, 80)) {
     const d = await rpc.call("decompile", { entry: fn.entry });
     const t = d.tokens.find((t) => (t.kind === "variable" || t.kind === "param") && t.varName) ?? d.tokens.find((t) => t.targetFunction && t.targetFunction !== fn.entry);
-    if (t) { tokPick = { f: fn, label: t.varName ?? d.text.split("\n")[t.line].slice(t.colStart, t.colEnd), line: t.line + 1, col: t.colStart + 2, kind: t.varName ? "variable" : "call" }; break; }
+    if (t) { tokPick = { f: fn, label: t.varName ?? d.text.split("\n")[t.line].slice(t.colStart, t.colEnd), line: t.line + 1, col: t.colStart + 2, kind: t.varName ? "variable" : "call", text: d.text }; break; }
   }
   need(tokPick, "no decompiler token with references target");
   await c.select(tokPick!.f.entry);
-  await waitFor(() => c.editorText().includes(tokPick!.label), 20000, "decompiler text");
+  await waitFor(() => c.editorText() === tokPick!.text, 20000, "decompiler text of " + tokPick!.f.name); // not the previous tab's text, which may contain the same name
   const ed = c.editor();
   need(ed.getAction("gd.xrefs"), "Monaco has the Show References To action");
   ed.setPosition({ lineNumber: tokPick!.line, column: tokPick!.col }); ed.focus();
