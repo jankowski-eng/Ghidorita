@@ -12,7 +12,7 @@ import type { MenuCommand } from "../preload";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
 /** One row of the bar: a typed address, a symbol or a defined string (`why`: what ranks it, `used`: a string's first referencing function). */
-type Hit = Omit<Cand, "kind"> & { kind: Cand["kind"] | "address"; why?: string };
+type Hit = Omit<Cand, "kind"> & { kind: Cand["kind"] | "address"; why?: string; score?: number };
 const short = (v: string) => (v.length > 80 ? v.slice(0, 80) + "…" : v).replace(/\s+/g, " ");
 
 /** Command bar (Cmd+K): symbols, defined strings and typed addresses (each when the provider offers it); ">" lists menu actions; arrows to move, Enter to run, Escape to close. */
@@ -76,7 +76,7 @@ export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrin
         {hits.map((h, i) => (
           <div key={h.kind + h.address + h.name} id={`sym-${i}`} role="option" aria-selected={i === cur} className={"hit" + (i === cur ? " cur" : "")}
             onMouseDown={(e) => e.preventDefault()} onClick={() => go(h)}>
-            <span className="k">{h.kind}</span><span className="n">{h.name}{h.why && <span className="dim"> · {h.why}</span>}{h.used && <span className="dim"> · first in {h.used}</span>}</span><span className="a">{h.address}</span>
+            <span className="k">{h.kind}</span><span className="n">{h.name}{h.why && <span className="dim"> · {h.why}</span>}{h.score !== undefined && <span className="dim" title="kind weight + 10 × log2(1 + references)"> · score {h.score}</span>}{h.used && <span className="dim"> · first in {h.used}</span>}</span><span className="a">{h.address}</span>
           </div>
         ))}
       </div>
