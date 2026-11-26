@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ListingRow, Address } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
 import { rpc } from "./client";
+import { listingKey, type EditAction } from "./editActions";
 
 const ROW_H = 16;
 // Fixed pixel height of the listing scrollbar, independent of binary size (Chromium caps elements near 33.5M px).
@@ -17,14 +18,14 @@ const nextAddr = (r: ListingRow): Address => "0x" + (BigInt(r.address) + BigInt(
  * Wheel scrolls by lines inside the buffer; the (fixed-height) scrollbar maps fraction -> byte position -> address and jumps.
  * shortcut: no cache beyond the one contiguous buffer; a jump refetches even if the target is already buffered.
  */
-export function Listing({ map, scrollReq, topAddrRef, onLatency, onError, onRowClick }: {
-  map: AddrMap; scrollReq: { address: Address; n: number }; topAddrRef: { current: Address };
-  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void;
+export function Listing({ map, scrollReq, topAddrRef, cursorRef, onLatency, onError, onRowClick, onEdit }: {
+  map: AddrMap; scrollReq: { address: Address; n: number; refresh?: boolean }; topAddrRef: { current: Address }; cursorRef: { current: Address };
+  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onEdit?: (a: EditAction) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
-  const b = useRef({ rows: [] as ListingRow[], lines: [] as Line[], top: 0, atStart: false, atEnd: false, busy: false, gen: 0, view: 30, lastSet: -1, acc: 0 });
+  const b = useRef({ rows: [] as ListingRow[], lines: [] as Line[], top: 0, atStart: false, atEnd: false, busy: false, gen: 0, view: 30, lastSet: -1, acc: 0, cur: "" as Address });
   const st = b.current;
   const render = () => tick((n) => n + 1);
 
@@ -85,6 +86,28 @@ export function Listing({ map, scrollReq, topAddrRef, onLatency, onError, onRowC
     } else { st.atEnd = false; setRows(st.rows.slice(0, MAXBUF), st.top); }
   };
 
+  // Row cursor: an address (not an index), so it survives buffer shifts and refreshes; it highlights the row whose unit contains it.
+  const setCur = (a: Address) => { st.cur = a; cursorRef.current = a; };
+  const curIndex = () => {
+    if (!st.cur) return -1;
+    const c = BigInt(st.cur);
+    return st.rows.findIndex((r) => c >= BigInt(r.address) && c < BigInt(r.address) + BigInt(Math.max(r.length, 1)));
+  };
+  const moveCursor = (n: number) => {
+    if (!st.rows.length) return;
+    let i = curIndex();
+    if (i < 0) { const top = st.lines[st.top]?.row; i = Math.max(0, top ? st.rows.indexOf(top) : 0); n = 0; } // cursor not buffered: start at the top row
+    const ni = Math.max(0, Math.min(st.rows.length - 1, i + n)), row = st.rows[ni];
+    setCur(row.address);
+    let li = st.lines.findIndex((l) => l.row === row && !l.label);
+    if (li > 0 && st.lines[li - 1].row === row) li--; // show the label line with its row
+    const last = st.top + st.view - 2;
+    if (li < st.top) st.top = li; else if (li > last) st.top = Math.min(li - st.view + 2, maxTop());
+    st.top = Math.max(0, st.top);
+    topAddrRef.current = st.lines[st.top]?.row.address ?? topAddrRef.current;
+    syncThumb(); render(); ensure();
+  };
+
   const jump = async (address: Address, thumb: boolean) => {
     const gen = ++st.gen;
     st.busy = false;
@@ -107,9 +130,9 @@ export function Listing({ map, scrollReq, topAddrRef, onLatency, onError, onRowC
     syncThumb(); render(); ensure();
     return st.top - before;
   };
-  (window as any).__listing = { jump: (a: Address) => jump(a, true), scrollLines, top: () => topAddrRef.current };
+  (window as any).__listing = { rowAt: (a: Address) => { const c = BigInt(a); return st.rows.find((r) => c >= BigInt(r.address) && c < BigInt(r.address) + BigInt(Math.max(r.length, 1))); }, jump: (a: Address) => jump(a, true), scrollLines, top: () => topAddrRef.current };
 
-  useEffect(() => { if (scrollReq.address) jump(scrollReq.address, true); }, [scrollReq]); // eslint-disable-line
+  useEffect(() => { if (scrollReq.address) { if (!scrollReq.refresh) setCur(scrollReq.address); jump(scrollReq.address, true); } }, [scrollReq]); // eslint-disable-line
   useEffect(() => { // first view: start of the listing
     if (!scrollReq.address) jump(map.addr(0), true);
   }, [map]); // eslint-disable-line
@@ -135,16 +158,21 @@ export function Listing({ map, scrollReq, topAddrRef, onLatency, onError, onRowC
     jump(map.addr(f * (map.total - 1)), false);
   };
 
-  const onKey = (e: React.KeyboardEvent) => { // keyboard scrolling (no row cursor yet)
+  const onKey = (e: React.KeyboardEvent) => { // arrows/page move the row cursor (scrolling into view); letters are Ghidra's edit keys
     const n = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "PageDown" ? st.view - 1 : e.key === "PageUp" ? 1 - st.view : 0;
-    if (n) { e.preventDefault(); scrollLines(n); }
+    if (n) { e.preventDefault(); moveCursor(n); return; }
+    const a = listingKey(e.nativeEvent);
+    if (a) { e.preventDefault(); onEdit?.(a); }
   };
+  const curB = st.cur ? BigInt(st.cur) : -1n;
+  const isCur = (r: ListingRow) => curB >= 0n && curB >= BigInt(r.address) && curB < BigInt(r.address) + BigInt(Math.max(r.length, 1));
   const vis = st.lines.slice(st.top, st.top + st.view);
   return (
     <div className="lbox" ref={box} tabIndex={0} aria-label="Listing" onKeyDown={onKey}>
       <div className="lpane">
         {vis.map((l, i) => (
-          <div key={l.row.address + (l.label ? "L" : "")} className={"lrow" + (l.label ? " lbl" : "")} style={{ top: i * ROW_H }} onClick={() => onRowClick?.(l.row.address)}>
+          <div key={l.row.address + (l.label ? "L" : "")} className={"lrow" + (l.label ? " lbl" : "") + (isCur(l.row) ? " cursor" : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && !l.label ? "true" : undefined}
+            onClick={() => { setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}>
             {l.label ? <span className="l">{l.row.label}:</span> : (<>
               <span className="a">{l.row.address}</span><span className="b">{l.row.bytes}</span><span className="m">{l.row.mnemonic}</span>
               <span>{l.row.operands}</span>{l.row.comment && <span className="c">; {l.row.comment}</span>}
