@@ -14,6 +14,7 @@ import { windowTitle } from "./session";
 import { reopenParams } from "./openOptions";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { SearchPanel } from "./SearchPanel";
+import { coverage, Coverage } from "./coverage";
 import { XrefPanel } from "./XrefPanel";
 import { Dock, type DockId } from "./Dock";
 import { RpcError } from "./backend";
@@ -127,13 +128,13 @@ export function App() {
 
   // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
   const clearProgram = () => {
-    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
+    coverage.current = null; openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
     tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
     clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
   };
   const open = async (p: string, opts: ImportOptions = {}) => {
     if (openingRef.current) return; // the sidecar would answer Busy
-    openingRef.current = true; cancellingRef.current = false;
+    openingRef.current = true; cancellingRef.current = false; coverage.current = null;
     setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
     clearProgram();
     try {
@@ -338,8 +339,20 @@ export function App() {
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
+  const apiNow_refresh = () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1, refresh: true })); };
+  const loadCoverage = async (path: string) => {
+    if (!openedRef.current || openingRef.current) return;
+    try {
+      const { ranges } = await rpc.call("load_coverage", { path });
+      coverage.current = new Coverage(ranges);
+      setNotice(`Coverage loaded: ${coverage.current.size} ranges (green bar in the listing). File > Clear Coverage removes it.`);
+      apiNow_refresh();
+    } catch (e) { fail(e); }
+  };
   const handleMenu = (c: MenuCommand) => {
     if (c.type === "open-path") requestOpen(c.path);
+    else if (c.type === "coverage-path") void loadCoverage(c.path);
+    else if (c.type === "coverage-clear") { coverage.current = null; apiNow_refresh(); }
     else if (c.type === "close-program") void closeProgram();
     else if (c.type === "search") { if (openedRef.current) setSearchOpen(true); }
     else if (c.type === "nav-back") back();

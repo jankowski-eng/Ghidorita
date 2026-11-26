@@ -350,6 +350,11 @@ const handlers = {
     const k = o === "param_1" ? 0 : 1;
     return [{ from: hex(BASE + i * STEP + (4 + k) * STRIDE), type: "READ", kind: "read", function: nameOf(i) }, { from: hex(BASE + i * STEP + (9 + k) * STRIDE), type: "WRITE", kind: "write", function: nameOf(i) }];
   },
+  load_coverage({ path }) {
+    if (typeof path !== "string") bad("path");
+    if (/missing/.test(path)) throw { code: -32004, message: "NotFound" };
+    return { ranges: [{ start: hex(BASE), end: hex(BASE + STEP - 1) }] }; // mock: the first function was reached
+  },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);
     if (!(i >= 0 && i < NFUNC)) return [];

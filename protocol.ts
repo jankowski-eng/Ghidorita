@@ -149,6 +149,7 @@ export interface Methods {
   dt_children: { params: { source?: string; path?: string }; result: { categories: { name: string; path: string }[]; types: DataTypeHit[] } };
   get_data_type: { params: { path: string; source?: string }; result: DataTypeDetail };
   undo_state: { params: {}; result: UndoState };
+  load_coverage: { params: { path: string }; result: { ranges: { start: Address; end: Address }[] } }; // text file: `0xSTART-0xEND` (inclusive) or `0xADDR` per line, `#` comments; the client tints the listing
   // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
   rename_symbol: { params: { address: Address; newName: string }; result: {} };
   create_label: { params: { address: Address; name: string }; result: {} }; // where no symbol exists; InvalidArgument if one does (use rename_symbol)

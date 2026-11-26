@@ -158,3 +158,5 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .changes li button:disabled { cursor: default; }
 .changes li.undone { opacity: 0.5; text-decoration: line-through; }
 .changes .t, .changes .a { color: #888; } .changes .n { flex: 1; }
+.lrow.cov { box-shadow: inset 3px 0 0 #4ec36b; background: #1f2a23; }
+.lrow.cov.cursor { background: #094771; }

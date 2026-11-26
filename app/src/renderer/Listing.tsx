@@ -1,3 +1,4 @@
+import { coverage } from "./coverage";
 import { useEffect, useRef, useState } from "react";
 import type { ListingRow, Address, DataPart } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
@@ -304,7 +305,7 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
     <div className="lbox" ref={box} tabIndex={0} aria-label="Listing" onKeyDown={onKey}>
       <div className="lpane">
         {vis.map((l, i) => (
-          <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
+          <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "") + (l.kind === "main" && coverage.current?.has(l.row.address, l.row.length) ? " cov" : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
             onClick={() => { setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}>
             {body(l)}
           </div>
