@@ -16,7 +16,11 @@ MODS=java.base,java.compiler,java.datatransfer,java.desktop,java.instrument,java
 GH=$B/ghidra; mkdir -p $GH
 rsync -a --exclude '.DS_Store' "$GHIDRA_INSTALL_DIR"/ $GH/
 trim() { for p in "$@"; do if [ -e "$GH/$p" ]; then printf '%8s  %s\n' "$(du -sh "$GH/$p" | awk '{print $1}')" "$p" >> $LOG; rm -rf "$GH/$p"; fi; done; }
-trim Ghidra/Features/FunctionID/data docs Extensions Ghidra/Debug Ghidra/Features/GhidraServer Ghidra/Features/BSim
+# Function ID: the .fidbf databases cover MSVC runtimes for Windows PE (x86/x64) only, no Linux/macOS. Keep vs2015/2017/2019 (~93 MB), trim vs2012 and vsOlder (~102 MB).
+FID=Ghidra/Features/FunctionID/data
+trim $(cd $GH && ls -d $FID/vs2012_* $FID/vsOlder_* 2>/dev/null)
+for p in $(cd $GH && ls -d $FID/vs20*.fidbf 2>/dev/null); do printf '%8s  %s (kept)\n' "$(du -sh "$GH/$p" | awk '{print $1}')" "$p" >> $LOG; done
+trim docs Extensions Ghidra/Debug Ghidra/Features/GhidraServer Ghidra/Features/BSim
 trim GPL/DMG/data/os GPL/DemanglerGnu/os/mac_x86_64 Ghidra/Features/Decompiler/os/mac_x86_64 Ghidra/Features/FileFormats/os/mac_x86_64
 trim support/GhidraGo support/bsim support/bsim_ctl support/eclipse support/jshellRun support/buildGhidraJar support/convertStorage support/updateServerAllowList support/ghidraClean support/ghidraDebug
 find $GH -name '*-src.zip' -print0 | xargs -0 du -ch | tail -1 | sed 's/total/*-src.zip/' >> $LOG; find $GH -name '*-src.zip' -delete
