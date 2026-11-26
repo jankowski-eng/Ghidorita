@@ -167,8 +167,8 @@ export interface Methods {
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   // Control-flow graph of one function: basic blocks (C lines where the decompiler maps them, else assembly) and edges. Decompiler lane, cancellable with cancel_decompile.
   function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
-  // Call graph (thread R): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
-  call_graph: { /* scan lane: cancel_search */ params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
+  // Call graph (scan lane, cancel_search; bounded by visited functions and time, `truncated` says a bound hit): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
+  call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
