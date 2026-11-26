@@ -22,7 +22,7 @@ const usedBy = (go: (a: Address) => void) => (r: StringItem) => {
 export function StringsPanel({ version, onGo, onError }: { version: number; onGo: (a: Address) => void; onError: (e: unknown) => void }) {
   const [q, setQ] = useState("");
   const [min, setMin] = useState("4");
-  const [refOnly, setRefOnly] = useState(false);
+  const [refOnly, setRefOnly] = useState(true);
   const dq = useDebounced(q.trim(), 250), dmin = useDebounced(Math.max(1, Math.floor(Number(min)) || 1), 250);
   const sc = useRef(scanner()).current;
   const t = usePaged<StringItem>((offset, limit) => sc.call("list_strings", { offset, limit, minLength: dmin, query: dq, referencedOnly: refOnly }), JSON.stringify([dq, dmin, refOnly, version]), onError, sc.cancelAll);
