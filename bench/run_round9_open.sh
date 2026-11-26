@@ -2,7 +2,7 @@
 # Round 9 first-open runs (fresh projects dir each): fast profile x3, full profile x1. Each waits for a quiet machine or exits 3.
 cd "$(dirname "$0")"
 export JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home}
-export GHIDRA_INSTALL_DIR=${GHIDRA_INSTALL_DIR:-/Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV}
+export GHIDRA_INSTALL_DIR=${GHIDRA_INSTALL_DIR:-$(cd "$(dirname "$0")/.." && pwd)/ghidra-install/ghidra_12.3_DEV}
 BIN=/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis
 PY=../sidecar/.venv/bin/python
 OUT=results_round9; T=$(cd "${TMPDIR:-/tmp}" && pwd -P)/r6open  # no "//": Ghidra rejects blank path elements; mkdir -p $T

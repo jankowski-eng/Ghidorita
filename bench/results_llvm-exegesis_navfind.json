@@ -2,20 +2,20 @@
  "binary": "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis",
  "others_running_at_start": [
   "72754 sh -c electron-vite build && electron .",
-  "72885 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
-  "72886 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "72887 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "72888 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "72905 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "72909 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/sidecar/.venv/bin/python /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/sidecar/main.py",
+  "72885 node <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
+  "72886 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72887 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72888 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72905 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "72909 <repo>/sidecar/.venv/bin/python <repo>/sidecar/main.py",
   "73068 sh -c electron-vite build && electron .",
-  "73169 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
-  "73180 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
-  "73181 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/ghidrette-data-type-manager-c9a23c/app/node_modules/.bin/electron .",
-  "73182 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .",
-  "73185 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
-  "73186 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
-  "73187 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/ghidrette-data-type-manager-c9a23c/sidecar/.venv/bin/python /Users/fjankowski/Proj"
+  "73169 <repo>/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
+  "73180 <repo>/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile",
+  "73181 node <repo>/.claude/worktrees/ghidrette-data-type-manager-c9a23c/app/node_modules/.bin/electron .",
+  "73182 <repo>/app/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron .",
+  "73185 <repo>/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
+  "73186 <repo>/app/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/E",
+  "73187 <repo>/.claude/worktrees/ghidrette-data-type-manager-c9a23c/sidecar/.venv/bin/python <repo>"
  ],
  "rss_after_open_mb": 372.2,
  "total_bytes": 66696320,
@@ -196,12 +196,12 @@
  "rss_end_mb": 1412.7,
  "others_running_at_end": [
   "78429 sh -c electron-vite build && electron .",
-  "78474 node /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
-  "78475 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "78476 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "78477 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "78478 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/sidecar/.venv/bin/python /Users/fjankowski/Projekte/f",
-  "78492 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
-  "78562 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile"
+  "78474 node <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/.bin/electron .",
+  "78475 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78476 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78477 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78478 <repo>/.claude/worktrees/app-shell-restructure-d09309/sidecar/.venv/bin/python <repo>",
+  "78492 <repo>/.claude/worktrees/app-shell-restructure-d09309/app/node_modules/electron/dist/Electron.app/Contents/",
+  "78562 <repo>/ghidra-install/ghidra_12.3_DEV/Ghidra/Features/Decompiler/os/mac_arm_64/decompile"
  ]
 }

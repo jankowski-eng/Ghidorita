@@ -12,3 +12,7 @@ ghidra-install/
 # Apple binary slice used by benches; do not publish
 bench/ls_arm64e
 app/bundle/
+
+# Local tooling / scratch
+.claude/worktrees/
+.DS_Store

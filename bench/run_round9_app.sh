@@ -2,7 +2,7 @@
 # BENCH=1 app run x3 on the stored fast analysis of llvm-exegesis (renderer measurements). Waits for a quiet machine before each run.
 cd "$(dirname "$0")"
 export JAVA_HOME=${JAVA_HOME:-/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home}
-export GHIDRA_INSTALL_DIR=${GHIDRA_INSTALL_DIR:-/Users/fjankowski/Projekte/floss/ghidra-desktop-spike/ghidra-install/ghidra_12.3_DEV}
+export GHIDRA_INSTALL_DIR=${GHIDRA_INSTALL_DIR:-$(cd "$(dirname "$0")/.." && pwd)/ghidra-install/ghidra_12.3_DEV}
 BIN=/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis
 PROJ=${BIG_PROJECTS:?set BIG_PROJECTS}
 OUT=results_round9
