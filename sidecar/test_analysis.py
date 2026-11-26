@@ -321,7 +321,7 @@ def test_failed_analysis_save_reports_the_cleared_history_and_the_unsaved_edit(s
     """The analysis clears the undo history before it saves. If the save fails the edit is still unsaved but can no longer be undone: the
     announced undo state must say so (it used to keep the pre-analysis state, offering an undo that fails)."""
     from inproc import build
-    from ghidrette.domains import analysis as an
+    from ghidorita.domains import analysis as an
     p = build(sc, "t_nosave", [("b", 0x1000, bytes([0xC3]) * 16, False)])  # no project file: saving raises
     tx = p.startTransaction("edit")
     p.getListing().setComment(p.getAddressFactory().getDefaultAddressSpace().getAddress(0x1000), 0, "x")
