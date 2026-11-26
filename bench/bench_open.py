@@ -135,7 +135,9 @@ async def main():
             if cur:
                 cur["end"] = res["full_open_wall_s"]; tl.append(cur)
             res["analyzer_timeline"] = tl
-            if isinstance(res["open_result"], dict):
+            if "programId" not in (res["open_result"] or {}):
+                print("open failed:", res["open_result"], flush=True)
+            elif isinstance(res["open_result"], dict):
                 fns = (await call("list_functions"))["result"]
                 info = (await call("listing_info"))["result"]
                 res.update(functions=len(fns), total_bytes=info["totalBytes"], ranges=len(info["ranges"]))
