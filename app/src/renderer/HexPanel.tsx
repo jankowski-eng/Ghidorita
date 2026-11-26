@@ -20,6 +20,7 @@ export function HexPanel({ read, patches, unit, map, cursor, version, onGo, onEr
   const layout = useMemo(() => hexLayout(map.ranges), [map]);
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0), [view, setView] = useState(24), [tick, setTick] = useState(0);
+  const [shown, setShown] = useState(true); // false while the dock keeps this pane mounted but hidden (zero height)
   const [mark, setMark] = useState<{ space: string; lo: bigint; hi: bigint } | null>(null);
   const [changed, setChanged] = useState(() => new Map<string, string>()); // "space|offset" -> the byte the file had (patch capability)
   useEffect(() => {
@@ -49,7 +50,7 @@ export function HexPanel({ read, patches, unit, map, cursor, version, onGo, onEr
   const onScroll = () => { const el = box.current; if (el) setTop(rowAtScroll(el.scrollTop, el.clientHeight)); };
   useEffect(() => {
     const el = box.current; if (!el) return;
-    const ro = new ResizeObserver(() => { setView(Math.max(1, Math.ceil(el.clientHeight / RH))); onScroll(); });
+    const ro = new ResizeObserver(() => { setShown(el.clientHeight > 0); setView(Math.max(1, Math.ceil(el.clientHeight / RH))); onScroll(); });
     ro.observe(el);
     return () => ro.disconnect();
   }, [layout]); // eslint-disable-line
@@ -97,15 +98,15 @@ export function HexPanel({ read, patches, unit, map, cursor, version, onGo, onEr
       if (r < top || r >= top + rows - 1) scrollToRow(Math.max(0, r - Math.floor(rows / 3)));
     }
     return () => { live = false; };
-  }, [cursor, layout, version]); // eslint-disable-line -- version: a patch, undo or data edit changes the unit under the cursor
+  }, [cursor, layout, version, shown]); // eslint-disable-line -- shown: follow the cursor again when the pane becomes visible; version: a patch, undo or data edit changes the unit under the cursor
 
   // keyboard: arrows move the shared cursor by a byte or a row over mapped bytes, Page keys by a screen, Home/End to the ends of the row
   const onKey = (e: React.KeyboardEvent) => {
     const rows = Math.max(1, view - 1), d: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: ROW, ArrowUp: -ROW, PageDown: ROW * rows, PageUp: -ROW * rows };
     if (e.metaKey || e.ctrlKey || e.altKey || !(e.key in d)) return;
     e.preventDefault();
-    const cp = cursor ? parseAddr(cursor) : null, p = mark ?? (cp ? { space: cp.space, lo: cp.off, hi: cp.off + 1n } : null);
-    const to = p && stepByte(layout, p.space, d[e.key] < 0 ? p.lo : p.hi - 1n, d[e.key]);
+    const cp = cursor ? parseAddr(cursor) : null, p = cp ?? (mark ? { space: mark.space, off: mark.lo } : null); // the cursor's own byte; `mark` is only the highlight
+    const to = p && stepByte(layout, p.space, p.off, d[e.key]);
     if (to) onGo(fmtAddr(to.space, to.off));
   };
   const lines = [];

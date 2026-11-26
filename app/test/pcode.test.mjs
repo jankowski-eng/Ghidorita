@@ -16,7 +16,7 @@ test("raw lines: a header per instruction, its ops indented; high lines: a heade
 });
 
 test("the cursor marks the lines of its instruction: the greatest instruction address at or below it, only that instruction's lines", () => {
-  const instrs = ["0x1000", "0x1004", "0x1008"]; // 0x1008 has no high op: the decompiler dropped it
+  const instrs = [{ address: "0x1000", length: 4 }, { address: "0x1004", length: 1 }, { address: "0x1008", length: 1 }]; // 0x1008 has no high op: the decompiler dropped it
   const raw = pcodeLines(R, "raw"), high = pcodeLines(R, "high");
   assert.deepEqual(linesAt(raw, "0x1000", instrs), [0, 1, 2]);
   assert.deepEqual(linesAt(raw, "0x1002", instrs), [0, 1, 2]); // inside the first instruction
@@ -25,5 +25,6 @@ test("the cursor marks the lines of its instruction: the greatest instruction ad
   assert.deepEqual(linesAt(raw, "code:1004", instrs), []);   // another address space
   assert.deepEqual(linesAt(raw, null, instrs), []);
   assert.deepEqual(linesAt(high, "0x1004", instrs), [3]);
+  assert.deepEqual(linesAt(raw, "0x1005", instrs), []);      // past the last byte of an instruction (data after the function, a hole in the body)
   assert.deepEqual(linesAt(high, "0x1009", instrs), []);     // on the dropped instruction: not the previous instruction's ops
 });

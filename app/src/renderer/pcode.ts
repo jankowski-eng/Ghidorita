@@ -23,14 +23,15 @@ export function pcodeLines(r: PcodeResult, mode: PcodeMode): PcodeLine[] {
 }
 
 /**
- * Indices of the lines of the instruction the cursor is on: the instruction is the greatest of `instrs` (the function's instruction addresses) at or
- * below the cursor in its space, and only lines with exactly that address count, so an instruction the decompiler optimised away marks nothing.
+ * Indices of the lines of the instruction the cursor is on: the one of `instrs` (address and length) that contains the cursor, and only lines with
+ * exactly that address count, so data after the function, holes in its body and instructions the decompiler optimised away mark nothing.
+ * An instruction without a length counts as one byte.
  */
-export function linesAt(lines: PcodeLine[], cursor: Address | null, instrs: Address[]): number[] {
+export function linesAt(lines: PcodeLine[], cursor: Address | null, instrs: { address: Address; length?: number }[]): number[] {
   const c = cursor ? parseAddr(cursor) : null;
   if (!c) return [];
   let best: bigint | null = null;
-  for (const a of instrs) { const p = parseAddr(a); if (p && p.space === c.space && p.off <= c.off && (best === null || p.off > best)) best = p.off; }
+  for (const i of instrs) { const p = parseAddr(i.address); if (p && p.space === c.space && p.off <= c.off && c.off < p.off + BigInt(Math.max(1, i.length ?? 1))) best = p.off; }
   if (best === null) return [];
   return lines.flatMap((l, i) => { const p = l.address ? parseAddr(l.address) : null; return p && p.space === c.space && p.off === best ? [i] : []; });
 }

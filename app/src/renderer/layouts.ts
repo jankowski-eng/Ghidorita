@@ -8,7 +8,7 @@ export interface Layout { order: PaneId[]; visible: Record<PaneId, boolean>; siz
 
 export const DEFAULT_NAME = "Default";
 export const PANES: readonly PaneId[] = ["functions", "listing", "decompiler"];
-export const DOCKS = ["strings", "symbols", "memsearch", "changes", "coverage", "calls", "bookmarks", "stack", "undefined", "hex"] as const satisfies readonly DockId[];
+export const DOCKS = ["strings", "symbols", "memsearch", "changes", "coverage", "calls", "bookmarks", "stack", "undefined", "hex", "registers", "locals", "memory"] as const satisfies readonly DockId[];
 const CENTERS: readonly Center[] = ["c", "graph", "callgraph", "pcode"];
 export const MIN = 120, MAX = 2000;
 export const KEY = "ghidorita.layouts.v1", OLD_KEY = "ghidra.layout.v1"; // OLD_KEY: the sizes saved before named layouts existed
@@ -55,7 +55,7 @@ export function readLayouts(st: StorageLike | undefined = browserStorage()): Lay
   } catch { layouts = {}; sizes = null; found = false; }
   if (!found) { // first run with named layouts: carry the old saved sizes over
     try { const old = cleanSizes(JSON.parse(st?.getItem(OLD_KEY) ?? "null")); if (old) layouts[DEFAULT_NAME] = { ...BUILTIN, sizes: old }; } catch { /* corrupt: defaults */ }
-    if (layouts[DEFAULT_NAME]) { writeLayouts({ layouts, sizes: null }, st); try { st?.removeItem?.(OLD_KEY); } catch { /* keep it */ } }
+    if (layouts[DEFAULT_NAME] && writeLayouts({ layouts, sizes: null }, st)) { try { st?.removeItem?.(OLD_KEY); } catch { /* keep it */ } } // the old key goes only once the new copy is stored
   }
   if (!layouts[DEFAULT_NAME]) layouts[DEFAULT_NAME] = { ...BUILTIN, order: [...BUILTIN.order], visible: { ...BUILTIN.visible }, sizes: { ...BUILTIN.sizes } };
   return { layouts, sizes };

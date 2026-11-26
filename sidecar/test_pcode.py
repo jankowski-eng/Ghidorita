@@ -36,6 +36,7 @@ def test_raw_pcode_of_a_known_instruction_and_high_pcode_inside_the_function(sc,
     assert any("INT_ADD" in o and "RCX" in o and "0x5" in o for o in lea["ops"]), lea["ops"]
     assert any(o.startswith("RCX = ") for o in lea["ops"]), lea["ops"]
     assert any(o.startswith("CALL ") for o in by["0x401004"]["ops"]) and any(o.startswith("RETURN ") for o in by["0x401009"]["ops"])
+    assert all(i["length"] >= 1 for i in r["raw"]) and lea["length"] == 4, lea  # lea rcx,[rcx+5] is 4 bytes
     f = sc.get_function_at("0x401000")
     lo, hi = 0x401000, 0x401000 + f["size"] - 1
     assert r["high"] and all(lo <= int(o["address"], 16) <= hi for o in r["high"]), r["high"]

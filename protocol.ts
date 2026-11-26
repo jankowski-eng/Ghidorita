@@ -81,7 +81,7 @@ export interface CallGraphNode { entry: Address; name: string; kind: "function" 
 export interface CallGraph { nodes: CallGraphNode[]; edges: { from: Address; to: Address; sites: number }[]; truncated: boolean } // sites: call instructions from `from` to `to`
 
 /** Op text is `[out = ]OPCODE in, ...`: a register by name, a constant as 0x.., other varnodes as space[0xoffset]:size; the high p-code appends the high variable's name in parentheses. */
-export interface RawPcode { address: Address; asm: string; ops: string[] } // one instruction (address order); ops as Instruction.getPcode()
+export interface RawPcode { address: Address; asm: string; ops: string[]; length?: number } // one instruction (address order); ops as Instruction.getPcode()
 export interface HighPcodeOp { block: number; address: Address; text: string } // block = basic block index, in block order; address = the instruction the op belongs to
 export interface PcodeResult { raw: RawPcode[]; high: HighPcodeOp[]; truncated: boolean } // truncated: a large function was cut (5000 instructions, 30000 ops)
 

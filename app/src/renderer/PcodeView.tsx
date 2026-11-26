@@ -21,7 +21,7 @@ export function PcodeView({ source, entry, cursor, version, onGo }: { source: De
     return () => { live = false; job.cancel(); };
   }, [source, entry, version]);
   const lines = useMemo(() => (res ? pcodeLines(res, mode) : []), [res, mode]);
-  const instrs = useMemo(() => (res ? res.raw.map((i) => i.address) : []), [res]);
+  const instrs = useMemo(() => (res ? res.raw.map((i) => ({ address: i.address, length: i.length })) : []), [res]);
   const cur = useMemo(() => linesAt(lines, cursor, instrs), [lines, cursor, instrs]);
   const box = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: lines.length, getScrollElement: () => box.current, estimateSize: () => LH, overscan: 20 });

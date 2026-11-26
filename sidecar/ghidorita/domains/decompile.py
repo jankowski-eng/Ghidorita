@@ -258,7 +258,7 @@ class Decompile:
                 break
             ops = [self._op(o, lang) for o in ins.getPcode()]
             n += len(ops)
-            raw.append({"address": fa(ins.getAddress()), "asm": str(ins), "ops": ops})
+            raw.append({"address": fa(ins.getAddress()), "asm": str(ins), "ops": ops, "length": int(ins.getLength())})
         high, n = [], 0
         for bi, b in enumerate(hf.getBasicBlocks()):
             for op in b.getIterator():
