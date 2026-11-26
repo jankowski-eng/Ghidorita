@@ -17,9 +17,9 @@ const nextAddr = (r: ListingRow): Address => "0x" + (BigInt(r.address) + BigInt(
  * Wheel scrolls by lines inside the buffer; the (fixed-height) scrollbar maps fraction -> byte position -> address and jumps.
  * shortcut: no cache beyond the one contiguous buffer; a jump refetches even if the target is already buffered.
  */
-export function Listing({ map, scrollReq, topAddrRef, onLatency, onError }: {
+export function Listing({ map, scrollReq, topAddrRef, onLatency, onError, onRowClick }: {
   map: AddrMap; scrollReq: { address: Address; n: number }; topAddrRef: { current: Address };
-  onLatency: (ms: number) => void; onError: (e: unknown) => void;
+  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -135,12 +135,16 @@ export function Listing({ map, scrollReq, topAddrRef, onLatency, onError }: {
     jump(map.addr(f * (map.total - 1)), false);
   };
 
+  const onKey = (e: React.KeyboardEvent) => { // keyboard scrolling (no row cursor yet)
+    const n = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "PageDown" ? st.view - 1 : e.key === "PageUp" ? 1 - st.view : 0;
+    if (n) { e.preventDefault(); scrollLines(n); }
+  };
   const vis = st.lines.slice(st.top, st.top + st.view);
   return (
-    <div className="lbox" ref={box}>
+    <div className="lbox" ref={box} tabIndex={0} aria-label="Listing" onKeyDown={onKey}>
       <div className="lpane">
         {vis.map((l, i) => (
-          <div key={l.row.address + (l.label ? "L" : "")} className={"lrow" + (l.label ? " lbl" : "")} style={{ top: i * ROW_H }}>
+          <div key={l.row.address + (l.label ? "L" : "")} className={"lrow" + (l.label ? " lbl" : "")} style={{ top: i * ROW_H }} onClick={() => onRowClick?.(l.row.address)}>
             {l.label ? <span className="l">{l.row.label}:</span> : (<>
               <span className="a">{l.row.address}</span><span className="b">{l.row.bytes}</span><span className="m">{l.row.mnemonic}</span>
               <span>{l.row.operands}</span>{l.row.comment && <span className="c">; {l.row.comment}</span>}

@@ -7,6 +7,8 @@ export interface AutotestCtx {
   open(path: string): Promise<FunctionInfo[] | undefined>;
   select(entry: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
+  back(): void;
+  forward(): void;
   selected(): Address | null;
   topAddr(): Address;
   editorText(): string;
@@ -43,7 +45,14 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.listingTopAddress = c.topAddr();
       result.editorFirstLine = c.editorText().split("\n")[0];
       result.functions = fl.length; result.totalBytes = (await rpc.call("listing_info", {})).totalBytes;
-      result.ok = result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      // Back returns to the start function (listing top row = its entry), Forward to the callee again
+      const startEntry = fl.find((f) => f.name === result.startFunction)!.entry;
+      c.back(); await new Promise((r) => setTimeout(r, 1000));
+      result.afterBackTop = c.topAddr();
+      c.forward(); await new Promise((r) => setTimeout(r, 1000));
+      result.afterForwardTop = c.topAddr();
+      result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
+      result.ok = result.navOk && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
     } catch (e) { c.fail(e); }
     result.errors = c.errors;
     window.host.autotestDone(result);
