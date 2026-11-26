@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import type { Token } from "../../../protocol";
+import type { Address, Token } from "../../../protocol";
+import { coverage } from "./coverage";
 import { mapPos, type EditAction } from "./editActions";
 
 type Ed = Parameters<OnMount>[0];
@@ -11,12 +12,13 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, onCallClick, editorRef, onEdit, canAt, onXrefs }: {
-  tabId: number | null; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, onCallClick, editorRef, onEdit, canAt, onXrefs }: {
+  tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
   onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
+  const covDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlKey = useRef("");
   const monacoRef = useRef<Monaco | null>(null);
   const clickRef = useRef(onCallClick); clickRef.current = onCallClick;
@@ -40,6 +42,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, onCallClic
     editor.onDidChangeCursorPosition(syncKeys);
     decorations.current = editor.createDecorationsCollection();
     hlDecor.current = editor.createDecorationsCollection();
+    covDecor.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
   };
   useEffect(() => () => { for (const m of monacoRef.current?.editor.getModels() ?? []) if (/tab-\d+$/.test(m.uri.path)) m.dispose(); }, []);
@@ -77,6 +80,14 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, onCallClic
       options: { inlineClassName: "call-token" },
     })));
   }, [tokens, text, tabId]);
+  useEffect(() => { // coverage tint, same classes as the listing's rows; a line without any token address stays untinted
+    const byLine = new Map<number, Address[]>();
+    if (coverage.shown) for (const t of tokens) if (t.address) { const l = byLine.get(t.line); if (l) l.push(t.address); else byLine.set(t.line, [t.address]); }
+    covDecor.current?.set([...byLine].flatMap(([line, addrs]) => {
+      const c = coverage.markAny(addrs).trim();
+      return c ? [{ range: { startLineNumber: line + 1, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, options: { isWholeLine: true, className: "d" + c } }] : [];
+    }));
+  }, [tokens, text, tabId, covVersion]);
   useEffect(() => { // the token(s) of the use clicked in the references panel; scrolled into view once per new highlight
     const rng = (t: Token) => ({ startLineNumber: t.line + 1, startColumn: t.colStart + 1, endLineNumber: t.line + 1, endColumn: t.colEnd + 1 });
     hlDecor.current?.set(highlight.map((t) => ({ range: rng(t), options: { inlineClassName: "use-token" } })));
