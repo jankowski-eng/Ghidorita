@@ -4,6 +4,7 @@ import { rpc, ws } from "./client";
 import { AddrMap } from "./addrmap";
 import { Listing } from "./Listing";
 import { FunctionList } from "./FunctionList";
+import { BinaryMap } from "./BinaryMap";
 import { Decompiler } from "./Decompiler";
 import { Toolbar } from "./Toolbar";
 import { OpenDialog, type Progress } from "./OpenDialog";
@@ -467,7 +468,10 @@ export function App() {
         <Panes visible={visible}>{{
           functions: (
             <div className="funcs-col">
-              <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
+              <div className="funcs-row">
+                <BinaryMap map={map!} funcs={funcs} here={here} onGo={(a) => go(a, "goto")} />
+                <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
+              </div>
               <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { setUseHl(use ? { name: use.name, address: a } : null); void go(a, "xrefs"); }} onFollow={() => { setXrefTarget(null); setUseHl(null); }} />
             </div>
           ),

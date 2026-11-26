@@ -74,7 +74,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 @keyframes slide { from { left: -30%; } to { left: 100%; } }
 .notice { padding: 16px; color: #ccc; overflow: auto; flex: 1; }
 .funcs-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.funcs-col > .funcs { flex: 1; min-height: 0; }
+.funcs-col > .funcs-row { flex: 1; min-height: 0; }
 .card.wide { width: 560px; max-width: 90%; }
 .card label { display: flex; flex-direction: column; gap: 2px; }
 .card select, .card input { background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 3px 6px; font: inherit; }
@@ -166,3 +166,5 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .cmdhint kbd { float: right; color: #777; font: inherit; }
 .status .hist { margin-right: 8px; } .status .hist button { background: transparent; color: #fff; border: 0; padding: 0 4px; cursor: pointer; font: inherit; } .status .hist button:disabled { opacity: .4; cursor: default; }
 .funcs .todo { padding: 2px 8px; }
+.funcs-row { display: flex; flex: 1; min-height: 0; } .funcs-row > .funcs { flex: 1; min-width: 0; }
+.bmap { flex: none; width: 20px; background: #1b1b1c; border-right: 1px solid #444; cursor: pointer; touch-action: none; } .bmap canvas { display: block; width: 20px; height: 100%; }
