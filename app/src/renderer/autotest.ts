@@ -124,6 +124,23 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.search = { query: q, address: hit, listingTop: c.topAddr(), focusRestored: document.activeElement === sbtn };
       result.searchOk = c.topAddr() === hit && document.activeElement === sbtn;
 
+      // quickly open two functions back to back: the first decompile must be cancelled, the second one shown
+      const [fa, fb] = fl.slice(-2);
+      const cancelled: unknown[] = [], origCC = (rpc as any).callCancellable.bind(rpc);
+      let started = 0;
+      (rpc as any).callCancellable = (m: string, p: any) => { // the first decompile is held back so the second open reliably supersedes it
+        const r = origCC(m, p), hold = started++ === 0;
+        return { result: hold ? r.result.then(async (v: any) => { await sleep(1500); return v; }) : r.result, cancel: () => { cancelled.push(p); r.cancel(); } };
+      };
+      const first = c.select(fa.entry);
+      await waitFor(() => started > 0, 5000, "first decompile to start");
+      await c.select(fb.entry); await first;
+      await sleep(1700); // the held first result arrives late and must be ignored
+      (rpc as any).callCancellable = origCC;
+      await waitFor(() => c.selected() === fb.entry && c.editorText().length > 0, 10000, "second function decompiled");
+      result.quickSwitch = { cancelled: cancelled.length, shown: c.selected() };
+      result.quickSwitchOk = cancelled.length >= 1 && c.selected() === fb.entry;
+
       // ---- save / close (autosave) / welcome / import, all through the real UI ----
       const base = file.split("/").pop()!;
       const dirtyNow = () => c.title().startsWith("• ");
@@ -205,7 +222,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
       result.importOk = importOk;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
-      result.ok = result.navOk && result.searchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      result.ok = result.navOk && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
     } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;
