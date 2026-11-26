@@ -23,7 +23,7 @@ sidecar/
       project.py       Ghidra project, programs.json, list_programs, delete_program, list_languages, import_candidates, program_key
       program.py       open_binary (import/analyze/profile), cancel_open, close_program, save, undo, redo, undo_state
       listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments
-      decompile.py     decompile (pool), result cache, tokens, cancel_decompile, decompile_for_edit()
+      decompile.py     decompile and variable_uses (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
       highvars.py      rename_variable, retype_variable, auto_create_structure
       search.py        search_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache

@@ -33,7 +33,9 @@ class Session:
         return self.program
 
     def addr(self, s, prog=None):
-        """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1."""
+        """Address string (protocol.md: "0x401000", "code:1000", "OVL1::1000") -> Ghidra Address; offsets up to 2^64-1.
+        shortcut: segmented addresses (real-mode "1000:0042", Ghidra's SegmentedAddress) are not parsed (the prefix is read as a space name,
+        so they are InvalidArgument), untested on a DOS/MZ program; upgrade by taking AddressFactory.getAddress(s) for segmented spaces."""
         prog = prog or self.need()
         try:
             f = prog.getAddressFactory()
