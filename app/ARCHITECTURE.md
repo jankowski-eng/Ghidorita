@@ -12,7 +12,7 @@ src/renderer/
   rpc.ts wire.ts       the one adapter: WebSocketBackend (JSON-RPC, session ids, errors -> Failure) and the payload checks; nothing else may import them
   store/               state that outlives a component
     createStore.ts     state + pure reducer + subscribe + useStore (useSyncExternalStore); no dependency
-    program.ts         ProgramState and programReducer: the active program (session, operations, function lookup), open lifecycle, progress, closing, functions, address map, first listing page, undo/dirty, saving, stats, messages
+    program.ts         ProgramState and programReducer: the active program (session, operations, function lookup), open lifecycle, progress, closing, functions, address map, first listing page, undo/dirty, the background analysis state (`analysis` capability), saving, stats, messages
     views.ts           Views and viewsReducer: history, current function, scroll/refetch signals, versions, pinned xref target, dock, search/go-to/type manager, dialogs, pane visibility
     session.ts         createSession(backend): the program store, the views store and the actions that move them (open, cancelOpen, close, save, undo, program_changed); SessionProvider, useSession, useProgram, useViews
   features/            hooks and modules that route user intent
