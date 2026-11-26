@@ -8,7 +8,7 @@ from ghidorita.app import App
 GOLDEN = {
     "provider_info": "loop", "active_session": "loop",
     "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop", "cancel_analysis": "loop+scoped", "analysis_status": "loop+scoped",
-    "open_binary": "open",
+    "open_binary": "open", "open_program": "open",
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
     "search_symbols": "scan", "export_symbols": "scan", "export_header": "scan", "export_gzf": "R", "function_calls": "scan", "top_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "search_memory": "scan", "list_data_types": "scan", "list_bookmarks": "scan", "call_graph": "scan",

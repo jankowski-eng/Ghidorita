@@ -152,6 +152,8 @@ export interface Methods {
   active_session: { params: {}; result: ActiveSession | null };
   // analysis (default "background"): the reply comes right after the import is saved and published, analysis keeps running on its own lane (see AnalysisState, protocol.md "Analysis"). "blocking": the reply waits for the analysis (`progress` events, cancel_open cancels it and nothing is saved).
   open_binary: { params: { path: string; analysis?: "background" | "blocking" } & ImportOptions; result: OpenResult };
+  // Opens a stored program (capability "projects") by the programId of list_programs: no path, no source file read or hashed, so it works when the binary moved, vanished or changed. NotFound if the project has no such program. Same lifecycle, progress events, cancel_open, Busy and analysis rules as open_binary; persisted is always true.
+  open_program: { params: { programId: string; analysis?: "background" | "blocking" }; result: OpenResult };
   cancel_open: { params: { id?: number }; result: { cancelled: boolean } };
   analysis_status: { params: {}; result: AnalysisState };
   // Starts (or resumes) the analysis of the open program. profile omitted = the program's recorded profile. fast -> full on a finished fast program runs only the three analyzers the fast profile skipped; the programId does not change. No-op (returns the state) if the program is already analyzed with that profile or better. Busy while an analysis runs.

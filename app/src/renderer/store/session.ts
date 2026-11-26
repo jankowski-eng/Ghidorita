@@ -101,7 +101,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
         return;
       }
       dispatch({ type: "analysis", state: outcome.session.analysis ?? null });
-      if (!opts.autotest) window.host.recentAdd(p).catch(() => {});
+      if (!opts.autotest && !stored) window.host.recentAdd(p).catch(() => {});
       return await loadBrowsing(current!);
     } finally {
       openJob = null; dispatch({ type: "openEnded" });
@@ -113,7 +113,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
 
   /** Open a program from the browser; "full" also upgrades a finished fast analysis (a partial one resumes by itself when opened). */
   const openStored = (entry: ProgramEntry, then?: "full") =>
-    open(entry.sourcePath ?? entry.name, {}, entry).then((fl) => { if (fl && then) void analysisAction("full"); });
+    open(entry.name, {}, entry).then((fl) => { if (fl && then) void analysisAction("full"); });
   /** The status bar's analysis button, and Run full analysis. */
   const analysisAction = (a: "cancel" | "resume" | "full") => send(async () => {
     const current = get().program;

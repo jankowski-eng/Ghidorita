@@ -92,6 +92,12 @@ def test_browsing_protocol(provider, tmp_path):
             second = await c.ok("open_binary", path=sample)
             assert first["programId"] == second["programId"]
             assert second["sessionId"] != session
+            if "projects" in info["capabilities"]:  # reopening by ID needs no path
+                by_id = await c.ok("open_program", programId=second["programId"])
+                assert by_id["programId"] == second["programId"] and by_id["persisted"] is True and by_id["sessionId"] != second["sessionId"]
+                second = by_id
+            else:
+                await c.err("open_program", -32601, programId=second["programId"])
             await c.err("listing_info", STALE, session_id=session)
             await c.err("listing_info", STALE)  # versioned requests must be scoped
             await c.err("close_program", STALE, session_id=session)

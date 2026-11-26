@@ -1,10 +1,9 @@
 import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type Methods, type Notifications } from "../../../protocol";
 import {
-  BackendError, type AnalysisMode, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenProgress, type ProgramChange,
+  BackendError, type AnalysisMode, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenJob, type OpenProgress, type ProgramChange,
   type ProgramLifecycle, type ProgramOperations, type ProjectCatalog, type ProviderEvents,
 } from "./backend";
 import { notifications, object, results, knownCapabilities } from "./wire";
-import { reopenParams } from "./openOptions";
 
 const kinds: Record<number, Failure> = {
   [ErrorCode.NoProgram]: "noProgram", [ErrorCode.Cancelled]: "cancelled", [ErrorCode.Timeout]: "timeout",
@@ -96,6 +95,18 @@ export class WebSocketBackend implements ApplicationBackend {
     } else p.accept(reply.result);
   }
 
+  private open<M extends "open_binary" | "open_program">(method: M, params: Omit<Params<M>, "analysis">, onProgress: (event: OpenProgress) => void, mode?: AnalysisMode): OpenJob {
+    const unsupported = method === "open_program" && !this.capabilities.has("projects");
+    if (unsupported) return { result: Promise.reject(this.unsupported("projects")), cancel: async () => false };
+    const id = this.nextId++;
+    this.progress.set(id, onProgress);
+    const result = this.send(id, method, { ...params, ...(mode && this.capabilities.has("analysis") ? { analysis: mode } : {}) } as Params<M>).then((session) => {
+      this.adopt(session);
+      return session;
+    }).finally(() => this.progress.delete(id));
+    return { result, cancel: async () => this.progress.has(id) && (await this.send(this.nextId++, "cancel_open", { id })).cancelled };
+  }
+
   private stale() { return new BackendError("stale", "Program session is no longer active"); }
 
   private adopt(session: ActiveSession | null) {
@@ -111,15 +122,7 @@ export class WebSocketBackend implements ApplicationBackend {
   }
 
   readonly lifecycle: ProgramLifecycle = {
-    open: (path, options, onProgress, mode) => {
-      const id = this.nextId++;
-      this.progress.set(id, onProgress);
-      const result = this.send(id, "open_binary", { ...options, path, ...(mode && this.capabilities.has("analysis") ? { analysis: mode } : {}) }).then((session) => {
-        this.adopt(session);
-        return session;
-      }).finally(() => this.progress.delete(id));
-      return { result, cancel: async () => this.progress.has(id) && (await this.send(this.nextId++, "cancel_open", { id })).cancelled };
-    },
+    open: (path, options, onProgress, mode) => this.open("open_binary", { ...options, path }, onProgress, mode),
     active: async () => {
       const revision = this.sessionRevision;
       const session = await this.send(this.nextId++, "active_session", {});
@@ -140,15 +143,7 @@ export class WebSocketBackend implements ApplicationBackend {
   readonly projects: ProjectCatalog = {
     list: () => this.request("projects", "list_programs", {}),
     remove: (params) => this.request("projects", "delete_program", params),
-    reopen: (entry, progress, mode) => {
-      const params = reopenParams(entry);
-      if (!this.capabilities.has("projects") || !params) {
-        const error = params ? this.unsupported("projects") : new BackendError("notFound", `${entry.name} has no stored source path. Use File → Open.`);
-        return { result: Promise.reject(error), cancel: async () => false };
-      }
-      const { path, ...options } = params;
-      return this.lifecycle.open(path, options, progress, mode);
-    },
+    reopen: ({ programId }, progress, mode) => this.open("open_program", { programId }, progress, mode),
   };
   readonly imports: ImportSelection = {
     choices: (params) => this.request("importOptions", "import_candidates", params),

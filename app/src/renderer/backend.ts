@@ -127,6 +127,7 @@ export interface Exports {
 export interface ProjectCatalog {
   list(): Promise<ProgramEntry[]>;
   remove(params: { programId: string }): Promise<{}>;
+  /** Opens the stored program by its programId, whatever became of its source file. */
   reopen(entry: ProgramEntry, progress: (event: OpenProgress) => void, mode?: AnalysisMode): OpenJob;
 }
 

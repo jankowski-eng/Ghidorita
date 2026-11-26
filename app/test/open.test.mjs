@@ -6,7 +6,7 @@ const load = async (f) => {
   const r = await build({ entryPoints: [new URL(`../src/renderer/${f}`, import.meta.url).pathname], bundle: true, format: "esm", write: false });
   return import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 };
-const { parseBase, choiceError, buildOptions, optionsSummary, reopenParams, entropyHint } = await load("openOptions.ts");
+const { parseBase, choiceError, buildOptions, optionsSummary, entropyHint } = await load("openOptions.ts");
 const { windowTitle } = await load("session.ts");
 
 test("parseBase: normalises, validates, 64-bit limit", () => {
@@ -47,11 +47,9 @@ test("a provider can supply an import choice with no language", () => {
   assert.equal(choiceError(ch(c)), null);
   assert.deepEqual(buildOptions(ch(c)), { loader: c.loader });
 });
-test("optionsSummary / reopenParams", () => {
+test("optionsSummary", () => {
   assert.equal(optionsSummary({}), "default");
   assert.equal(optionsSummary({ loader: "Raw Binary", language: "ARM:LE:32:v8", baseAddress: "0x8000000" }), "Raw Binary · ARM:LE:32:v8 · @0x8000000");
-  assert.equal(reopenParams({ programId: "x", name: "n", sizeBytes: 1, analyzed: true, options: {} }), null);
-  assert.deepEqual(reopenParams({ programId: "x", name: "n", sourcePath: "/a/n", sizeBytes: 1, analyzed: true, options: { loader: "L" } }), { path: "/a/n", loader: "L" });
 });
 test("windowTitle", () => {
   assert.equal(windowTitle(null, false), "Ghidorita");
@@ -65,10 +63,9 @@ test("buildOptions: provider-supplied profiles are explicit", () => {
   assert.deepEqual(buildOptions({ ...ch(alt), profile: "fast" }), { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", profile: "fast" });
   assert.deepEqual(buildOptions({ ...ch(macho), base: "0x10", profile: "fast" }), { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", baseAddress: "0x10", profile: "fast" });
 });
-test("optionsSummary / reopenParams carry the profile", () => {
+test("optionsSummary carries the profile", () => {
   assert.equal(optionsSummary({ profile: "fast" }), "fast analysis");
   assert.equal(optionsSummary({ loader: "Raw Binary", language: "ARM:LE:32:v8", profile: "fast" }), "Raw Binary · ARM:LE:32:v8 · fast analysis");
-  assert.deepEqual(reopenParams({ programId: "x", name: "n", sizeBytes: 1, analyzed: true, sourcePath: "/p", options: { profile: "fast" } }), { path: "/p", profile: "fast" });
 });
 
 test("entropyHint: none, some, mostly high", () => {
