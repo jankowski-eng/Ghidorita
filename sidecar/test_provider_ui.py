@@ -56,7 +56,7 @@ def test_event_during_failed_open_is_applied_to_the_kept_session(electron, provi
 
 def test_debugger_flow_in_built_electron_with_the_mock(electron):
     """Attach, stop highlight, registers, statement step, locals, history back/forward, memory, breakpoint, detach, through the UI (the mock fakes a stopped target)."""
-    env = {**os.environ, "GHIDRETTE_PROVIDER": "mock", "AUTOTEST_FLOW": "debug", "AUTOTEST": "/program-a"}
+    env = {**os.environ, "GHIDORITA_PROVIDER": "mock", "AUTOTEST_FLOW": "debug", "AUTOTEST": "/program-a"}
     process = subprocess.run([electron, "."], cwd=APP, env=env, capture_output=True, text=True, timeout=180)
     results = [line for line in process.stdout.splitlines() if line.startswith("AUTOTEST_RESULT ")]
     assert results, (process.stdout[-2000:], process.stderr[-4000:])
