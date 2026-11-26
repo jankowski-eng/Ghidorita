@@ -15,23 +15,13 @@ from ghidrette.core.rpc import Dispatcher, Registry, rpc
 from ghidrette.core.server import Server
 from ghidrette.core.session import undo_state
 from ghidrette.domains.search import Search
+from ghidrette.domains.decompile import Decompile
 from ghidrette.domains.edits import Edits
 from ghidrette.domains.datatypes import DataTypes
 from ghidrette.domains.listing import Listing
 from ghidrette.domains.xrefs import Xrefs
 from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_PROGRAM, NOT_FOUND,
                                    PROJECT_LOCKED, TIMEOUT, RpcError, log)
-
-KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
-         6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
-# kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
-RANGE_ONLY_KINDS = {"comment", "code"}
-ROW_COMMENT_KINDS = {"eol": "comment", "pre": "pre", "post": "post", "plate": "plate", "repeatable": "repeatable"}  # CommentType name -> row field
-
-
-def _akey(s):
-    """Sort key of a protocol address string: its offset (qualified addresses carry the space before the last ':')."""
-    return int(s.rpartition(":")[2], 16)
 # analysis profiles (open_binary `profile`): "fast" switches these off for the first-open analysis (measured in SPIKE_REPORT round 4)
 FAST_PROFILE = ["Call Convention ID", "Decompiler Switch Analysis", "Stack"]
 RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a base address option ("-loader-baseAddr")
@@ -41,46 +31,15 @@ KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 class Sidecar:
     def __init__(self):
         self.ctx = ctx = Ctx()
-        self.cache = OrderedDict()   # entry offset -> (lo, hi, result); cache_lock
-        self.cache_ver = 0
-        self.cache_lock = threading.Lock()
         self.proj = self.gp = None
         self.proj_lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
-        ctx.events.subscribe(self._invalidate)
         ctx.shutdown_hooks += [lambda: self._close(), self._close_project]
         self.registry = Registry()
         self.registry.register(self)
-        for dom in (Edits, DataTypes, Listing, Search, Xrefs):
+        for dom in (Decompile, Edits, DataTypes, Listing, Search, Xrefs):
             self.registry.register(dom(ctx))
         self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)
         ctx.lanes.start()
-
-    def _invalidate(self, kinds, ranges, broad):
-        # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
-        # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
-        if ranges is None or not kinds <= RANGE_ONLY_KINDS:
-            self.cache_clear()
-        else:
-            self.cache_invalidate(ranges)
-
-    def fmtr(self, prog=None):
-        """-> function Address -> protocol string (the default space as "0x..", others space-qualified); one lookup of the default space."""
-        dsid = (prog or self.need()).getAddressFactory().getDefaultAddressSpace().getSpaceID()
-
-        def f(a):
-            sp = a.getAddressSpace()
-            off = a.getOffset() & MASK64
-            if sp.getSpaceID() == dsid:
-                return "0x%x" % off
-            return "%s%s%x" % (sp.getName(), "::" if sp.isOverlaySpace() else ":", off)
-        return f
-
-    def fmt(self, a, prog=None):
-        return self.fmtr(prog)(a)
-
-    def _rng(self, lo, hi):
-        """Pending change range: (space name, first offset, last offset), unsigned."""
-        return (str(lo.getAddressSpace().getName()), lo.getOffset() & MASK64, hi.getOffset() & MASK64)
 
     @staticmethod
     def _projects_dir():
@@ -580,18 +539,6 @@ class Sidecar:
         self.progress("saving", -1, "saving to project")
         res.save(TaskMonitor.DUMMY)
 
-    # ---- decompile cache (shared by the pool and by the event listener) ----
-    def cache_clear(self):
-        with self.cache_lock:
-            self.cache.clear()
-            self.cache_ver += 1
-
-    def cache_invalidate(self, ranges):
-        with self.cache_lock:
-            for k in [k for k, (lo, hi, _) in self.cache.items() if any(s <= hi and e >= lo for s, e in ranges)]:
-                del self.cache[k]
-            self.cache_ver += 1  # also stops in-flight decompiles from storing a pre-edit result
-
     @rpc(lane="R")
     def undo_state(self, prog=None):
         return undo_state(prog or self.need())
@@ -742,115 +689,6 @@ class Sidecar:
     @rpc(lane="R")
     def redo(self):
         return self._undo_redo(False)
-
-    # ---- decompile (pool worker) ----
-    @rpc(lane="decomp")
-    def decompile(self, entry, timeoutSecs=30, job=None):
-        from ghidra.app.decompiler import DecompInterface
-        from ghidra.pyghidra import PyGhidraTaskMonitor
-        w = self.tl.w
-        timeoutSecs = lim(timeoutSecs, 30)
-        with self.pool_lock:
-            prog, epoch = self.program, self.epoch
-            if job.cancelled or job.epoch != epoch:  # cancelled while queued, or the program was closed/swapped meanwhile
-                raise RpcError(CANCELLED, "decompile cancelled")
-            if prog is None:
-                raise RpcError(NO_PROGRAM, "no program open")
-            w.busy = True
-            self.running.add(job)
-        try:
-            a = self.addr(entry, prog)
-            func = prog.getFunctionManager().getFunctionAt(a)
-            if func is None:
-                raise RpcError(NOT_FOUND, "no function at %s" % entry)
-            key = a.getOffset()
-            with self.cache_lock:
-                ver = self.cache_ver
-                hit = self.cache.get(key)
-                if hit is not None:
-                    self.cache.move_to_end(key)
-                    return {**hit[2], "cached": True}
-            if w.decomp is None or w.epoch != epoch:
-                self.ctx.lanes.dispose(w)
-                d = DecompInterface()
-                if not d.openProgram(prog):
-                    raise RpcError(INTERNAL, "decompiler failed to open program: %s" % d.getLastMessage())
-                w.decomp, w.epoch = d, epoch
-            mon = PyGhidraTaskMonitor(None, None)
-            with self.mon_lock:
-                job.mon = mon
-                if job.cancelled:
-                    mon.cancel()
-            res = w.decomp.decompileFunction(func, timeoutSecs, mon)
-            if res.isCancelled() or mon.isCancelled():
-                raise RpcError(CANCELLED, "decompile cancelled")
-            if res.isTimedOut():
-                raise RpcError(TIMEOUT, "decompile timed out after %ss" % timeoutSecs)
-            if not res.decompileCompleted():
-                raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
-            out = self._tokens(prog, res)
-            body = func.getBody()
-            with self.cache_lock:
-                if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store
-                    self.cache[key] = (body.getMinAddress().getOffset() & MASK64, body.getMaxAddress().getOffset() & MASK64, out)
-                    if len(self.cache) > 256:
-                        self.cache.popitem(last=False)
-            return {**out, "cached": False}
-        finally:
-            with self.pool_lock:
-                w.busy = False
-                self.running.discard(job)
-
-    def _tokens(self, prog, res):
-        from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
-        from ghidra.app.decompiler.component import DecompilerUtils
-        from ghidra.program.model.pcode import PcodeOp
-        fm, fa = prog.getFunctionManager(), self.fmtr(prog)
-        lines_out, tokens = [], []
-        for ln, line in enumerate(DecompilerUtils.toLines(res.getCCodeMarkup())):
-            indent = str(line.getIndentString())
-            col = len(indent)
-            text = indent
-            for t in line.getAllTokens():
-                s = str(t.getText())
-                start, col = col, col + len(s)  # Java String length == UTF-16 units, as protocol wants
-                text += s
-                if not s.strip():
-                    continue
-                kind = KINDS.get(int(t.getSyntaxType()), "default")
-                if isinstance(t, ClangFieldToken):
-                    kind = "field"
-                elif isinstance(t, ClangLabelToken):
-                    kind = "label"
-                tok = {"line": ln, "colStart": start, "colEnd": col, "kind": kind}
-                ma = t.getMinAddress()
-                if ma is not None:
-                    tok["address"] = fa(ma)
-                if kind in ("variable", "param"):
-                    tok["varName"] = s
-                if isinstance(t, ClangFuncNameToken):
-                    # only tokens that belong to a call op; the function's own name in its signature has no op
-                    op = t.getPcodeOp()
-                    if op is not None and op.getOpcode() == PcodeOp.CALL:
-                        f = fm.getFunctionAt(op.getInput(0).getAddress())
-                        if f is not None:
-                            tok["targetFunction"] = fa(f.getEntryPoint())
-                tokens.append(tok)
-            lines_out.append(text)
-        return {"text": "\n".join(lines_out), "tokens": tokens}
-
-    # ---- loop-thread side ----
-    @rpc(lane="loop")
-    def cancel_decompile(self, id):
-        """Cancel the decompile request with this JSON-RPC id, queued or running. False if unknown/finished."""
-        job = self.dj.get(id)
-        if job is None:
-            return {"cancelled": False}
-        with self.mon_lock:
-            job.cancelled = True
-            if job.mon is not None:
-                job.mon.cancel()
-        return {"cancelled": True}
 
     @rpc(lane="loop")
     def cancel_open(self):
