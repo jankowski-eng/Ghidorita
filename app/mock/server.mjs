@@ -8,7 +8,7 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-let S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map() };
+let S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map() };
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
 const VARS = { param_1: "int", param_2: "char *", iVar1: "int" };
@@ -41,13 +41,14 @@ const CALLS = [[7, 1, 3, "UNCONDITIONAL_CALL"], [13, 2, 5, "CONDITIONAL_CALL"], 
 const calleeOf = (i, [mul, add]) => (i * mul + add) % NFUNC;
 const fnRange = (i) => ({ start: entryOf(i), end: hex(BASE + (i + 1) * STEP - 1) });
 const undoStack = [], redoStack = [];
-const undoState = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoName: undoStack.at(-1)?.name, redoName: redoStack.at(-1)?.name });
+let dirty = false; // set by any edit/undo/redo, reset by save
+const undoState = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoName: undoStack.at(-1)?.name, redoName: redoStack.at(-1)?.name, dirty });
 const decompCache = new Set();
 const changed = (notify, ranges, kinds) => { decompCache.clear(); notify("program_changed", { ranges, kinds, undo: undoState() }); };
 function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mutates S; undo/redo restore whole-state snapshots
   const before = structuredClone(S);
   const result = fn() ?? {};
-  undoStack.push({ name, before, after: structuredClone(S) }); redoStack.length = 0;
+  undoStack.push({ name, before, after: structuredClone(S) }); redoStack.length = 0; dirty = true;
   changed(notify, ranges, kinds);
   return result;
 }
@@ -59,6 +60,8 @@ const row = (idx) => {
   const r = { address: hex(BASE + idx * STRIDE), length: STRIDE, bytes: (h >>> 8).toString(16).padStart(8, "0").replace(/(..)/g, "$1 ").trim(),
     mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
   if (idx % ROWS_PER_FUNC === 0) r.label = nameOf(idx / ROWS_PER_FUNC);
+  const dd = S.data.get(BASE + idx * STRIDE);
+  if (dd) { r.mnemonic = dd.mnemonic; r.length = dd.length; r.operands = ""; }
   if (S.created.has(BASE + idx * STRIDE)) r.label = S.created.get(BASE + idx * STRIDE);
   const ov = COMMENT_KINDS.map((k) => S.comments.get(`${BASE + idx * STRIDE}|${k}`)).find(Boolean);
   if (ov) r.comment = ov;
@@ -222,13 +225,33 @@ const handlers = {
     if (!d || d.size < 0) bad("dataType");
     return edit("Retype variable", notify, [fnRange(i)], ["function"], () => { S.types.set(`${i}|${o}`, d.name); });
   },
+  define_data({ address, dataType }, notify) {
+    const n = parseAddr(address);
+    if (typeof dataType !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("dataType/address");
+    const arr = /^(\w+)\[(\d+)\]$/.exec(dataType.trim()), name = (arr ? arr[1] : dataType.trim()).replace(/^\//, "");
+    const d = name.endsWith("*") ? { size: 8 } : DATA_TYPES.find((d) => d.name === name);
+    if (!d || d.size <= 0) bad("dataType");
+    const length = d.size * (arr ? +arr[2] : 1);
+    return edit("Define data", notify, [{ start: hex(n), end: hex(n + length - 1) }], ["data", "code"], () => { S.data.set(n, { mnemonic: dataType, length }); });
+  },
+  clear_code({ address, length }, notify) {
+    const n = parseAddr(address), len = parseInt0(length, STRIDE, "length");
+    if (n < BASE || n >= BASE + ROWS * STRIDE || len < 1) bad("address/length");
+    return edit("Clear code", notify, [{ start: hex(n), end: hex(n + len - 1) }], ["code", "data"], () => { for (let a = n; a < n + len; a += STRIDE) S.data.set(a, { mnemonic: "??", length: STRIDE }); });
+  },
+  save(_, notify) { // like Ghidra: history is dropped, dirty cleared
+    if (!dirty) return { saved: false };
+    dirty = false; undoStack.length = 0; redoStack.length = 0;
+    notify("program_changed", { ranges: [], kinds: [], undo: undoState() });
+    return { saved: true };
+  },
   undo(_, notify) { return step(undoStack, redoStack, "before", notify); },
   redo(_, notify) { return step(redoStack, undoStack, "after", notify); },
 };
 function step(from, to, side, notify) {
   const e = from.pop();
   if (!e) bad("nothing to " + (side === "before" ? "undo" : "redo"));
-  S = structuredClone(e[side]); to.push(e);
+  S = structuredClone(e[side]); to.push(e); dirty = true;
   changed(notify, null, ["other"]);
   return undoState();
 }

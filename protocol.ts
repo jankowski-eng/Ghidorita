@@ -103,7 +103,7 @@ export interface Methods {
   // clear_code: Ghidra's ClearCmd (code, data, references; not symbols/comments); `length` bytes from `address` (default: the code unit at address).
   clear_code: { params: { address: Address; length?: number }; result: {} };
   // ---- persistence ----
-  // Writes the program to the project. saved=false when nothing had changed. Also done automatically when a program is closed and on shutdown.
+  // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
   save: { params: {}; result: { saved: boolean } };
 }
 
