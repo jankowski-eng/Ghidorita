@@ -13,12 +13,12 @@ export function createMenu({ getWin, pick }: Deps) {
   };
   const shown = { functions: true, listing: true, decompiler: true }; // survives menu rebuilds
   const pane = (label: string, p: keyof typeof shown): MenuItemConstructorOptions =>
-    ({ label, type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p }); } });
+    ({ label, type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p, visible: mi.checked }); } });
 
   function build() {
     const recent = getRecent();
     const recentItems: MenuItemConstructorOptions[] = recent.length
-      ? [...recent.map((p): MenuItemConstructorOptions => ({ label: p, click: () => send({ type: "open-path", path: p }) })),
+      ? [...recent.map((p): MenuItemConstructorOptions => ({ label: p.length > 80 ? "…" + p.slice(-79) : p, click: () => send({ type: "open-path", path: p }) })),
          { type: "separator" }, { label: "Clear Recent", click: () => { clearRecent(); build(); } }]
       : [{ label: "(none)", enabled: false }];
     const mac = process.platform === "darwin";

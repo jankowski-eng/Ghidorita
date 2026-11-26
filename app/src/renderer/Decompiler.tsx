@@ -20,6 +20,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, onCallClick, editorRe
     decorations.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
   };
+  useEffect(() => () => { for (const m of monacoRef.current?.editor.getModels() ?? []) if (/tab-\d+$/.test(m.uri.path)) m.dispose(); }, []);
   useEffect(() => { // dispose models of closed tabs
     for (const m of monacoRef.current?.editor.getModels() ?? []) {
       const id = /tab-(\d+)$/.exec(m.uri.path)?.[1];

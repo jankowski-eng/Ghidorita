@@ -97,7 +97,7 @@ ipcMain.handle("autotest-done", async (e, result: { ok: boolean }) => {
 app.whenReady().then(async () => {
   let port: number;
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
-  ipcMain.handle("get-config", () => ({ port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1" }));
+  ipcMain.handle("get-config", (e) => !fromWin(e) ? null : ({ port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1" }));
   win = new BrowserWindow({ width: 1400, height: 900, webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
   menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));

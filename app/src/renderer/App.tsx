@@ -33,6 +33,7 @@ export function App() {
   const idxRef = useRef(noIndex);
   const topAddrRef = useRef<Address>("");
   const errors = useRef<string[]>([]);
+  const autotestRef = useRef(false);
   const editorRef = useRef<any>(null);
 
   const fail = (e: unknown) => { const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
@@ -43,12 +44,20 @@ export function App() {
 
   const setNav = (n: Nav) => { navRef.current = n; setNavState(n); };
   // Every navigation ends here: scroll the listing (except for a click inside it) and show the containing function.
-  const applyLoc = (loc: Loc, viaHistory: boolean) => {
+  const applyLoc = (loc: Loc, viaHistory: boolean): Promise<void> | undefined => {
     if (viaHistory || loc.source !== "listing") setScrollReq((s) => ({ address: loc.address, n: s.n + 1 }));
     const fn = containingFunction(idxRef.current, loc.address);
-    if (fn) tabs.show(fn.entry);
+    return fn ? tabs.show(fn.entry) : undefined;
   };
-  const go = (address: Address, source: Source) => { const n = push(navRef.current, { address, source }); setNav(n); applyLoc(n.current!, false); };
+  const go = (address: Address, source: Source) => {
+    const loc: Loc = { address, source }, cur = navRef.current.current;
+    // reading in the listing must not flood the history: clicks within one function replace the current entry
+    const sameFn = cur?.source === "listing" && source === "listing" && containingFunction(idxRef.current, cur.address)?.entry === containingFunction(idxRef.current, address)?.entry;
+    const n = sameFn ? { ...navRef.current, current: loc } : push(navRef.current, loc);
+    setNav(n);
+    return applyLoc(loc, false);
+  };
+  const goTab = (entry: Address | null) => { if (entry) void go(entry, "functions"); }; // keep list/status/listing in step with the visible tab
   const back = () => { const n = goBack(navRef.current); if (n !== navRef.current) { setNav(n); applyLoc(n.current!, true); } };
   const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current) { setNav(n); applyLoc(n.current!, true); } };
 
@@ -60,7 +69,7 @@ export function App() {
       idxRef.current = new FuncIndex(fl);
       tabs.reset(); setNav(emptyNav);
       setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true);
-      window.host.recentAdd(p).catch(() => {});
+      if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
     } catch (e) { fail(e); } finally { setProgress(null); }
   };
@@ -73,7 +82,7 @@ export function App() {
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
-  const api = useRef({ go, back, forward, clickAt, open, closeTab: tabs.closeActive });
+  const api = useRef({ go, back, forward, clickAt, open, closeTab: () => goTab(tabs.closeActive()) });
   api.current = { go, back, forward, clickAt, open, closeTab: tabs.closeActive };
 
   useEffect(() => {
@@ -84,8 +93,9 @@ export function App() {
         if (m === "progress") setProgress(p as Progress);
         else if (m === "error") fail((p as { message: string }).message);
       };
+      autotestRef.current = !!cfg.autotest;
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), select: async (e) => api.current.go(e, "functions"), clickAt: (l, c) => api.current.clickAt(l, c),
+        open: (p) => api.current.open(p), select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
         selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
         topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
@@ -97,7 +107,7 @@ export function App() {
       else if (c.type === "nav-forward") api.current.forward();
       else if (c.type === "goto") setGotoOpen(true);
       else if (c.type === "close-tab") api.current.closeTab();
-      else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: !v[c.pane] }));
+      else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
     });
     const mouse = (e: MouseEvent) => { // buttons 4/5 = back/forward
       if (e.button === 3) { e.preventDefault(); api.current.back(); } else if (e.button === 4) { e.preventDefault(); api.current.forward(); }
@@ -105,8 +115,8 @@ export function App() {
     window.addEventListener("mouseup", mouse);
     return () => { off(); window.removeEventListener("mouseup", mouse); };
   }, []);
-  const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
 
+  const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
   const canBack = nav.back.length > 0, canForward = nav.forward.length > 0;
   useEffect(() => { window.host.setMenuState({ canBack, canForward }).catch(() => {}); }, [canBack, canForward]);
 
@@ -124,11 +134,11 @@ export function App() {
       {gotoOpen && opened && <GoTo funcs={funcs} onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
       {opened ? (
         <Panes visible={visible}>{{
-          functions: <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { go(e, "functions"); const t = tabsRef.current().tabs.find((x) => x.id === tabsRef.current().active); if (t) tabs.pin(t.id); }} />,
+          functions: <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />,
           listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={fail} onRowClick={(a) => go(a, "listing")} />,
           decompiler: (
             <div className="dec">
-              <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={tabs.activate} onClose={tabs.close} onPin={tabs.pin} />
+              <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
               {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
               {ad?.status === "loading" && <div className="empty">Decompiling…</div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}</div>}

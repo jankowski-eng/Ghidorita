@@ -10,7 +10,7 @@ const DEFAULT: Sizes = { functions: 260, listing: 560 };
 function load(): Sizes {
   try {
     const s = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (s && Number.isFinite(s.functions) && Number.isFinite(s.listing)) return { functions: Math.max(MIN, s.functions), listing: Math.max(MIN, s.listing) };
+    if (s && Number.isFinite(s.functions) && Number.isFinite(s.listing)) return { functions: Math.min(2000, Math.max(MIN, s.functions)), listing: Math.min(2000, Math.max(MIN, s.listing)) };
   } catch { /* storage unavailable or corrupt: defaults */ }
   return DEFAULT;
 }
@@ -20,7 +20,7 @@ export function Panes({ visible, children }: { visible: Record<PaneId, boolean>;
   const [sizes, setSizes] = useState(load);
   const sizesRef = useRef(sizes); sizesRef.current = sizes;
   const resize = (id: "functions" | "listing", w: number, save: boolean) => {
-    const next = { ...sizesRef.current, [id]: Math.max(MIN, Math.round(w)) };
+    const next = { ...sizesRef.current, [id]: Math.min(2000, Math.max(MIN, Math.round(w))) };
     setSizes(next);
     if (save) try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
   };
@@ -48,6 +48,7 @@ function Handle({ label, width, onResize }: { label: string; width: number; onRe
     <div className="handle" role="separator" aria-orientation="vertical" aria-label={`Resize ${label} pane`} aria-valuenow={width} tabIndex={0}
       onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, w: width }; }}
       onPointerMove={(e) => { if (drag.current) onResize(drag.current.w + e.clientX - drag.current.x, false); }}
+      onPointerCancel={() => { drag.current = null; }}
       onPointerUp={(e) => { if (drag.current) { onResize(drag.current.w + e.clientX - drag.current.x, true); drag.current = null; } }}
       onKeyDown={(e) => {
         const d = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;

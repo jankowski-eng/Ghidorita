@@ -47,23 +47,25 @@ export function useTabs(onError: (e: unknown) => void, onDecompiled: (ms: number
     } finally { if (jobs.current.get(id) === myJob) jobs.current.delete(id); }
   };
 
-  const show = (entry: Address, pin = false) => {
+  const show = (entry: Address, pin = false): Promise<void> => {
     const next = openFunction(tabsRef.current, entry, pin);
     set(next);
     const t = next.tabs.find((x) => x.id === next.active)!;
-    void load(t.id, t.entry);
+    return load(t.id, t.entry);
   };
-  const activate = (id: number) => {
+  const activate = (id: number): Address | null => {
     const next = activateTab(tabsRef.current, id);
     set(next);
     const t = next.tabs.find((x) => x.id === id);
     if (t) void load(t.id, t.entry); // retries a failed tab
+    return t?.entry ?? null;
   };
   return {
     state: tabsRef.current, data: dataRef.current, show, activate,
     pin: (id: number) => set(pinTab(tabsRef.current, id)),
-    close: (id: number) => { const next = closeTab(tabsRef.current, id); set(next); const a = next.tabs.find((x) => x.id === next.active); if (a) void load(a.id, a.entry); },
-    closeActive: () => { const a = tabsRef.current.active; if (a !== null) { const next = closeTab(tabsRef.current, a); set(next); const n = next.tabs.find((x) => x.id === next.active); if (n) void load(n.id, n.entry); } },
-    reset: () => set(emptyTabs),
+    /** closes a tab; returns the entry of the tab that became active, if any */
+    close: (id: number): Address | null => { const next = closeTab(tabsRef.current, id); set(next); return next.tabs.find((x) => x.id === next.active)?.entry ?? null; },
+    closeActive: (): Address | null => { const a = tabsRef.current.active; return a === null ? null : (() => { const next = closeTab(tabsRef.current, a); set(next); return next.tabs.find((x) => x.id === next.active)?.entry ?? null; })(); },
+    reset: () => set({ ...emptyTabs, nextId: tabsRef.current.nextId }),
   };
 }

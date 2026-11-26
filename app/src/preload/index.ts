@@ -6,7 +6,7 @@ export type Pane = "functions" | "listing" | "decompiler";
 export type MenuCommand =
   | { type: "open-path"; path: string }
   | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
-  | { type: "toggle-pane"; pane: Pane };
+  | { type: "toggle-pane"; pane: Pane; visible: boolean };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward. */
 export interface MenuState { canBack: boolean; canForward: boolean }
 
