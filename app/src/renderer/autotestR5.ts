@@ -12,7 +12,7 @@ export async function runR5Flow(file: string, c: AutotestCtx, result: Record<str
   const closed = (t: string) => waitFor(() => !byLabel("dialog", t), 8000, `dialog "${t}" to close`);
   const hasLabel = (n: string) => [...document.querySelectorAll(".lrow.lbl .l")].some((x) => x.textContent === n + ":");
   const undoN = async (n: number) => { for (let i = 0; i < n; i++) await rpc.call("undo", {}); await sleep(300); };
-  const goTop = async (a: string) => { await c.goAddr(a); await waitFor(() => c.topAddr() === a, 8000, "listing at " + a); };
+  const goTop = async (a: string) => { await c.goAddr(a); await waitFor(() => { const r = (window as any).__listing.rowAt(a); return !!r && c.topAddr() === r.address; }, 8000, "listing at " + a); };
 
   // 3. Comment dialog: prefill per kind from get_comments, text follows the kind selector, drafts survive switching
   const entry = fl[Math.min(3, fl.length - 1)].entry;

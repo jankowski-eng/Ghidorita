@@ -32,8 +32,21 @@ class Program:
     def _snapshot(self):
         prog = self.ses.program
         if prog is not None and prog.isChanged():
-            with self.ses.save_lock:
-                prog.getDomainFile().takeRecoverySnapshot()
+            from java.lang import System
+            key = "SystemUtilities.isHeadless"
+            was = System.getProperty(key)
+            # Ghidra's lockForSnapshot refuses in headless mode (default "true") and takeRecoverySnapshot then silently does nothing,
+            # so the snapshot would never exist. The flag is only read for that check; set it for the call.
+            # shortcut: process-wide for a few ms, other threads may see it; upgrade to taking the snapshot through DBHandle if that matters.
+            System.setProperty(key, "false")
+            try:
+                with self.ses.save_lock:
+                    prog.getDomainFile().takeRecoverySnapshot()
+            finally:
+                if was is None:
+                    System.clearProperty(key)
+                else:
+                    System.setProperty(key, was)
 
     @rpc(lane="project")
     def close_program(self):

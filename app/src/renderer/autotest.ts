@@ -135,7 +135,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       // symbol search through the real panel: click Search, type, wait for hits, press Enter; focus must come back
       const q = fl[Math.min(5, fl.length - 1)].name;
       const sbtn = button("Search symbols")!; sbtn.focus(); sbtn.click();
-      const box = await waitFor(() => document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Symbol name"]'), 5000, "search panel");
+      const box = await waitFor(() => document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Symbol or action"]'), 5000, "search panel");
       typeInto(box, q);
       const opt = await waitFor(() => document.querySelector<HTMLElement>('#sym-list [role="option"][aria-selected="true"]'), 5000, "search results");
       const hit = opt.querySelector(".a")!.textContent!;
