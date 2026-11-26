@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
+import { DecompilerWarnings } from "./DecompilerWarnings";
 import { Decompiler } from "./Decompiler";
 import { FunctionList } from "./FunctionList";
 import { Listing } from "./Listing";
@@ -70,7 +71,8 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {centre.decompiler && graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.callGraph && graphEntry && <CallGraphView source={ops.references.callGraph} entry={graphEntry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
-            <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} />
+            <DecompilerWarnings warnings={ad?.status === "ready" ? ad.warnings ?? [] : []} />
+            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} /></div>
           </div>}
         </div>
       ),

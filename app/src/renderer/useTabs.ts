@@ -5,7 +5,7 @@ import { decompileJobs } from "./decompileJobs";
 import { emptyTabs, openFunction, pinTab, activateTab, closeTab, droppedIds, isLarge, LONG_TIMEOUT_SECS, testTimeout, type Tabs } from "./tabs";
 
 /** "large": not started, waiting for "Decompile anyway" (size warning). error + code Timeout/Cancelled also offer "Decompile anyway". long: running with the long timeout (cancellable). */
-export interface TabData { status: "loading" | "ready" | "error" | "large"; text: string; tokens: Token[]; error?: string; kind?: Failure; size?: number; long?: boolean }
+export interface TabData { status: "loading" | "ready" | "error" | "large"; text: string; tokens: Token[]; warnings?: string[]; error?: string; kind?: Failure; size?: number; long?: boolean }
 export const canForce = (d: TabData) => d.status === "large" || (d.status === "error" && (d.kind === "timeout" || d.kind === "cancelled"));
 
 /**
@@ -46,7 +46,7 @@ export function useTabs(decompiler: Decompilation | undefined, onError: (e: unkn
     try {
       const r = await job.result;
       if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current()) return; // closed or superseded
-      setData(id, { status: "ready", text: r.text, tokens: r.tokens });
+      setData(id, { status: "ready", text: r.text, tokens: r.tokens, warnings: r.warnings });
       onDecompiled(Math.round(performance.now() - t0));
     } catch (e) {
       if (!tabsRef.current.tabs.some((t) => t.id === id) || !job.current() || isFailure(e, "cancelled") || isObsolete(e)) return;

@@ -42,12 +42,13 @@ class Bookmarks:
 
     @rpc(lane="scan")
     def list_bookmarks(self, type=None, query=None, offset=0, limit=100, sort="address", desc=False, scan=None):
-        """One page of the program's bookmarks: {total, types[{type, count}], items[{address, type, category, comment}]}. `type` keeps one bookmark type
+        """One page of the program's bookmarks: {total, types[{type, count}], items[{address, type, category, comment}]}. `type` keeps one bookmark type, or several as a comma list
         (omitted = every type), `query` is a case-insensitive substring of category or comment, `sort` address|type|category (ties by address).
         `types` counts every type present before any filter, for a filter control. Lane scan (cancellable with cancel_search): one pass over the
         bookmark table builds a snapshot that is reused until the next program_changed; filter and sort run per page on the snapshot."""
         if type is not None:
             text_arg(type, "type")
+            type = set(type.split(","))  # "Error,Warning": several types (a type name has no comma)
         if query is not None:
             text_arg(query, "query")
         if sort not in SORTS or not isinstance(desc, bool):
@@ -56,7 +57,7 @@ class Bookmarks:
         with self.ctx.lanes.scanning(scan) as prog:
             counts, all_items = self._snapshot(prog, scan)
             q = (query or "").lower()
-            items = [o for o in all_items if (type is None or o["type"] == type) and (not q or q in o["category"].lower() or q in o["comment"].lower())]
+            items = [o for o in all_items if (type is None or o["type"] in type) and (not q or q in o["category"].lower() or q in o["comment"].lower())]
             scan.check()
             key = {"address": lambda o: (akey(o["address"]), o["type"], o["category"]),
                    "type": lambda o: (o["type"].lower(), akey(o["address"]), o["category"]),

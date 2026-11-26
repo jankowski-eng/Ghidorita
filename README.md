@@ -53,6 +53,9 @@ View > Call Graph (or the command bar) swaps the decompiler for the functions ar
 
 ![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
 
+### Decompiler warnings and problems
+Non-fatal decompiler warnings (unknown calling convention, a switch table it could not recover, code it cut at invalid bytes, …) show in a compact bar above the C, one line each in plain words (hover for Ghidra's own text), with a one-line note for `in_` / `unaff_` / `extraout_` names when a warning mentions them. The Bookmarks panel has a **Problems** button: the analyzers' Error and Warning bookmarks.
+
 ### Strings, symbols, memory search
 View > Defined Strings lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default, and a minimum length and a text filter narrow it. Symbol Table (`Cmd+T`) filters by name (`*` and `?` wildcards) and kind and shows each symbol's namespace and source. Search Memory (`S`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text and streams results; **Cancel** keeps what was found, **Continue** resumes. All of them open in the dock under the panes; a click or Enter goes to the address.
 

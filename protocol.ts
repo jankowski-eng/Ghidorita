@@ -65,6 +65,7 @@ export interface DecompileResult {
   text: string;
   tokens: Token[];
   cached: boolean;
+  warnings?: string[]; // the decompiler's non-fatal warnings ("WARNING: Unknown calling convention ..."), at most 50, absent when there are none; the C text no longer carries them
 }
 
 export interface GraphBlock { start: Address; end: Address; kind: "c" | "asm"; lines: string[] } // end = last byte of the block; lines: C source lines or "addr  instruction"
@@ -287,7 +288,7 @@ export interface CallEdge extends CallRef { thunk: boolean; target?: CallRef }
 export interface FunctionCalls { callers: CallEdge[]; callees: CallEdge[] }
 export interface BookmarkItem { address: Address; type: string; category: string; comment: string } // type: "Note" (the user's), "Analysis", "Warning", "Error", "Info", ...
 /** type omitted = every type; query = substring of category or comment; sort default address; limit <= 1000. `types` of the result counts every type before filtering. */
-export interface ListBookmarksParams { type?: string; query?: string; offset?: number; limit?: number; sort?: "address" | "type" | "category"; desc?: boolean }
+export interface ListBookmarksParams { type?: string /* one type, or a comma list: "Error,Warning" */; query?: string; offset?: number; limit?: number; sort?: "address" | "type" | "category"; desc?: boolean }
 export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other";
 export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
 /** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */

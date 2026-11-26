@@ -70,3 +70,17 @@ def test_list_bookmarks_is_cancellable_and_does_not_block_listing(sc, tmp_path, 
             await call("remove_bookmark", address=BASE, type="Note", category="c")
             assert (await call("list_bookmarks", type="Note"))["total"] == 0
     run(go())
+
+
+def test_list_bookmarks_type_list(env):
+    async def go():
+        async with Client(env["proc"].port) as c:
+            allb = await c.ok("list_bookmarks", limit=1000)
+            kinds = {t["type"]: t["count"] for t in allb["types"]}
+            pair = [k for k in ("Error", "Warning") if k in kinds]
+            assert pair, kinds  # the analysis of /bin/ls leaves some
+            both = await c.ok("list_bookmarks", type=",".join(pair))
+            assert both["total"] == sum(kinds[k] for k in pair) and {i["type"] for i in both["items"]} <= set(pair)
+            one = await c.ok("list_bookmarks", type=pair[0])
+            assert one["total"] == kinds[pair[0]]
+    run(go())

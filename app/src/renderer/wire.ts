@@ -65,7 +65,7 @@ export const results = {
   get_bytes: shape({ address, length: positive, bytes: str }),
   list_functions: array(shape({ ...labelFields, source: optional(source) })),
   get_function_at: nullable(shape({ ...labelFields, signature: str })),
-  decompile: shape({ text: str, cached: bool, tokens: array(shape({
+  decompile: shape({ text: str, cached: bool, warnings: optional(array(str)), tokens: array(shape({
     line: count, colStart: count, colEnd: count, kind: oneOf("keyword", "type", "function", "variable", "param", "const", "comment", "label", "field", "default"),
     address: optional(address), varAddress: optional(address), varName: optional(str), targetFunction: optional(address),
   })) }),
