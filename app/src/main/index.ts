@@ -1,10 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomBytes } from "node:crypto";
 const token = randomBytes(24).toString("hex");
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createMenu } from "./menu";
+import { validPath } from "./recent";
 
 const appDir = path.resolve(__dirname, "../.."); // app/ (this file is app/out/main/index.js)
 const repo = path.resolve(appDir, "..");
@@ -62,12 +64,24 @@ app.on("before-quit", () => { quitting = true; });
 let win: BrowserWindow;
 const autotest = process.env.AUTOTEST;
 
-ipcMain.handle("pick-file", async () => {
+const fromWin = (e: IpcMainInvokeEvent) => !!win && !win.isDestroyed() && e.sender === win.webContents;
+async function pickFile() {
   const r = await dialog.showOpenDialog(win, { properties: ["openFile"] });
   return r.canceled ? null : r.filePaths[0];
+}
+let menu: ReturnType<typeof createMenu>;
+
+ipcMain.handle("pick-file", async (e) => (fromWin(e) ? pickFile() : null));
+
+ipcMain.handle("recent-add", (e, p: unknown) => { if (fromWin(e) && validPath(p)) menu?.addRecent(p); });
+ipcMain.handle("menu-state", (e, s: unknown) => {
+  const o = s as Record<string, unknown> | null;
+  if (!fromWin(e) || !o || typeof o !== "object" || typeof o.canBack !== "boolean" || typeof o.canForward !== "boolean") return;
+  menu?.setState({ canBack: o.canBack, canForward: o.canForward });
 });
 
-ipcMain.handle("autotest-done", async (_e, result: { ok: boolean }) => {
+ipcMain.handle("autotest-done", async (e, result: { ok: boolean }) => {
+  if (!fromWin(e)) return;
   await new Promise((r) => setTimeout(r, 300)); // let the last paint land
   try {
     const img = await win.webContents.capturePage();
@@ -85,6 +99,7 @@ app.whenReady().then(async () => {
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
   ipcMain.handle("get-config", () => ({ port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1" }));
   win = new BrowserWindow({ width: 1400, height: 900, webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
+  menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
 });
 app.on("window-all-closed", () => app.quit());
