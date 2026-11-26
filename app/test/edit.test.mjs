@@ -8,7 +8,9 @@ test("listing keys", () => {
   assert.equal(listingKey({ key: "l" }), "rename"); assert.equal(listingKey({ key: "L" }), "rename");
   assert.equal(listingKey({ key: "l", meta: true }), "retype"); assert.equal(listingKey({ key: "l", ctrl: true }), "retype");
   assert.equal(listingKey({ key: ";" }), "comment"); assert.equal(listingKey({ key: "f" }), "createFunction");
-  assert.equal(listingKey({ key: "t" }), "defineData"); assert.equal(listingKey({ key: "c" }), "clear");
+  assert.equal(listingKey({ key: "t" }), "defineData");
+  assert.equal(listingKey({ key: "{", code: "BracketLeft", shift: true }), "createStruct");
+  assert.equal(listingKey({ key: "c", meta: true }), null, "Cmd+C is not Clear Code"); assert.equal(listingKey({ key: "x" }), null, "X is IDA's key"); assert.equal(listingKey({ key: "c" }), "clear");
   assert.equal(listingKey({ key: "c", meta: true }), null); // copy must not clear
   assert.equal(listingKey({ key: "f", alt: true }), null); assert.equal(listingKey({ key: "x" }), null);
 });

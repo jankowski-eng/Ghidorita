@@ -61,7 +61,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
       decompiler: (centre.decompiler || centre.callGraph) && (
         <div className="dec">
           {centre.decompiler && <><TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
-          {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
+          {!active && <div className="empty">Select a function, click an address in the listing, or press G.</div>}
           {ad?.status === "loading" && <div className="empty">Decompiling…{ad.long && <button aria-label="Cancel decompile" onClick={() => tabs.cancel(active!.id)}>Cancel</button>}</div>}
           {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
             <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}

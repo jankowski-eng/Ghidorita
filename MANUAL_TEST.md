@@ -41,7 +41,7 @@ Use a binary with many rows: the 66 MB `llvm-exegesis` if you have its analysis 
 Do not touch the mouse from step 4.1 on (except where noted).
 | # | Step | Expected | Pass | Fail |
 |---|---|---|---|---|
-| 4.1 | Press **Cmd+Shift+T**. | The data type manager opens and keyboard focus is inside it (visible focus ring). | ☐ | ☐ |
+| 4.1 | Choose View > Data Type Manager. | The data type manager opens and keyboard focus is inside it (visible focus ring). | ☐ | ☐ |
 | 4.2 | Tab through the panel: filter box, tree, buttons. Shift+Tab back. | Focus moves in a sensible order, every control gets a visible focus ring, nothing traps focus. | ☐ | ☐ |
 | 4.3 | In the tree: Up/Down moves, Right expands a category, Left collapses it, Home/End jump. | Each key does what it says; the selected row is always visible. | ☐ | ☐ |
 | 4.4 | Use the New / Create button by keyboard to make a struct `ManualStruct` (type the name, Enter). | The struct appears in the tree and is selected, the editor shows it. | ☐ | ☐ |
@@ -66,6 +66,6 @@ Do not touch the mouse from step 4.1 on (except where noted).
 | 6.1 | Open `/bin/ls` and, while it is analysing for the first time (fresh projects dir), click Cancel in the progress dialog. | Dialog closes, the welcome pane shows "Open cancelled." (not an error). | ☐ | ☐ |
 | 6.2 | Start a second copy of the app against the same projects dir (`SIDECAR_PROJECTS_DIR=<same> npm start` in another terminal). | The second window's "Programs in this project" shows the red text `projects dir in use by another Ghidorita (<dir>)`. | ☐ | ☐ |
 | 6.3 | Open a program you opened before, rename its file, then choose it under File > Open Recent. | An error/notice "Could not open <path>". A failed open leaves the previously open program (and its unsaved edits) as it was; with none open you stay on the welcome pane. | ☐ | ☐ |
-| 6.4 | Open `/bin/ls`, click a listing row, then the decompiler, then press Space for the graph, then click the function list. Press `Cmd+K`, type `>`. | The status bar's right side changes with the focused view (listing: `L rename · X refs · Space graph …`; decompiler: `… ⌘L retype …`; graph: `Space back · wheel zoom …`; function list: `⌘K commands · ⌘G go to`) and never wraps. The command bar shows `L` next to Rename and `⌘⇧G` next to Toggle Call Graph. Function list dots: off-white solid = named by you, amber ring = analysis, blue solid = imports, grey dashed ring = `FUN_…`. Graph edges: true solid, false dashed, loop-back dotted. Binary map: functions light blue, renamed ones off-white. | ☐ | ☐ |
+| 6.4 | Open `/bin/ls`, click a listing row, then the decompiler, then press Cmd+Space (or View > Control-Flow Graph) for the graph, then click the function list. Press `Cmd+K`, type `>`. | The status bar's right side changes with the focused view (listing: `L rename · X refs · Space graph …`; decompiler: `… ⌘L retype …`; graph: `Space back · wheel zoom …`; function list: `⌘K commands · ⌘G go to`) and never wraps. The command bar shows `L` next to Rename and `⌘⇧G` next to Toggle Call Graph. Function list dots: off-white solid = named by you, amber ring = analysis, blue solid = imports, grey dashed ring = `FUN_…`. Graph edges: true solid, false dashed, loop-back dotted. Binary map: functions light blue, renamed ones off-white. | ☐ | ☐ |
 
 ## Notes

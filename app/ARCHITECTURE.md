@@ -28,7 +28,7 @@ src/renderer/
     exports.ts         File > Export (symbol map, C header, Ghidra archive)
     copy.ts            useCopy: copy address / bytes (hex, C array) / decompiled text from the focused pane; clipboard.ts has the writer (navigator.clipboard, then the validated IPC)
     reactions.ts       useProgramReactions: program_changed -> tabs, listing rows, xrefs, function list (the decisions are in changes.ts); tabs reset with the program
-    bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, Space, focus), quit-save, the autotest driver
+    bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, hint-only keys G, S, Alt+arrows, focus), quit-save, the autotest driver
   useTabs.ts tabs.ts   decompiler tabs and their results (tabs.ts is the pure part)
   session.ts           open helpers used by store/session.ts: resolveOpen, readBrowsing (first listing page), windowTitle
   Workbench.tsx        the three panes of the open program; WelcomePane.tsx the program browser; Shell.tsx toolbar, search/go-to bars, dock, status bar, type manager

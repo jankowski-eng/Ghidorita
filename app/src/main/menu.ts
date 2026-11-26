@@ -71,8 +71,7 @@ export function createMenu({ getWin, pick }: Deps) {
       ] },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
-        // Space is only a hint in the label (a real accelerator would swallow the space typed into text inputs): App handles the key itself
-        { label: lab("Control-Flow Graph", "graph"), enabled: state.hasProgram && allowsCommand(caps, { type: "graph" }), click: () => send({ type: "graph" }) },
+        { label: "Control-Flow Graph", accelerator: acc("graph"), enabled: state.hasProgram && allowsCommand(caps, { type: "graph" }), click: () => send({ type: "graph" }) },
         { label: "Call Graph", enabled: state.hasProgram && allowsCommand(caps, { type: "callgraph" }), accelerator: acc("callgraph"), click: () => send({ type: "callgraph" }) },
         { type: "separator" },
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: acc("dock:symbols"), click: () => send({ type: "dock", panel: "symbols" }) },
@@ -81,18 +80,17 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: acc("dock:calls"), click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: acc("dock:bookmarks"), click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
-        { id: "memsearch", label: "Search Memory…", enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: acc("dock:memsearch"), click: () => send({ type: "dock", panel: "memsearch" }) },
+        { id: "memsearch", label: lab("Search Memory…", "dock:memsearch"), enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: acc("dock:memsearch"), click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: acc("datatypes"), click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [
-        { label: "Back", accelerator: acc("nav-back"), enabled: state.canBack, click: () => send({ type: "nav-back" }) },
-        { label: "Forward", accelerator: acc("nav-forward"), enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
+        { label: lab("Back", "nav-back"), accelerator: acc("nav-back"), enabled: state.canBack, click: () => send({ type: "nav-back" }) },
+        { label: lab("Forward", "nav-forward"), accelerator: acc("nav-forward"), enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
         { id: "command-bar", label: "Command Bar…", enabled: state.hasProgram, accelerator: acc("search"), click: () => send({ type: "search" }) },
         { id: "search-symbols", label: "Search Symbols…", enabled: state.hasProgram && caps.has("symbolSearch"), accelerator: acc("symbolSearch"), click: () => send({ type: "search" }) },
-        { id: "goto", label: "Go to Address…", enabled: state.hasProgram, accelerator: acc("goto"), click: () => send({ type: "goto" }) },
-        // the key is only a hint in the label (a real accelerator would swallow a typed x): Listing and Decompiler handle X themselves
-        { id: "xrefs", label: lab("Show References To", "xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
+        { id: "goto", label: lab("Go to Address…", "goto"), enabled: state.hasProgram, accelerator: acc("goto"), click: () => send({ type: "goto" }) },
+        { id: "xrefs", label: "Show References To", accelerator: acc("xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },
       { role: "windowMenu" },
     ];

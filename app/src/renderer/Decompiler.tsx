@@ -41,7 +41,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     act("retype", "Retype Variable…", "retype", 2, "gdRetype && !findInputFocus && !replaceInputFocus", [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL]);
     act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && !findInputFocus && !replaceInputFocus");
     act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
-    if (canEdit.has("references")) editor.addAction({ id: "gd.xrefs", label: "Show References To", keybindings: [monaco.KeyCode.KeyX], precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
+    if (canEdit.has("references")) editor.addAction({ id: "gd.xrefs", label: "Show References To", precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
     // Cmd+C stays Monaco's own copy of the selection; these two are menu-only (the Edit menu has their keys)
     editor.addAction({ id: "gd.copyAddress", label: "Copy Address", contextMenuGroupId: "gd", contextMenuOrder: 6, run: () => copyRef.current("address") });
     editor.addAction({ id: "gd.copyDecompiled", label: "Copy Decompiled Function", contextMenuGroupId: "gd", contextMenuOrder: 7, run: () => copyRef.current("decompiled") });

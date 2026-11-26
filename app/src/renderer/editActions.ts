@@ -2,7 +2,7 @@ import type { Address, Token } from "../../../protocol";
 
 export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "bookmark" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save";
 export type Focus = "listing" | "decompiler" | "input" | "other";
-export interface KeyLike { key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
+export interface KeyLike { key: string; code?: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
 
 /**
  * Ghidra's default bindings. Plain letters only fire in the listing (the decompiler registers its own via Monaco's action API);
@@ -13,7 +13,7 @@ export function listingKey(e: KeyLike): EditAction | null {
   if (e.alt) return null;
   const mod = !!(e.meta || e.ctrl), k = e.key.toLowerCase();
   if (mod) return k === "l" && !e.shift ? "retype" : null;
-  if (e.shift) return null;
+  if (e.shift) return e.code === "BracketLeft" ? "createStruct" : null; // Shift+[
   return ({ l: "rename", ";": "comment", f: "createFunction", t: "defineData", c: "clear" } as Record<string, EditAction>)[k] ?? null;
 }
 

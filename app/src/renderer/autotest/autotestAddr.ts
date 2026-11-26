@@ -22,7 +22,7 @@ export async function runAddrFlow(file: string, fl: FunctionInfo[], c: AutotestC
     ed.setPosition({ lineNumber: t.line + 1, column: t.colStart + 2 }); ed.focus();
     await sleep(200);
     const ta = document.querySelector<HTMLElement>(".monaco-editor textarea")!; ta.focus();
-    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "x", code: "KeyX", keyCode: 88, which: 88, bubbles: true, cancelable: true } as KeyboardEventInit));
+    c.command({ type: "xrefs" }); // Cmd+Shift+F is a menu accelerator; the menu sends this command
   };
 
   // find a function with a global token that has references, and one with a temporary that has writes and reads
