@@ -7,6 +7,10 @@ export interface AutotestCtx {
   open(path: string): Promise<FunctionInfo[] | undefined>;
   select(entry: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
+  cancelOpen(): void;
+  cancelFile: string | null;
+  status(): { opened: boolean; opening: boolean; phase: string; notice: string };
+  searchAndGo(query: string): Promise<Address | null>;
   back(): void;
   forward(): void;
   selected(): Address | null;
@@ -21,6 +25,16 @@ export async function runAutotest(file: string, c: AutotestCtx) {
     const result: Record<string, unknown> = { ok: false };
     try {
       c.setPath(file);
+      if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again
+        const p = c.open(c.cancelFile), t0 = Date.now();
+        while (c.status().phase !== "analysis" && c.status().opening && Date.now() - t0 < 120000) await new Promise((r) => setTimeout(r, 100));
+        const reached = c.status().phase;
+        c.cancelOpen(); await p;
+        const st = c.status();
+        const again = await c.open(c.cancelFile);
+        result.cancel = { phaseAtCancel: reached, openedAfterCancel: st.opened, notice: st.notice, reopenFunctions: again?.length ?? 0, openedAfterReopen: c.status().opened };
+        result.cancelOk = reached === "analysis" && !st.opened && /cancel/i.test(st.notice) && !!again?.length && c.status().opened;
+      }
       const fl = await c.open(file);
       if (!fl?.length) throw new Error("no functions");
       // pick main (or first), else walk the first few functions until one has a call token
@@ -51,8 +65,13 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.afterBackTop = c.topAddr();
       c.forward(); await new Promise((r) => setTimeout(r, 1000));
       result.afterForwardTop = c.topAddr();
+      const q = fl[Math.min(5, fl.length - 1)].name; // symbol search -> navigate -> listing top row is the result
+      const hit = await c.searchAndGo(q);
+      await new Promise((r) => setTimeout(r, 1000));
+      result.search = { query: q, address: hit, listingTop: c.topAddr() };
+      result.searchOk = !!hit && c.topAddr() === hit;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
-      result.ok = result.navOk && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      result.ok = result.navOk && result.searchOk && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
     } catch (e) { c.fail(e); }
     result.errors = c.errors;
     window.host.autotestDone(result);

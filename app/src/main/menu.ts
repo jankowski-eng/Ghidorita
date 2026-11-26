@@ -42,6 +42,7 @@ export function createMenu({ getWin, pick }: Deps) {
       { label: "Go", submenu: [
         { label: "Back", accelerator: "CmdOrCtrl+[", enabled: state.canBack, click: () => send({ type: "nav-back" }) },
         { label: "Forward", accelerator: "CmdOrCtrl+]", enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
+        { label: "Search Symbols…", accelerator: "CmdOrCtrl+Shift+O", click: () => send({ type: "search" }) },
         { label: "Go to Address…", accelerator: "CmdOrCtrl+G", click: () => send({ type: "goto" }) },
       ] },
       { role: "windowMenu" },

@@ -5,13 +5,13 @@ export type Pane = "functions" | "listing" | "decompiler";
 /** main -> renderer, channel "menu". "open-path": File > Open Binary… (main shows the dialog) or File > Open Recent. */
 export type MenuCommand =
   | { type: "open-path"; path: string }
-  | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
+  | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward. */
 export interface MenuState { canBack: boolean; canForward: boolean }
 
 export interface Host {
-  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean }>;
+  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null }>;
   pickFile(): Promise<string | null>;
   autotestDone(result: unknown): Promise<void>;
   /** Subscribe to menu commands; returns the unsubscribe function. */

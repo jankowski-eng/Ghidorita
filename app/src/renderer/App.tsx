@@ -5,17 +5,21 @@ import { AddrMap } from "./addrmap";
 import { Listing } from "./Listing";
 import { FunctionList } from "./FunctionList";
 import { Decompiler } from "./Decompiler";
-import { Toolbar, ProgressBar, type Progress } from "./Toolbar";
+import { Toolbar } from "./Toolbar";
+import { OpenDialog, type Progress } from "./OpenDialog";
+import { SearchPanel } from "./SearchPanel";
+import { XrefPanel } from "./XrefPanel";
+import { RpcError } from "./rpc";
+import { onProgramChanged } from "./changes";
+import { latest } from "./latest";
 import { StatusBar, type Stats } from "./StatusBar";
 import { TabStrip } from "./TabStrip";
 import { GoTo } from "./GoTo";
 import { Panes, type PaneId } from "./Layout";
 import { runAutotest, runBench } from "./autotest";
 import { emptyNav, push, goBack, goForward, type Nav, type Loc, type Source } from "./nav";
-import { FuncIndex, containingFunction } from "./funcs";
+import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } from "./symbols";
 import { useTabs } from "./useTabs";
-
-const noIndex = new FuncIndex([]);
 
 export function App() {
   const [path, setPath] = useState("");
@@ -28,9 +32,18 @@ export function App() {
   const [stats, setStats] = useState<Stats>({});
   const [error, setError] = useState("");
   const [gotoOpen, setGotoOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [opening, setOpening] = useState<{ path: string; startedAt: number; cancelling: boolean } | null>(null);
+  const [notice, setNoticeState] = useState("");
+  const noticeRef = useRef("");
+  const setNotice = (m: string) => { noticeRef.current = m; setNoticeState(m); };
+  const [fn, setFn] = useState<FuncAt | null>(null);
+  const [xrefVersion, setXrefVersion] = useState(0);
   const [visible, setVisible] = useState<Record<PaneId, boolean>>({ functions: true, listing: true, decompiler: true });
   const navRef = useRef(nav);
-  const idxRef = useRef(noIndex);
+  const openingRef = useRef(false);
+  const openedRef = useRef(false);
+  const goSeq = useRef(0);
   const topAddrRef = useRef<Address>("");
   const errors = useRef<string[]>([]);
   const autotestRef = useRef(false);
@@ -38,40 +51,69 @@ export function App() {
 
   const fail = (e: unknown) => { const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
   const tabs = useTabs(fail, (ms) => setStats((s) => ({ ...s, decompileMs: ms })));
-  const idx = useMemo(() => new FuncIndex(funcs), [funcs]);
-  idxRef.current = idx;
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
 
   const setNav = (n: Nav) => { navRef.current = n; setNavState(n); };
   // Every navigation ends here: scroll the listing (except for a click inside it) and show the containing function.
-  const applyLoc = (loc: Loc, viaHistory: boolean): Promise<void> | undefined => {
+  // Only the newest navigation may open a tab (goSeq), so a slow get_function_at can't override a later click.
+  const applyLoc = async (loc: Loc, viaHistory: boolean, seq: number): Promise<void> => {
     if (viaHistory || loc.source !== "listing") setScrollReq((s) => ({ address: loc.address, n: s.n + 1 }));
-    const fn = containingFunction(idxRef.current, loc.address);
-    return fn ? tabs.show(fn.entry) : undefined;
+    let f: FuncAt | null = null;
+    try { f = await containingFunction(loc.address); } catch (e) { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }
+    if (seq !== goSeq.current) return;
+    setFn(f);
+    if (f) await tabs.show(f.entry);
   };
-  const go = (address: Address, source: Source) => {
+  const go = async (address: Address, source: Source) => {
+    if (openingRef.current || !openedRef.current) return;
+    const seq = ++goSeq.current;
     const loc: Loc = { address, source }, cur = navRef.current.current;
     // reading in the listing must not flood the history: clicks within one function replace the current entry
-    const sameFn = cur?.source === "listing" && source === "listing" && containingFunction(idxRef.current, cur.address)?.entry === containingFunction(idxRef.current, address)?.entry;
-    const n = sameFn ? { ...navRef.current, current: loc } : push(navRef.current, loc);
-    setNav(n);
-    return applyLoc(loc, false);
+    let sameFn = false;
+    if (cur?.source === "listing" && source === "listing") {
+      try { const [a, b] = await Promise.all([containingFunction(cur.address), containingFunction(address)]); sameFn = !!a && a.entry === b?.entry; } catch { /* treat as different */ }
+      if (seq !== goSeq.current) return;
+    }
+    setNav(sameFn ? { ...navRef.current, current: loc } : push(navRef.current, loc));
+    await applyLoc(loc, false, seq);
   };
   const goTab = (entry: Address | null) => { if (entry) void go(entry, "functions"); }; // keep list/status/listing in step with the visible tab
-  const back = () => { const n = goBack(navRef.current); if (n !== navRef.current) { setNav(n); applyLoc(n.current!, true); } };
-  const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current) { setNav(n); applyLoc(n.current!, true); } };
+  const back = () => { const n = goBack(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
+  const forward = () => { const n = goForward(navRef.current); if (n !== navRef.current && !openingRef.current) { setNav(n); void applyLoc(n.current!, true, ++goSeq.current); } };
 
   const open = async (p: string) => {
-    setOpened(false); setError(""); setProgress({ phase: "import", pct: 0, message: "starting" });
+    if (openingRef.current) return; // the sidecar would answer Busy
+    openingRef.current = true; openedRef.current = false;
+    setOpened(false); setError(""); setNotice(""); setProgress(null); setOpening({ path: p, startedAt: Date.now(), cancelling: false });
+    tabs.reset(); setNav(emptyNav); setFn(null); clearFunctionCache(); ++goSeq.current;
     try {
       await rpc.call("open_binary", { path: p });
       const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
-      idxRef.current = new FuncIndex(fl);
-      tabs.reset(); setNav(emptyNav);
-      setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true);
+      setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
       if (!autotestRef.current) window.host.recentAdd(p).catch(() => {});
       return fl;
-    } catch (e) { fail(e); } finally { setProgress(null); }
+    } catch (e) {
+      if (e instanceof RpcError && e.code === -32002) setNotice("Open cancelled."); // not an error
+      else { fail(e); setNotice("Could not open " + p); }
+    } finally { openingRef.current = false; setOpening(null); setProgress(null); }
+  };
+  const cancelOpen = () => {
+    if (!openingRef.current) return;
+    setOpening((o) => (o ? { ...o, cancelling: true } : o));
+    rpc.call("cancel_open", {}).catch(fail);
+  };
+
+  // program_changed: one subscription, all reactions in changes.ts
+  const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
+    if (!openedRef.current) return;
+    clearFunctionCache();
+    onProgramChanged(p, {
+      refetchFunctions: async () => { const fl = await rpc.call("list_functions", {}); setFuncs(fl); return fl; },
+      tabs: () => tabsRef.current().tabs,
+      reloadTab: (id) => tabs.reload(id),
+      refreshListing: () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1 })); },
+      refreshXrefs: () => setXrefVersion((v) => v + 1),
+    }).catch((e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); });
   };
 
   // Monaco token click -> navigate
@@ -82,27 +124,33 @@ export function App() {
   };
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
-  const api = useRef({ go, back, forward, clickAt, open, closeTab: () => goTab(tabs.closeActive()) });
-  api.current = { go, back, forward, clickAt, open, closeTab: tabs.closeActive };
+  const apiNow = { go, back, forward, clickAt, open, cancelOpen, programChanged, closeTab: () => goTab(tabs.closeActive()) };
+  const api = useRef(apiNow);
+  api.current = apiNow;
 
   useEffect(() => {
     (async () => {
       const cfg = await window.host.getConfig();
       await rpc.connect(cfg.port, cfg.token);
       rpc.onNotification = (m, p) => {
-        if (m === "progress") setProgress(p as Progress);
+        if (m === "progress") { if (openingRef.current) setProgress(p as Progress); } // late progress after cancel is dropped
+        else if (m === "program_changed") api.current.programChanged(p as Parameters<typeof onProgramChanged>[0]);
         else if (m === "error") fail((p as { message: string }).message);
       };
       autotestRef.current = !!cfg.autotest;
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
-        open: (p) => api.current.open(p), select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
+        open: (p) => api.current.open(p), cancelOpen: () => api.current.cancelOpen(), cancelFile: cfg.cancelFile,
+        status: () => ({ opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
+        searchAndGo: async (q) => { const h = (await searchSymbols(q, 100)).find((x) => x.kind === "function"); if (!h) return null; await api.current.go(h.address, "search"); return h.address; },
+        select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
         selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
         topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
       });
     })().catch(fail);
     const off = window.host.onMenu((c) => {
-      if (c.type === "open-path") { setPath(c.path); api.current.open(c.path); }
+      if (c.type === "open-path") { if (!openingRef.current) { setPath(c.path); api.current.open(c.path); } }
+      else if (c.type === "search") setSearchOpen(true);
       else if (c.type === "nav-back") api.current.back();
       else if (c.type === "nav-forward") api.current.forward();
       else if (c.type === "goto") setGotoOpen(true);
@@ -120,21 +168,27 @@ export function App() {
   const canBack = nav.back.length > 0, canForward = nav.forward.length > 0;
   useEffect(() => { window.host.setMenuState({ canBack, canForward }).catch(() => {}); }, [canBack, canForward]);
 
+  const progressRef = useRef(progress); progressRef.current = progress;
   const here = nav.current?.address ?? null;
-  const fn = here ? containingFunction(idx, here) : null;
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
 
   return (
     <div className="app">
-      <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened}
+      <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={!!opening}
         onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onOpen={() => open(path)}
         onPick={async () => { const p = await window.host.pickFile(); if (p) { setPath(p); open(p); } }} />
-      {progress && <ProgressBar progress={progress} />}
-      {gotoOpen && opened && <GoTo funcs={funcs} onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
+      {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
+      {searchOpen && opened && <SearchPanel onGo={(a) => go(a, "search")} onClose={() => setSearchOpen(false)} />}
+      {gotoOpen && opened && <GoTo onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
       {opened ? (
         <Panes visible={visible}>{{
-          functions: <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />,
+          functions: (
+            <div className="funcs-col">
+              <FunctionList funcs={funcs} selected={fn?.entry ?? null} onSelect={(e) => go(e, "functions")} onPin={(e) => { void go(e, "functions"); void tabs.show(e, true); }} />
+              <XrefPanel address={here} version={xrefVersion} onGo={(a) => go(a, "xrefs")} />
+            </div>
+          ),
           listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={fail} onRowClick={(a) => go(a, "listing")} />,
           decompiler: (
             <div className="dec">
@@ -148,7 +202,7 @@ export function App() {
             </div>
           ),
         }}</Panes>
-      ) : <div style={{ flex: 1, padding: 16 }}>Open a binary to begin (File → Open Binary…, Cmd+O).</div>}
+      ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O).</p></div>}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} />
     </div>
   );

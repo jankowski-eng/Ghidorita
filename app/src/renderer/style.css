@@ -47,3 +47,25 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .goto input { background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 3px 6px; width: 240px; }
 .goto button { background: none; border: 0; color: #ddd; cursor: pointer; }
 .lbox { outline-offset: -2px; }
+.search { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: 560px; max-width: 90%; z-index: 10; background: #252526; border: 1px solid #555; box-shadow: 0 4px 16px #000a; }
+.search input { width: 100%; box-sizing: border-box; background: #1e1e1e; color: #ddd; border: 0; border-bottom: 1px solid #555; padding: 6px 8px; font: inherit; }
+.search #sym-list { max-height: 320px; overflow: auto; }
+.hit { display: flex; gap: 10px; padding: 2px 8px; cursor: pointer; font: 12px ui-monospace, Menlo, monospace; }
+.hit.cur { background: #094771; } .hit .k { width: 60px; color: #888; } .hit .n { flex: 1; overflow: hidden; text-overflow: ellipsis; } .hit .a { color: #9cdcfe; }
+.msg { padding: 4px 8px; color: #888; }
+.xrefs { height: 170px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #444; }
+.xh { padding: 3px 8px; background: #2d2d30; font-size: 12px; }
+.xl { overflow: auto; flex: 1; }
+.xr { display: block; width: 100%; text-align: left; background: none; border: 0; color: #ddd; padding: 1px 8px; font: 12px ui-monospace, Menlo, monospace; cursor: pointer; }
+.xr:hover { background: #2a2d2e; } .xr .a { color: #9cdcfe; } .xr .t { color: #888; } .xr .f { color: #dcdcaa; }
+.modal { position: fixed; inset: 0; background: #0008; display: flex; align-items: center; justify-content: center; z-index: 20; }
+.card { background: #252526; border: 1px solid #555; padding: 16px 20px; width: 440px; display: flex; flex-direction: column; gap: 6px; }
+.card .title { font-size: 15px; font-weight: 600; } .card .meta { color: #999; }
+.card button { align-self: flex-end; }
+.bar2 { height: 10px; background: #333; overflow: hidden; position: relative; }
+.bar2 > div { height: 100%; background: #0e639c; transition: width .2s; }
+.bar2.indet > div { width: 30%; position: absolute; animation: slide 1.2s linear infinite; }
+@keyframes slide { from { left: -30%; } to { left: 100%; } }
+.notice { padding: 16px; color: #ccc; }
+.funcs-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.funcs-col > .funcs { flex: 1; min-height: 0; }

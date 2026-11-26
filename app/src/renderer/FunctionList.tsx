@@ -1,16 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FunctionInfo, Address } from "../../../protocol";
+import { searchSymbols } from "./symbols";
+import { latest } from "./latest";
+import { useDebounced } from "./hooks";
 
 /** Listbox: click/Enter opens a preview tab, double-click/Shift+Enter pins; arrows move the cursor (also from the filter box). */
 export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: FunctionInfo[]; selected: Address | null; onSelect: (e: Address) => void; onPin: (e: Address) => void }) {
   const [filter, setFilter] = useState("");
-  const shown = useMemo(() => { const f = filter.toLowerCase(); return f ? funcs.filter((x) => x.name.toLowerCase().includes(f)) : funcs; }, [funcs, filter]);
+  const dq = useDebounced(filter.trim(), 150);
+  const [hits, setHits] = useState<FunctionInfo[] | null>(null); // null = no filter: show everything
+  const [err, setErr] = useState("");
+  const run = useRef(latest()).current;
+  useEffect(() => {
+    if (!dq) { run(Promise.resolve(null)); setHits(null); setErr(""); return; }
+    run(searchSymbols(dq, 1000)).then((r) => { if (r) { setErr(""); setHits(r.filter((h) => h.kind === "function").map((h) => ({ name: h.name, entry: h.address, size: 0 }))); } },
+      (e) => setErr(e instanceof Error ? e.message : String(e)));
+  }, [dq, funcs]); // eslint-disable-line
+  const shown = hits ?? funcs;
   const [cursor, setCursor] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: shown.length, getScrollElement: () => ref.current, estimateSize: () => 20, overscan: 10 });
   useEffect(() => { const i = shown.findIndex((f) => f.entry === selected); if (i >= 0) { setCursor(i); v.scrollToIndex(i); } }, [selected]); // eslint-disable-line
-  useEffect(() => setCursor(0), [filter]);
+  useEffect(() => setCursor(0), [hits]);
   const move = (i: number) => { const c = Math.max(0, Math.min(shown.length - 1, i)); setCursor(c); v.scrollToIndex(c); };
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); move(cursor + 1); }
@@ -22,6 +34,7 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
   return (
     <div className="funcs" onKeyDown={onKey}>
       <input aria-label="Filter functions" placeholder={`filter ${funcs.length} functions`} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {err && <div className="err" role="alert">{err}</div>}
       <div className="scroll" ref={ref} style={{ flex: 1 }} role="listbox" tabIndex={0} aria-label="Functions" aria-activedescendant={shown[cursor] ? `fn-${shown[cursor].entry}` : undefined}>
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
           {v.getVirtualItems().map((it) => {

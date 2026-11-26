@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import type { Address, FunctionInfo } from "../../../protocol";
-import { parseGoto } from "./parseGoto";
+import type { Address } from "../../../protocol";
+import { resolveGoto } from "./parseGoto";
+import { searchSymbols } from "./symbols";
 
 /** Go to address bar: Enter navigates, Escape closes, an invalid entry shows an inline error and stays open. */
-export function GoTo({ funcs, onGo, onClose }: { funcs: FunctionInfo[]; onGo: (a: Address) => void; onClose: () => void }) {
+export function GoTo({ onGo, onClose }: { onGo: (a: Address) => void; onClose: () => void }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.focus(), []);
-  const submit = () => {
-    const r = parseGoto(value, funcs);
-    if ("error" in r) setError(r.error); else { onGo(r.address); onClose(); }
+  const submit = async () => {
+    try {
+      const r = await resolveGoto(value, (q) => searchSymbols(q, 100));
+      if ("error" in r) setError(r.error); else { onGo(r.address); onClose(); }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   return (
     <div className="goto" role="dialog" aria-label="Go to address">
