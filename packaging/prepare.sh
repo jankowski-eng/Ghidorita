@@ -32,5 +32,6 @@ rm -rf $B/python/lib/python3.12/test $B/python/lib/python3.12/idlelib $B/python/
 find $B/python -name __pycache__ -prune -exec rm -rf {} +
 
 # --- sidecar
-mkdir -p $B/sidecar; cp sidecar/main.py $B/sidecar/
+mkdir -p $B/sidecar; cp sidecar/main.py $B/sidecar/; cp -R sidecar/ghidrette $B/sidecar/
+find $B/sidecar -name __pycache__ -prune -exec rm -rf {} +
 echo "bundle staged:"; du -sh $B/jdk $B/ghidra $B/python $B/sidecar
