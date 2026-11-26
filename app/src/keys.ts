@@ -14,7 +14,7 @@ export const KEYS: Readonly<Record<string, string>> = {
   "copy:address": "CmdOrCtrl+Shift+C", "copy:bytes": "CmdOrCtrl+Alt+C", // app-only
   "edit:bookmark": "CmdOrCtrl+D",
   "edit:rename": "L", "edit:retype": "CmdOrCtrl+L", "edit:comment": ";", "edit:createFunction": "F", "edit:defineData": "T", "edit:clear": "C",
-  "edit:createStruct": "Shift+[",
+  "edit:defineArray": "[", "edit:definePointer": "P", "edit:repeatData": "Y", "edit:createStruct": "Shift+[",
   graph: "CmdOrCtrl+Space", callgraph: "CmdOrCtrl+Shift+G", // graph: Ghidra's "Toggle Listing and Function Graph"; call graph app-only
   "dock:symbols": "CmdOrCtrl+T", "dock:changes": "CmdOrCtrl+Shift+H", "dock:bookmarks": "CmdOrCtrl+B", "dock:memsearch": "S", // changes app-only
   "nav-back": "Alt+Left", "nav-forward": "Alt+Right", search: "CmdOrCtrl+K", symbolSearch: "CmdOrCtrl+Shift+O", goto: "G", xrefs: "CmdOrCtrl+Shift+F", // search, symbolSearch app-only
@@ -49,7 +49,7 @@ type Hint = [word: string, cmd: MenuCommand];
 const E = (action: Extract<MenuCommand, { type: "edit" }>["action"]): MenuCommand => ({ type: "edit", action });
 // most used first: a narrow window cuts the line from the end (ellipsis), so the rarer keys go first
 const HINTS: Record<"listing" | "decompiler", Hint[]> = {
-  listing: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["comment", E("comment")], ["function", E("createFunction")], ["data", E("defineData")], ["clear", E("clear")]],
+  listing: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["comment", E("comment")], ["function", E("createFunction")], ["data", E("defineData")], ["array", E("defineArray")], ["pointer", E("definePointer")], ["clear", E("clear")]],
   decompiler: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["retype", E("retype")], ["comment", E("comment")]],
 };
 const joined = (hs: Hint[], caps: ReadonlySet<Capability>, mac: boolean) =>

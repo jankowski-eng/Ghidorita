@@ -197,6 +197,8 @@ class Listing:
                 mem.getBytes(ca, buf)
                 b = bytes(x & 0xFF for x in buf)
             row = {"address": key, "length": n, "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
+            if not is_ins:
+                row["dataType"] = str(cu.getDataType().getName())  # "undefined" for an undefined byte
             if n > 16:
                 row["bytesMore"] = n - 16
             if key in marks["bm"]:

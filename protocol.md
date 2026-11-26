@@ -155,6 +155,7 @@ Each edit is one Ghidra transaction, named as the undo label (e.g. "Rename symbo
 - `header` on a function's entry row: `signature`, `convention`, `params` (count), `paramBytes` / `localBytes` (stack frame sizes), `noReturn`, `thunk`.
 - `xrefs` `{count, items}` when memory references point at the address: `count` is the full number, `items` at most 5 (shortcut: the first 5 Ghidra returns, shown ascending by from; the full list is `xrefs_to`), each `{from, kind}`.
 - `bookmarks` `[{category, comment}]` when the user has a `Note` bookmark on the unit (the analyzers' bookmark types are not marked; `list_bookmarks` has them).
+- `dataType` (optional, data rows only; absent on instructions): the data type's name in the form `define_data` takes (`dword`, `char[20]`, `char *`), `undefined` for an undefined byte. The client's Define Array (`[`) uses it.
 - `parts` for defined structure/union/array data: components `{offset, length, type, name, value}` (arrays name elements `[i]`), at most 64 (`partsTotal` is the real count when cut; shortcut: one level, nested composites show as one component with their display value). The client folds them by default.
 Row building stays on thread R and costs a few Ghidra calls per row; bench numbers are in SPIKE_REPORT.
 

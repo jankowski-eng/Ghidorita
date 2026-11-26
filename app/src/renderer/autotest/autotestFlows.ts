@@ -159,7 +159,7 @@ async function browsingFlow(file: string, c: AutotestCtx, result: Record<string,
   if (expectReadOnly) {
     check(!document.querySelector(".dec, .welcome, .xrefs, button[aria-label='Data types']"), "optional views should be absent");
     listing.focus();
-    for (const key of ["l", "t", "x", ";", "c", "f"]) press(listing, key);
+    for (const key of ["l", "t", "p", "y", "[", ";", "c", "f"]) press(listing, key);
     press(listing, "z", { metaKey: true });
     press(listing, "s", { metaKey: true });
     check(!document.querySelector(".dlg"), "editing shortcuts should not open a dialog");

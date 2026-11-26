@@ -92,6 +92,7 @@ export interface ListingRow {
   partsTotal?: number;     // component count when parts is cut (shortcut: first PARTS_MAX = 64)
   bookmarks?: { category: string; comment: string }[]; // the user's own bookmarks (type Note) on this unit; the analyzers' bookmarks are not marked
   bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16; get_bytes has them all)
+  dataType?: string;       // data rows only (absent on instructions): the data type's name as define_data takes it ("dword", "char[20]", "char *"); "undefined" for an undefined byte
 }
 
 export interface FunctionHeader {

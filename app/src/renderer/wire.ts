@@ -41,7 +41,7 @@ const row = shape({
   header: optional(shape({ signature: str, convention: optional(str), params: count, paramBytes: integer, localBytes: integer, noReturn: optional(bool), thunk: optional(bool) })),
   xrefs: optional(shape({ count, items: array(shape({ from: address, kind })) })),
   parts: optional(array(shape({ offset: count, length: count, type: str, name: str, value: str }))),
-  partsTotal: optional(count), bytesMore: optional(count), bookmarks: optional(array(shape({ category: str, comment: str }))),
+  partsTotal: optional(count), bytesMore: optional(count), dataType: optional(str), bookmarks: optional(array(shape({ category: str, comment: str }))),
 });
 
 export const results = {

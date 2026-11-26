@@ -99,3 +99,14 @@ def test_parts_and_xref_caps(sc):
     x = sc.listing_rows("0x500000", 1)[0]["xrefs"]
     assert x["count"] == 8 and len(x["items"]) == 5 and all(i["kind"] == "data" for i in x["items"])
     assert [i["from"] for i in x["items"]] == sorted((i["from"] for i in x["items"]), key=lambda s: int(s, 16))
+
+
+def test_row_data_type(sc):
+    build(sc, "t_dtype", [("ram", 0x600000, bytes(range(64)), False)])
+    sc.define_data("0x600000", "char[4]")
+    sc.define_data("0x600008", "dword")
+    sc.define_data("0x600010", "pointer")
+    rows = {r["address"]: r for r in sc.listing_rows("0x600000", 32)}
+    assert rows["0x600000"]["dataType"] == "char[4]"
+    assert rows["0x600008"]["dataType"] == "dword" and rows["0x600010"]["dataType"] == "pointer"
+    assert rows["0x600004"]["dataType"] == "undefined"  # an undefined byte

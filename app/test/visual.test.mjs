@@ -41,7 +41,7 @@ test("key table: every key is used once, and every command-bar action with a key
 });
 
 test("hint bar lists the keys of the focused view and only what the capabilities allow", () => {
-  assert.equal(hintLine("listing", ALL, true), "L rename · ⌘⇧F refs · ⌘Space graph · ; comment · F function · T data · C clear");
+  assert.equal(hintLine("listing", ALL, true), "L rename · ⌘⇧F refs · ⌘Space graph · ; comment · F function · T data · [ array · P pointer · C clear");
   assert.equal(hintLine("decompiler", ALL, true), "L rename · ⌘⇧F refs · ⌘Space graph · ⌘L retype · ; comment");
   assert.equal(hintLine("decompiler", ALL, false), "L rename · Ctrl+Shift+F refs · Ctrl+Space graph · Ctrl+L retype · ; comment");
   assert.equal(hintLine("graph", ALL, true), "⌘Space back · wheel zoom · drag pan · Fit · 1:1");
