@@ -132,7 +132,13 @@ class Edits:
             dt = arrays(dt)
             if dt is None:
                 return None
-            dt = PointerDataType(dt, int(s[1:]) // 8) if len(s) > 1 else PointerDataType(dt)  # "*32": an explicit width in bits
+            if len(s) > 1:  # "*32": an explicit width in bits, as Ghidra's parser accepts it
+                bits = int(s[1:])
+                if bits % 8 or not 8 <= bits <= 64:
+                    raise RpcError(INVALID, "pointer width %d is not a multiple of 8 bits between 8 and 64" % bits)
+                dt = PointerDataType(dt, bits // 8)
+            else:
+                dt = PointerDataType(dt)
         return arrays(dt)
 
     @rpc(lane="R")

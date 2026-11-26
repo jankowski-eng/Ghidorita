@@ -136,6 +136,11 @@ def test_row_data_type_same_name_in_two_categories(sc):
     # consecutive array suffixes reverse like Ghidra's name parser: qualified and unqualified give the same layout
     sc.define_data("0x6100a0", "/A/S *32")  # an explicit 4-byte pointer keeps its width in the reference
     assert sc.listing_rows("0x6100a0", 1)[0]["length"] == 4 and sc.listing_rows("0x6100a0", 1)[0]["dataType"] == "/A/S *32"
+    import pytest
+    from ghidorita.core.errors import RpcError
+    for bad in ("/A/S *33", "/A/S *0", "/A/S *72"):
+        with pytest.raises(RpcError):
+            sc.define_data("0x6100c0", bad)
     sc.define_data("0x6100b0", "/A/S *32[2]")
     assert sc.listing_rows("0x6100b0", 1)[0]["length"] == 8
     sc.define_data("0x610030", "/A/S[2][3]")
