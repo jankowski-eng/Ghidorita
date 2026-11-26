@@ -26,6 +26,7 @@ export const ErrorCode = {
   Timeout: -32003,
   NotFound: -32004,
   Busy: -32005,            // open_binary in progress (or a second open_binary)
+  ProjectLocked: -32006,   // another sidecar holds the projects dir
   InvalidArgument: -32602, // bad/missing params, unparsable type or signature, invalid name
   Internal: -32603,
   MethodNotFound: -32601,
@@ -76,7 +77,7 @@ export interface AddrRange {
 export interface Methods {
   open_binary: { params: { path: string } & ImportOptions; result: { programId: string; name: string; persisted: boolean } };
   cancel_open: { params: {}; result: { cancelled: boolean } };
-  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[] } };
+  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[]; sizeBytes: number } };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
   list_programs: { params: {}; result: ProgramEntry[] };
@@ -97,15 +98,18 @@ export interface Methods {
   list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string }; result: { total: number; items: StringItem[] } };
   search_memory: { params: SearchMemoryParams; result: { items: MemoryHit[]; next: Address | null } };
   cancel_search: { params: { id: number }; result: { cancelled: boolean } };
+  get_comments: { params: { address: Address }; result: Partial<Record<CommentKind, string>> }; // only kinds that are set; NotFound if no code unit
   list_data_types: { params: { query: string; limit?: number }; result: DataTypeHit[] };
   undo_state: { params: {}; result: UndoState };
   // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
   rename_symbol: { params: { address: Address; newName: string }; result: {} };
+  create_label: { params: { address: Address; name: string }; result: {} }; // where no symbol exists; InvalidArgument if one does (use rename_symbol)
   set_comment: { params: { address: Address; kind: CommentKind; text: string }; result: {} }; // empty text clears
   create_function: { params: { address: Address; name?: string }; result: { entry: Address; name: string } };
   set_function_signature: { params: { entry: Address; signature: string }; result: {} };
-  rename_variable: { params: { entry: Address; name: string; newName: string }; result: {} };
-  retype_variable: { params: { entry: Address; name: string; dataType: string }; result: {} };
+  // rename/retype_variable decompile first (thread R): Timeout after timeoutSecs (default 30), cancellable with cancel_decompile {id}
+  rename_variable: { params: { entry: Address; name: string; newName: string; timeoutSecs?: number }; result: {} };
+  retype_variable: { params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }; result: {} };
   undo: { params: {}; result: UndoState };
   redo: { params: {}; result: UndoState };
   // define_data: Ghidra's CreateDataCmd (clears conflicting code/data at the target); dataType is a name or path ("int", "char[4]", "/dword"). InvalidArgument for unknown/dynamic types or no room.
@@ -123,7 +127,9 @@ export interface ImportOptions {
   language?: string;      // Ghidra LanguageID, e.g. "ARM:LE:32:v8"
   compilerSpec?: string;  // CompilerSpecID, e.g. "default"; defaults to the language's default spec
   baseAddress?: Address;  // hex "0x08000000"; only for candidates with acceptsBaseAddress
+  profile?: AnalysisProfile; // not an import option: omitted = SIDECAR_ANALYSIS_DISABLE or full; "fast" skips Call Convention ID, Decompiler Switch Analysis, Stack (own persistence key)
 }
+export type AnalysisProfile = "full" | "fast";
 export interface ImportCandidate {
   loader: string;
   language: string | null;      // null = the loader needs the user to pick one (Raw Binary); see list_languages

@@ -8,7 +8,7 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-let S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map() };
+let S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map() };
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
 const VARS = { param_1: "int", param_2: "char *", iVar1: "int" };
@@ -22,7 +22,7 @@ const idxOfEntry = (n) => { const d = n - BASE; return d >= 0 && d % STEP === 0 
 const validName = (n) => { if (typeof n !== "string" || !/^[A-Za-z_][A-Za-z0-9_.$]*$/.test(n)) bad("invalid name"); return n; };
 const taken = (n) => {
   const m = /^fn_(\d+)$/.exec(n), j = n === "entry" ? 0 : n === "main" ? 1 : m ? +m[1] : -1;
-  return (j >= 0 && j < NFUNC && nameOf(j) === n) || [...S.names.values(), ...S.created.values()].includes(n);
+  return (j >= 0 && j < NFUNC && nameOf(j) === n) || [...S.names.values(), ...S.created.values(), ...S.labels.values()].includes(n);
 };
 const v = (i, o) => S.vars.get(`${i}|${o}`) ?? o;
 const ty = (i, o) => S.types.get(`${i}|${o}`) ?? VARS[o];
@@ -64,6 +64,7 @@ const row = (idx) => {
   const dd = S.data.get(BASE + idx * STRIDE);
   if (dd) { r.mnemonic = dd.mnemonic; r.length = dd.length; r.operands = ""; }
   if (S.created.has(BASE + idx * STRIDE)) r.label = S.created.get(BASE + idx * STRIDE);
+  if (S.labels.has(BASE + idx * STRIDE)) r.label = S.labels.get(BASE + idx * STRIDE);
   const ov = COMMENT_KINDS.map((k) => S.comments.get(`${BASE + idx * STRIDE}|${k}`)).find(Boolean);
   if (ov) r.comment = ov;
   else if (idx % 50 === 7 && !S.comments.has(`${BASE + idx * STRIDE}|eol`)) r.comment = `note ${idx}`;
@@ -109,6 +110,7 @@ const symbols = () => {
   for (let k = 0; k < 20; k++) out.push({ name: `imp_${k}`, address: null, kind: "external", namespace: "libc.so", source: "imported" });
   return out;
 };
+const HUGE = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false, opening = false, openCancelled = false, openId = null;
 // Project contents (fake). Seeded so the welcome pane has something to show.
@@ -124,6 +126,8 @@ const LANGS = [
 const hexAddr = (a) => { if (typeof a !== "string" || !/^0x[0-9a-f]+$/i.test(a) || BigInt(a) >= 2n ** 64n) bad("baseAddress"); return "0x" + BigInt(a).toString(16); };
 const optsOf = (p) => {
   const o = {};
+  if (p.profile !== undefined && p.profile !== "full" && p.profile !== "fast") bad("profile");
+  if (p.profile === "fast") o.profile = "fast";
   for (const k of ["loader", "language", "compilerSpec"]) if (p[k] !== undefined) { if (typeof p[k] !== "string" || !p[k]) bad(k); o[k] = p[k]; }
   if (p.language !== undefined && !LANGS.some((l) => l.id === p.language)) bad("language");
   if (p.baseAddress !== undefined) o.baseAddress = hexAddr(p.baseAddress);
@@ -131,12 +135,12 @@ const optsOf = (p) => {
 };
 const idFor = (path, o) => { // not a real hash: the mock only needs distinct keys
   const base = "mock:" + path;
-  return Object.keys(o).length ? base + "-" + [o.loader, o.language, o.compilerSpec, o.baseAddress].map((x) => x ?? "").join("|") : base;
+  return Object.keys(o).length ? base + "-" + [o.loader, o.language, o.compilerSpec, o.baseAddress, o.profile].map((x) => x ?? "").join("|") : base;
 };
 // like the sidecar: edits are written to the program's stored state on save, on close and when another open replaces it
 const stored = new Map(); // programId -> saved S
 const autosave = () => { if (opened && openId) stored.set(openId, structuredClone(S)); };
-const resetProgram = () => { autosave(); S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map() }; undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+const resetProgram = () => { autosave(); S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map() }; undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
 const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
@@ -144,8 +148,9 @@ const handlers = {
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
     if (/missing/.test(path)) throw { code: -32004, message: "NotFound" }; // mock: paths containing "missing"
-    if (/\.(bin|rom|img)$/i.test(path)) return { candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
-    return { candidates: [
+    const sizeBytes = /big/.test(path) ? 30 * 1048576 : 4096; // mock: paths containing "big" are 30 MB (the UI defaults those to the fast profile)
+    if (/\.(bin|rom|img)$/i.test(path)) return { sizeBytes, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
+    return { sizeBytes, candidates: [
       { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", preferred: true, acceptsBaseAddress: true },
       { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", preferred: false, acceptsBaseAddress: true },
       { loader: "Raw Binary", language: null, compilerSpec: null, preferred: false, acceptsBaseAddress: true }] };
@@ -158,6 +163,7 @@ const handlers = {
     return {};
   },
   list_programs() {
+    if (process.env.MOCK_LOCKED === "1") throw { code: -32006, message: "projects dir in use by another Ghidrette (mock)" };
     if (opening) throw { code: -32005, message: "Busy" };
     return [...programs.values()].sort((a, b) => (b.lastOpened ?? "").localeCompare(a.lastOpened ?? ""));
   },
@@ -195,21 +201,25 @@ const handlers = {
   },
   cancel_open() { const c = opening && !openCancelled; if (c) openCancelled = true; return { cancelled: c }; },
   list_functions() {
-    const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: STEP }));
+    // fn_2 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
+    // get_function_at keeps the real STEP so address-to-function lookups stay consistent
+    const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP }));
     for (const [a, name] of S.created) out.push({ name, entry: hex(a), size: STRIDE * 4 });
     return out.sort((x, y) => parseInt(x.entry, 16) - parseInt(y.entry, 16));
   },
-  decompile({ entry }, notify, rid) {
+  decompile({ entry, timeoutSecs }, notify, rid) {
     const n = parseAddr(entry), i = idxOfEntry(n);
     if (i < 0 && !S.created.has(n)) throw { code: -32004, message: "NotFound" };
+    const slow = i === HUGE && (timeoutSecs ?? 30) < 100; // the huge function times out unless the client asks for a long timeout
     return new Promise((resolve, reject) => {
       const done = () => {
         cancels.delete(rid);
+        if (slow) return reject({ code: -32003, message: `decompile timed out after ${timeoutSecs ?? 30}s` });
         if (i < 0) return resolve({ text: `void ${S.created.get(n)}(void)\n{\n  return;\n}`, tokens: [], cached: false });
         const cached = decompCache.has(i); decompCache.add(i);
         resolve({ ...decompile(i), cached });
       };
-      const t = setTimeout(done, i >= 0 && decompCache.has(i) ? 5 : 150);
+      const t = setTimeout(done, slow ? 400 : i >= 0 && decompCache.has(i) ? 5 : 150);
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },
@@ -259,6 +269,7 @@ const handlers = {
     const c = CALLS.find((c) => n === BASE + i * STEP + c[2] * STRIDE);
     if (c) return [{ to: entryOf(calleeOf(i, c)), type: c[3], kind: refKind(c[3]), target: "memory" }];
     if (n === BASE + i * STEP + 4 * STRIDE) return [{ to: null, type: "READ", kind: "read", target: "stack", label: "Stack[-0x10]" }];
+    if (n === BASE + i * STEP + 9 * STRIDE) return [{ to: null, type: "COMPUTED_CALL", kind: "call", target: "external", label: "LIBMOCK.DLL::ext_" + i }]; // an import, like the PE case
     return [];
   },
   list_strings({ offset, limit, minLength, query }) {
@@ -324,14 +335,30 @@ const handlers = {
     if (typeof query !== "string") bad("query");
     return DATA_TYPES.filter((d) => d.name.includes(query.toLowerCase())).slice(0, parseInt0(limit, 50, "limit"));
   },
+  get_comments({ address }) {
+    const n0 = parseAddr(address);
+    if (n0 < BASE || n0 >= BASE + ROWS * STRIDE) nf();
+    const n = BASE + Math.floor((n0 - BASE) / STRIDE) * STRIDE, idx = (n - BASE) / STRIDE, out = {};
+    for (const k of COMMENT_KINDS) { const t = S.comments.get(`${n}|${k}`); if (t) out[k] = t; }
+    if (idx % 50 === 7 && !S.comments.has(`${n}|eol`)) out.eol = `note ${idx}`; // the seeded EOL comments of row()
+    return out;
+  },
   undo_state: () => undoState(),
   // ---- edits ----
   rename_symbol({ address, newName }, notify) {
     const n = parseAddr(address), i = idxOfEntry(n);
-    if (i < 0 && !S.created.has(n)) nf();
+    if (i < 0 && !S.created.has(n) && !S.labels.has(n)) nf();
     validName(newName);
-    if (newName !== (i >= 0 ? nameOf(i) : S.created.get(n)) && taken(newName)) bad("duplicate name");
-    return edit("Rename symbol", notify, [{ start: hex(n), end: hex(n) }], ["symbol"], () => { i >= 0 ? S.names.set(i, newName) : S.created.set(n, newName); });
+    if (newName !== (i >= 0 ? nameOf(i) : S.created.get(n) ?? S.labels.get(n)) && taken(newName)) bad("duplicate name");
+    return edit("Rename symbol", notify, [{ start: hex(n), end: hex(n) }], ["symbol"], () => { i >= 0 ? S.names.set(i, newName) : S.created.has(n) ? S.created.set(n, newName) : S.labels.set(n, newName); });
+  },
+  create_label({ address, name }, notify) {
+    const n = parseAddr(address);
+    validName(name);
+    if (n < BASE || n >= BASE + ROWS * STRIDE) bad("address not in memory");
+    if (idxOfEntry(n) >= 0 || S.created.has(n) || S.labels.has(n)) bad("a label already exists here (use rename_symbol)");
+    if (taken(name)) bad("duplicate name");
+    return edit("Create label", notify, [{ start: hex(n), end: hex(n) }], ["symbol"], () => { S.labels.set(n, name); });
   },
   set_comment({ address, kind, text }, notify) {
     const n = parseAddr(address);
@@ -351,14 +378,16 @@ const handlers = {
     if (typeof signature !== "string" || !/^[A-Za-z_][\w\s*]*\([^()]*\)\s*;?$/.test(signature.trim())) bad("signature");
     return edit("Set function signature", notify, [fnRange(i)], ["function", "type"], () => { S.sigs.set(i, signature.trim()); });
   },
-  rename_variable({ entry, name, newName }, notify) {
+  rename_variable({ entry, name, newName, timeoutSecs }, notify) {
+    parseInt0(timeoutSecs, 30, "timeoutSecs");
     const i = idxOfEntry(parseAddr(entry)), o = Object.keys(VARS).find((o) => i >= 0 && v(i, o) === name);
     if (!o) nf();
     validName(newName);
     if (Object.keys(VARS).some((x) => v(i, x) === newName && x !== o)) bad("duplicate name");
     return edit("Rename variable", notify, [fnRange(i)], ["function"], () => { S.vars.set(`${i}|${o}`, newName); });
   },
-  retype_variable({ entry, name, dataType }, notify) {
+  retype_variable({ entry, name, dataType, timeoutSecs }, notify) {
+    parseInt0(timeoutSecs, 30, "timeoutSecs");
     const i = idxOfEntry(parseAddr(entry)), o = Object.keys(VARS).find((o) => i >= 0 && v(i, o) === name);
     if (!o) nf();
     const d = DATA_TYPES.find((d) => d.name === dataType);
