@@ -36,3 +36,12 @@ export async function resolveGoto(input: string, search: Search): Promise<GotoRe
   const h = pickHit(hits, s);
   return h ? { address: h.address } : { error: `no symbol named ${s}` };
 }
+
+/** Sync address check for the command bar: "0x..." or a space-qualified address; bare hex stays a name search (it may be a symbol). */
+export const addressOf = (input: string): Address | null => {
+  const s = input.trim();
+  if (/^0x/i.test(s)) { if (!HEX.test(s)) return null; const r = norm(s); return "address" in r ? r.address : null; }
+  if (!QUAL.test(s)) return null;
+  const r = qual(s);
+  return "address" in r ? r.address : null;
+};

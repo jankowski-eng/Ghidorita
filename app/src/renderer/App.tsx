@@ -36,7 +36,6 @@ import { DataTypes } from "./DataTypes";
 import type { CommentKind, UndoState } from "../../../protocol";
 
 export function App() {
-  const [path, setPath] = useState("");
   const [progress, setProgress] = useState<Progress | null>(null);
   const [opened, setOpened] = useState(false);
   const [funcs, setFuncs] = useState<FunctionInfo[]>([]);
@@ -167,7 +166,7 @@ export function App() {
   // Open entry point for Open, Open Recent and the path box: pick import options first. Unsaved edits of the open program are autosaved by the sidecar when it is replaced.
   const requestOpen = (p: string) => {
     if (openingRef.current || importRef.current) return;
-    importRef.current = true; setPath(p); setImportFor(p);
+    importRef.current = true; setImportFor(p);
   };
   const confirmImport = async (p: string, opts: ImportOptions | undefined) => {
     importRef.current = false; setImportFor(null);
@@ -178,7 +177,7 @@ export function App() {
     const r = reopenParams(e);
     if (!r) { setProgs((x) => ({ ...x, error: `${e.name} has no stored source path; open the file with File > Open.` })); return; }
     const { path: p, ...o } = r;
-    setPath(p); void open(p, o);
+    void open(p, o);
   };
   const closeProgram = async () => {
     if (!openedRef.current || openingRef.current) return;
@@ -396,7 +395,7 @@ export function App() {
         open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile, only: cfg.only, flow: cfg.flow,
         status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
         select: async (e) => { await api.current.go(e, "functions"); }, goAddr: async (a) => { await api.current.go(a, "goto"); }, clickAt: (l, c) => api.current.clickAt(l, c),
-        back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
+        back: () => api.current.back(), forward: () => api.current.forward(), fail, errors: errors.current,
         selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
         editor: () => editorRef.current, menu: (id) => window.host.autotestMenu(id), expect: cfg.expect, funcCount: () => funcsCountRef.current, topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
       });
@@ -456,8 +455,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={busy}
-        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onTypes={() => { if (openedRef.current) setTypesOpen((o) => !o); }} typesOpen={typesOpen} onOpen={() => requestOpen(path)}
+      <Toolbar canCommand={opened} busy={busy} onCommand={() => setSearchOpen(true)}
         onPick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(p); }} />
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
       {importFor && !opening && <ImportDialog key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
@@ -491,7 +489,8 @@ export function App() {
       ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
         <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
       {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} />}
-      <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash} />
+      <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash}
+        back={[...nav.back].reverse().map((l) => l.address)} forward={[...nav.forward].reverse().map((l) => l.address)} onBack={back} onForward={forward} />
       {typesOpen && opened && <DataTypes version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}
       {dlg && <EditDialog spec={dlg.spec} onSubmit={dlg.submit} onClose={() => setDlg(null)} />}
       {formDlg && <FormDialog title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} onSubmit={formDlg.go} onClose={() => setFormDlg(null)} />}

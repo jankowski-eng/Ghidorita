@@ -34,7 +34,6 @@ export interface AutotestCtx {
   funcCount(): number;
   errors: string[];
   fail(e: unknown): void;
-  setPath(p: string): void;
   /** the same handler the application menu's commands end in (main only forwards the click) */
   command(c: MenuCommand): void;
   lastMenu(): MenuState | null;
@@ -76,7 +75,6 @@ export async function runAutotest(file: string, c: AutotestCtx) {
     }
     let persist: unknown;
     try {
-      c.setPath(file);
       if (c.only === "addr") {
         await c.open(file);
         result.ok = (await runAddrFlow(file, await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
@@ -90,8 +88,8 @@ export async function runAutotest(file: string, c: AutotestCtx) {
         return window.host.autotestDone(result);
       }
       if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again, all through the UI
-        const openViaUi = async () => { // path box + Enter, then Enter in the import dialog (defaults)
-          const i = document.querySelector<HTMLInputElement>('input[aria-label="Binary path"]')!; typeInto(i, c.cancelFile!); press(i, "Enter");
+        const openViaUi = async () => { // the open-path command (File > Open Recent), then Enter in the import dialog (defaults)
+          c.command({ type: "open-path", path: c.cancelFile! });
           const d = await waitFor(() => byLabel("dialog", "Import binary"), 10000, "import dialog");
           await waitFor(() => !d.querySelector<HTMLButtonElement>("button.primary")!.disabled, 10000, "import dialog ready");
           press(d.querySelector<HTMLElement>('[aria-label="Loader"]')!, "Enter");
@@ -143,7 +141,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.afterForwardTop = c.topAddr();
       // symbol search through the real panel: click Search, type, wait for hits, press Enter; focus must come back
       const q = fl[Math.min(5, fl.length - 1)].name;
-      const sbtn = button("Search symbols")!; sbtn.focus(); sbtn.click();
+      const sbtn = button("Open binary")!; sbtn.focus(); c.command({ type: "search" });
       const box = await waitFor(() => document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Symbol or action"]'), 5000, "search panel");
       typeInto(box, q);
       const opt = await waitFor(() => document.querySelector<HTMLElement>('#sym-list [role="option"][aria-selected="true"]'), 5000, "search results");
@@ -281,7 +279,6 @@ export async function runBench(file: string, c: AutotestCtx) {
     (async () => { let last = performance.now(); while (running) { const n = await frame(); gaps.push(n - last); last = n; } })();
     const frames = () => { const g = gaps; gaps = []; return { frames: g.length, ...summ(g) }; };
     try {
-      c.setPath(file);
       const t0 = performance.now();
       const fl = await c.open(file);
       result.openMs = Math.round(performance.now() - t0);

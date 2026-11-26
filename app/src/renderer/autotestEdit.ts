@@ -148,7 +148,6 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
   const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; auto?: string } };
-  c.setPath(file);
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
   const f = await rpc.call("get_function_at", { address: x.entry });

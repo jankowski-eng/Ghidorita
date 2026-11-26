@@ -11,3 +11,14 @@ test("empty query lists everything, words match in any order", () => {
   assert.deepEqual(matchActions("TABLE symbol").map((a) => a.label), ["Symbol Table"]);
   assert.deepEqual(matchActions("nope"), []);
 });
+
+const { addressOf } = await import("data:text/javascript," + encodeURIComponent((await (await import("esbuild")).build({ entryPoints: [new URL("../src/renderer/parseGoto.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false })).outputFiles[0].text));
+
+test("addressOf: 0x and qualified addresses go to the bar's Go-to row, bare words and bare hex stay names", () => {
+  assert.equal(addressOf("0x00401000"), "0x401000");
+  assert.equal(addressOf(" 0X1F "), "0x1f");
+  assert.equal(addressOf("code:1000"), "code:1000");
+  assert.equal(addressOf("main"), null);
+  assert.equal(addressOf("add"), null);
+  assert.equal(addressOf("0xzz"), null);
+});
