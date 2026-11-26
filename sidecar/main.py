@@ -10,10 +10,11 @@ from collections import OrderedDict
 
 from ghidrette.core.args import hx, lim, name_arg, text_arg
 from ghidrette.core.context import Ctx
-from ghidrette.core.lanes import Job, Opening, Scan
+from ghidrette.core.lanes import Opening
+from ghidrette.core.rpc import Dispatcher, Registry, rpc
 from ghidrette.core.server import Server
 from ghidrette.core.session import undo_state
-from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_METHOD, NO_PROGRAM, NOT_FOUND,
+from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_PROGRAM, NOT_FOUND,
                                    PROJECT_LOCKED, TIMEOUT, RpcError, log)
 
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
@@ -54,7 +55,9 @@ class Sidecar:
         self.snap_lock = threading.Lock()
         ctx.events.subscribe(self._invalidate)
         ctx.shutdown_hooks += [lambda: self._close(), self._close_project]
-        self.server = Server(ctx, self.handle)
+        self.registry = Registry()
+        self.registry.register(self)
+        self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)
         ctx.lanes.start()
 
     def _invalidate(self, kinds, ranges, broad):
@@ -163,6 +166,7 @@ class Sidecar:
             self.sc.proj_lock.release()
 
     # ---- import options / program browser (thread R, Busy during an open) ----
+    @rpc(lane="project", busy_ok=True)
     def list_languages(self):
         from ghidra.program.util import DefaultLanguageService
         out = []
@@ -173,6 +177,7 @@ class Sidecar:
         out.sort(key=lambda o: o["id"])
         return out
 
+    @rpc(lane="project")
     def import_candidates(self, path):
         from java.io import File
         from ghidra.app.util.importer import LoadSpecChooser
@@ -208,6 +213,7 @@ class Sidecar:
             finally:
                 p.close()
 
+    @rpc(lane="project")
     def list_programs(self):
         with self._ProjGuard(self):
             meta, out = self._meta_load(), []
@@ -223,6 +229,7 @@ class Sidecar:
             out.sort(key=lambda e: e.get("lastOpened", ""), reverse=True)
             return out
 
+    @rpc(lane="project")
     def delete_program(self, programId):
         text_arg(programId, "programId")
         with self._ProjGuard(self):
@@ -237,6 +244,7 @@ class Sidecar:
                 self._meta_save(meta)
         return {}
 
+    @rpc(lane="project")
     def close_program(self):
         if self.opening is not None:
             raise RpcError(BUSY, "open_binary in progress")
@@ -299,6 +307,7 @@ class Sidecar:
                 log("%s save took %.2fs" % (why, time.monotonic() - t0))
             return True
 
+    @rpc(lane="R")
     def save(self):
         prog = self.need()
         saved = self._save_program(prog, "save")
@@ -377,6 +386,7 @@ class Sidecar:
         canon = json.dumps(c, separators=(",", ":"))
         return sha + "-" + hashlib.sha256(canon.encode()).hexdigest()[:12]
 
+    @rpc(lane="open")
     async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None):
         text_arg(path, "path")
         if self.opening is not None:
@@ -589,6 +599,7 @@ class Sidecar:
             self.cache_ver += 1  # also stops in-flight decompiles from storing a pre-edit result
 
     # ---- reads (thread R) ----
+    @rpc(lane="R")
     def list_functions(self):
         out = []
         dspace = self.need().getAddressFactory().getDefaultAddressSpace()
@@ -602,6 +613,7 @@ class Sidecar:
         out.sort()
         return [{"name": n, "entry": hx(o), "size": int(s)} for o, n, s in out]
 
+    @rpc(lane="R")
     def get_function_at(self, address):
         prog = self.need()
         f = prog.getFunctionManager().getFunctionContaining(self.addr(address))
@@ -647,6 +659,7 @@ class Sidecar:
             return "data" if d is not None else "label"
         return "other"
 
+    @rpc(lane="scan")
     def search_symbols(self, query, limit=100, scan=None):
         """Name substring match (also a hex address: symbols there, else a bare hit if mapped). The match runs inside Ghidra
         (SymbolTable.getSymbolIterator with a glob, so `*`/`?` in the query are wildcards): only hits cross into Python.
@@ -707,6 +720,7 @@ class Sidecar:
             return ("" if ns.isGlobal() else str(ns.getName(True)).lower(), name)
         return (self.SOURCES.get(str(s.getSource()), "other"), name)
 
+    @rpc(lane="scan")
     def list_symbols(self, offset=0, limit=100, query="", kinds=None, sort="address", desc=False, scan=None):
         """One page of the symbol table, in `sort` order. `total` counts all rows after the filters.
         Default view (address order, no filter): the Ghidra by-address iterator is advanced lazily and kept, so page 1 costs `limit` rows
@@ -793,6 +807,7 @@ class Sidecar:
             o["function"] = str(f.getName())
         return o
 
+    @rpc(lane="R")
     def xrefs_to(self, address, limit=500):
         """Memory references to `address` (calls, jumps, data reads/writes, pointers). Stack/register references target variables: see xrefs_to_variable."""
         prog = self.need()
@@ -805,6 +820,7 @@ class Sidecar:
         out.sort(key=lambda o: _akey(o["from"]))
         return out
 
+    @rpc(lane="R")
     def xrefs_to_variable(self, entry, name, limit=500):
         """References to a stack or register variable of the function at `entry` that the program has (a parameter or a stack local such as
         `param_1`, `local_10`, or one the user renamed), found by name. A variable the decompiler invents (`iVar1`, a register temporary)
@@ -825,6 +841,7 @@ class Sidecar:
         out.sort(key=lambda o: _akey(o["from"]))
         return out
 
+    @rpc(lane="R")
     def xrefs_from(self, address):
         prog = self.need()
         a = self.addr(address)
@@ -862,6 +879,7 @@ class Sidecar:
                     items.append({"address": fa(d.getMinAddress()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
         return items
 
+    @rpc(lane="scan")
     def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
         """Defined strings in address order. The full scan is cached per `minLength` until the next program change (first call on a
         big binary takes seconds, on a scan worker); `query` is a case-insensitive substring filter over the cached values; `total` is the
@@ -878,6 +896,7 @@ class Sidecar:
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
 
+    @rpc(lane="scan")
     def search_memory(self, pattern, kind="bytes", encoding="ascii", caseSensitive=True, start=None, limit=1000, scan=None):
         """Ghidra's memory search (ghidra.features.base.memsearch: UserInputByteMatcher + MemorySearcher, what the GUI's Search Memory uses) over
         the loaded, initialized address set, ascending, from `start` (default: the first address). kind "bytes": hex with wildcards ("48 8b ?? 24",
@@ -929,6 +948,7 @@ class Sidecar:
                 last = ad
             return {"items": items, "next": None if done or last is None else fa(last.next() or last)}
 
+    @rpc(lane="R")
     def list_data_types(self, query, limit=100):
         from ghidra.program.model.data import BuiltInDataTypeManager
         prog = self.need()
@@ -968,10 +988,12 @@ class Sidecar:
             return BuiltInDataTypeManager.getDataTypeManager()
         raise RpcError(INVALID, "unknown data type source %r" % (source,))
 
+    @rpc(lane="R")
     def dt_sources(self):
         return [{"id": "program", "name": str(self.need().getName()), "writable": True},
                 {"id": "builtin", "name": "BuiltInTypes", "writable": False}]
 
+    @rpc(lane="R")
     def dt_children(self, source="program", path="/"):
         from ghidra.program.model.data import CategoryPath
         dtm = self._dtm(source)
@@ -988,6 +1010,7 @@ class Sidecar:
             raise RpcError(NOT_FOUND, "no %s %s" % (what, path))
         return dt
 
+    @rpc(lane="R")
     def get_data_type(self, path, source="program"):
         dtm = self._dtm(source)
         dt = self._get_dt(dtm, path)
@@ -1043,6 +1066,7 @@ class Sidecar:
             raise RpcError(INVALID, "%s is a %s, not a %s" % (path, self._dt_kind(dt), "/".join(kinds)))
         return dtm, dt
 
+    @rpc(lane="R")
     def create_data_type(self, kind, name=None, category="/", size=None, base=None):
         from ghidra.program.model.data import (CategoryPath, DataTypeConflictHandler, EnumDataType, PointerDataType,
                                                StructureDataType, TypedefDataType, UnionDataType)
@@ -1079,6 +1103,7 @@ class Sidecar:
         self.edit("Create %s %s" % (kind, name or "pointer"), go)
         return out
 
+    @rpc(lane="R")
     def delete_data_type(self, path, category=False):
         from ghidra.program.model.data import CategoryPath
         from ghidra.util.task import TaskMonitor
@@ -1096,6 +1121,7 @@ class Sidecar:
         self.edit("Delete %s" % path, go)
         return {}
 
+    @rpc(lane="R")
     def rename_data_type(self, path, newName):
         dtm = self.need().getDataTypeManager()
         dt = self._get_dt(dtm, path)
@@ -1107,6 +1133,7 @@ class Sidecar:
     def _comp_len(c):  # -1 = rely on the type's own size (fixed length); dynamic types need the explicit length
         return -1 if c.getDataType().getLength() > 0 else int(c.getLength())
 
+    @rpc(lane="R")
     def edit_struct(self, path, op):
         dtm, dt = self._writable_dt(path, ("struct", "union"))
         is_struct = self._dt_kind(dt) == "struct"
@@ -1196,6 +1223,7 @@ class Sidecar:
             raise RpcError(INVALID, "bad enum value %r" % (v,))
         return i - (1 << 64) if i >= 1 << 63 else i  # Java long
 
+    @rpc(lane="R")
     def edit_enum(self, path, op):
         dtm, dt = self._writable_dt(path, ("enum",))
         if not isinstance(op, dict):
@@ -1230,6 +1258,7 @@ class Sidecar:
         self.edit("Edit %s: %s" % (dt.getName(), o), go)
         return {}
 
+    @rpc(lane="R")
     def create_struct_from_data(self, address, length, name, category="/", apply=True):
         from ghidra.app.cmd.data import CreateDataCmd
         from ghidra.program.model.data import CategoryPath, DataTypeConflictHandler, StructureDataType
@@ -1264,9 +1293,11 @@ class Sidecar:
             self.ctx.events.record({"data"}, [(a.getOffset(), a.getOffset() + length - 1)])
         return {"path": str(dtm.getDataType(cp, name).getPathName())}
 
+    @rpc(lane="R")
     def undo_state(self, prog=None):
         return undo_state(prog or self.need())
 
+    @rpc(lane="R")
     def listing_info(self):
         prog = self.need()
         f = self.fmtr(prog)
@@ -1274,72 +1305,7 @@ class Sidecar:
         ranges = [{"start": f(r.getMinAddress()), "size": int(r.getLength())} for r in prog.getMemory().getLoadedAndInitializedAddressSet().getAddressRanges(True)]
         return {"ranges": ranges, "totalBytes": sum(r["size"] for r in ranges)}
 
-    @staticmethod
-    def _view(loaded, a, fwd):
-        """The loaded set clipped to [a, end] (forward) or [start, a) (backward), across address spaces (AddressSet ranges cannot span spaces)."""
-        from ghidra.program.model.address import AddressSet
-        out = AddressSet()
-        for r in loaded.getAddressRanges(True):
-            mn, mx = r.getMinAddress(), r.getMaxAddress()
-            if fwd:
-                if mx.compareTo(a) >= 0:
-                    out.add(mn if mn.compareTo(a) >= 0 else a, mx)
-            elif mn.compareTo(a) < 0:
-                out.add(mn, mx if mx.compareTo(a) < 0 else a.previous())
-            else:
-                break
-        return out
-
-    ROW_PARTS_MAX = 64     # components listed per data unit
-    ROW_XREFS_SHOWN = 5    # references named per row annotation
-
-    def _row_marks(self, prog, cus, fa):
-        """Which of the walked code units have a symbol, a comment of each kind, a function or references to them: one iterator
-        per kind over the walked window instead of several calls per row (thread R, cost matters: see bench_sidecar)."""
-        from ghidra.program.model.address import AddressSet
-        from ghidra.program.model.listing import CommentType
-        listing = prog.getListing()
-        if cus[0].getMinAddress().getAddressSpace() == cus[-1].getMaxAddress().getAddressSpace():
-            win = AddressSet(cus[0].getMinAddress(), cus[-1].getMaxAddress())
-        else:  # a fetch across two address spaces: shortcut: window of the walked units one by one, upgrade only if that is slow
-            win = AddressSet()
-            for cu in cus:
-                win.add(cu.getMinAddress(), cu.getMaxAddress())
-        rm = prog.getReferenceManager()
-        return {
-            "sym": {fa(x.getAddress()) for x in prog.getSymbolTable().getPrimarySymbolIterator(win, True)},
-            "fn": {fa(f.getEntryPoint()): f for f in prog.getFunctionManager().getFunctions(win, True)},
-            "ref": {fa(x): x for x in rm.getReferenceDestinationIterator(win, True)},
-            "cm": {k: {fa(x) for x in listing.getCommentAddressIterator(t, win, True)}
-                   for k, t in ((k, getattr(CommentType, k.upper())) for k in ROW_COMMENT_KINDS)},
-        }
-
-    def _row_parts(self, cu):
-        # shortcut: one level (nested structs/arrays show as one component with their display value), at most ROW_PARTS_MAX; upgrade with a get_components RPC by path
-        from ghidra.program.model.data import Array
-        n = int(cu.getNumComponents())
-        is_arr = isinstance(cu.getDataType(), Array)
-        parts = []
-        for i in range(min(n, self.ROW_PARTS_MAX)):
-            c = cu.getComponent(i)
-            name = "[%d]" % i if is_arr else str(c.getFieldName() or "field%d" % i)
-            parts.append({"offset": int(c.getParentOffset()), "length": int(c.getLength()), "type": str(c.getDataType().getName()),
-                          "name": name, "value": str(c.getDefaultValueRepresentation())})
-        return parts, n
-
-    def _row_header(self, f):
-        sf = f.getStackFrame()
-        h = {"signature": str(f.getSignature().getPrototypeString()), "params": int(f.getParameterCount()),
-             "paramBytes": int(sf.getParameterSize()), "localBytes": int(sf.getLocalSize())}
-        cc = str(f.getCallingConventionName() or "")
-        if cc and cc.lower() not in ("unknown", "default"):
-            h["convention"] = cc
-        if f.hasNoReturn():
-            h["noReturn"] = True
-        if f.isThunk():
-            h["thunk"] = True
-        return h
-
+    @rpc(lane="R")
     def listing_rows(self, address, count, direction="forward"):
         """Walk code units from an anchor address; no index. See protocol.md."""
         from ghidra.program.model.listing import CommentType, Instruction
@@ -1414,6 +1380,7 @@ class Sidecar:
 
     _name_arg = staticmethod(name_arg)
 
+    @rpc(lane="R")
     def rename_symbol(self, address, newName):
         from ghidra.app.cmd.label import RenameLabelCmd
         from ghidra.program.model.symbol import SourceType
@@ -1426,6 +1393,7 @@ class Sidecar:
         self.edit("Rename %s to %s" % (old, newName), self._cmd(RenameLabelCmd(sym, newName, SourceType.USER_DEFINED)))
         return {}
 
+    @rpc(lane="R")
     def set_comment(self, address, kind, text):
         from ghidra.app.cmd.comments import SetCommentCmd
         from ghidra.program.model.listing import CommentType
@@ -1442,6 +1410,7 @@ class Sidecar:
         self.edit(("Clear %s comment" if not text else "Set %s comment") % kind, self._cmd(cmd))
         return {}
 
+    @rpc(lane="R")
     def get_comments(self, address):
         from ghidra.program.model.listing import CommentType
         cu = self.need().getListing().getCodeUnitContaining(self.addr(address))
@@ -1455,6 +1424,7 @@ class Sidecar:
                 out[k] = str(c)
         return out
 
+    @rpc(lane="R")
     def create_label(self, address, name):
         from ghidra.app.cmd.label import AddLabelCmd
         from ghidra.program.model.symbol import SourceType
@@ -1468,6 +1438,7 @@ class Sidecar:
         self.edit("Create label %s" % name, self._cmd(AddLabelCmd(a, name, SourceType.USER_DEFINED)))
         return {}
 
+    @rpc(lane="R")
     def create_function(self, address, name=None):
         from ghidra.app.cmd.function import CreateFunctionCmd
         from ghidra.program.model.symbol import SourceType
@@ -1484,6 +1455,7 @@ class Sidecar:
             raise RpcError(INTERNAL, "function was not created")
         return {"entry": self.fmt(a), "name": str(f.getName())}
 
+    @rpc(lane="R")
     def define_data(self, address, dataType):
         from ghidra.app.cmd.data import CreateDataCmd
         from ghidra.program.model.data import DataTypeConflictHandler
@@ -1512,6 +1484,7 @@ class Sidecar:
         self.ctx.events.record({"data"}, [self._data_ranges])
         return {}
 
+    @rpc(lane="R")
     def clear_code(self, address, length=None):
         from ghidra.app.plugin.core.clear import ClearCmd
         from ghidra.program.model.address import AddressSet
@@ -1538,6 +1511,7 @@ class Sidecar:
         self.ctx.events.record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
         return {}
 
+    @rpc(lane="R")
     def set_function_signature(self, entry, signature):
         from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
         from ghidra.app.util.parser import FunctionSignatureParser
@@ -1604,6 +1578,7 @@ class Sidecar:
                 return True
         return False
 
+    @rpc(lane="R", job=True)
     def rename_variable(self, entry, name, newName, timeoutSecs=30, job=None):
         from ghidra.program.model.pcode import HighFunctionDBUtil
         from ghidra.program.model.symbol import SourceType
@@ -1625,6 +1600,7 @@ class Sidecar:
                                                       HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, SourceType.USER_DEFINED)
         HighFunctionDBUtil.updateDBVariable(sym, None, dt, SourceType.USER_DEFINED)
 
+    @rpc(lane="R", job=True)
     def retype_variable(self, entry, name, dataType, timeoutSecs=30, job=None):
         from ghidra.program.model.data import DataTypeConflictHandler
         from ghidra.util.data import DataTypeParser
@@ -1640,6 +1616,7 @@ class Sidecar:
             self._commit_type(prog, func, hf, sym, dt)
         return self._high_edit("Retype variable in %s", entry, name, go, timeoutSecs, job)
 
+    @rpc(lane="R", job=True)
     def auto_create_structure(self, entry, name, structName=None, timeoutSecs=30, job=None):
         """Ghidra's "Auto Create Structure" (FillOutStructureHelper, as FillOutStructureCmd uses it) on a decompiler variable:
         infers fields from the load/store offsets through the variable (following it into callees), adds the struct, and
@@ -1689,13 +1666,16 @@ class Sidecar:
         prog.flushEvents()  # RESTORED -> program_changed (ranges null) and cache clear
         return self.ctx.session.refresh_undo(prog)
 
+    @rpc(lane="R")
     def undo(self):
         return self._undo_redo(True)
 
+    @rpc(lane="R")
     def redo(self):
         return self._undo_redo(False)
 
     # ---- decompile (pool worker) ----
+    @rpc(lane="decomp")
     def decompile(self, entry, timeoutSecs=30, job=None):
         from ghidra.app.decompiler import DecompInterface
         from ghidra.pyghidra import PyGhidraTaskMonitor
@@ -1791,6 +1771,7 @@ class Sidecar:
         return {"text": "\n".join(lines_out), "tokens": tokens}
 
     # ---- loop-thread side ----
+    @rpc(lane="loop")
     def cancel_decompile(self, id):
         """Cancel the decompile request with this JSON-RPC id, queued or running. False if unknown/finished."""
         job = self.dj.get(id)
@@ -1802,6 +1783,7 @@ class Sidecar:
                 job.mon.cancel()
         return {"cancelled": True}
 
+    @rpc(lane="loop")
     def cancel_search(self, id):
         """Cancel the scan request (list_symbols, list_strings, search_symbols, search_memory) with this JSON-RPC id, queued or running. False if unknown/finished."""
         sc = self.sj.get(id)
@@ -1811,92 +1793,10 @@ class Sidecar:
             sc.cancel()
         return {"cancelled": True}
 
+    @rpc(lane="loop")
     def cancel_open(self):
         return {"cancelled": bool(self.opening is not None and self.opening.cancel())}
 
-    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory")  # scan workers, see the module docstring
-    R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable",
-                 "xrefs_from", "list_data_types", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
-                 "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
-                 "define_data", "clear_code", "save", "dt_sources", "dt_children", "get_data_type", "create_data_type",
-                 "delete_data_type", "rename_data_type", "edit_struct", "edit_enum", "create_struct_from_data", "auto_create_structure")
-    # on R, with a Job registered under the request id so cancel_decompile can reach the decompile inside (see _high_edit)
-    CANCELLABLE = ("rename_variable", "retype_variable", "auto_create_structure")
-    # run on R, but never behind/alongside an open: Busy instead of NoProgram
-    P_METHODS = ("close_program", "import_candidates", "list_languages", "list_programs", "delete_program")
-
-    async def handle(self, ws, raw):
-        try:
-            msg = json.loads(raw)
-            rid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
-            if not isinstance(params, dict):
-                raise TypeError("params must be an object")
-        except Exception:
-            return
-        try:
-            if method == "cancel_decompile":
-                result = self.cancel_decompile(**params)
-            elif method == "cancel_search":
-                result = self.cancel_search(**params)
-            elif method == "cancel_open":
-                result = self.cancel_open(**params)
-            elif method == "open_binary":
-                result = await self.open_binary(**params)
-            elif method in self.P_METHODS:
-                if self.opening is not None and method != "list_languages":
-                    raise RpcError(BUSY, "open_binary in progress")
-                fn = getattr(self, method)
-                result = await self.run(lambda: fn(**params))
-            elif method == "decompile" or method in self.R_METHODS or method in self.S_METHODS:
-                if self.opening is not None:  # fail fast: never queue behind an open
-                    raise RpcError(NO_PROGRAM, "open_binary in progress")
-                if method in self.S_METHODS:
-                    if rid is None or rid in self.sj:
-                        raise RpcError(INVALID, "%s needs a unique request id" % method)
-                    scan = self.sj[rid] = Scan(self.epoch)
-                    fn = getattr(self, method)
-                    try:
-                        result = await self.run(lambda: fn(scan=scan, **params), self.sjobs)
-                    finally:
-                        self.sj.pop(rid, None)
-                elif method == "decompile":
-                    if rid is None or rid in self.dj:
-                        raise RpcError(INVALID, "decompile needs a unique request id")
-                    job = self.dj[rid] = Job(self.epoch)
-                    try:
-                        result = await self.run(lambda: self.decompile(job=job, **params), self.djobs)
-                    finally:
-                        self.dj.pop(rid, None)
-                elif method in self.CANCELLABLE:
-                    if rid is None or rid in self.dj:
-                        raise RpcError(INVALID, "%s needs a unique request id" % method)
-                    job = self.dj[rid] = Job(self.epoch)
-                    try:
-                        result = await self.run(lambda: getattr(self, method)(job=job, **params))
-                    finally:
-                        self.dj.pop(rid, None)
-                else:
-                    fn = getattr(self, method)
-                    result = await self.run(lambda: fn(**params))
-            else:
-                raise RpcError(NO_METHOD, "method not found: %s" % method)
-            reply = {"jsonrpc": "2.0", "id": rid, "result": result}
-        except RpcError as e:
-            reply = {"jsonrpc": "2.0", "id": rid, "error": {"code": e.code, "message": str(e)}}
-        except (TypeError, ValueError) as e:
-            reply = {"jsonrpc": "2.0", "id": rid, "error": {"code": INVALID, "message": "invalid params: %s" % e}}
-        except Exception as e:  # noqa
-            log("internal error", repr(e))
-            reply = {"jsonrpc": "2.0", "id": rid, "error": {"code": INTERNAL, "message": str(e)}}
-        if rid is not None:
-            await self._send_to(ws, json.dumps(reply))
-
-    @staticmethod
-    async def _send_to(ws, s):
-        try:
-            await ws.send(s)
-        except Exception:
-            pass
 
 
 # Temporary forwarding to the runtime objects until the domains move out (step 5): attributes and the helpers the methods call on self.

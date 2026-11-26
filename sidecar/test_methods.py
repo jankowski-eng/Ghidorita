@@ -23,15 +23,8 @@ GOLDEN = {
 
 
 def actual():
-    """method -> lane as the code has it today (the tuples and the special cases in handle())."""
-    S = main.Sidecar
-    out = {m: "R" for m in S.R_METHODS}
-    out.update({m: "R+job" for m in S.CANCELLABLE})
-    out.update({m: "scan" for m in S.S_METHODS})
-    out.update({m: "project" for m in S.P_METHODS})
-    out["list_languages"] = "project+busy_ok"
-    out.update(decompile="decomp", open_binary="open", cancel_decompile="loop", cancel_search="loop", cancel_open="loop")
-    return out
+    """method -> lane, from the registry the running sidecar dispatches with."""
+    return main.Sidecar().registry.describe()
 
 
 def test_method_table_is_golden():
