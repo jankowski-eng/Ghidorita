@@ -27,7 +27,7 @@ export async function runDebugFlow(file: string, c: AutotestCtx, result: Record<
   R.locals = { rows: document.querySelectorAll(".vals tbody tr").length, was: document.querySelectorAll(".vals tr.changed").length > 0, inline: await waitFor(() => q(".dval"), 5000, "values after the decompiler lines").then(() => true, () => false) };
   c.command({ type: "debug", action: "back" });
   await waitFor(() => /recorded stop/.test(status()), 5000, "recorded stop in the status bar");
-  R.back = { shownFirst: text(".regs-h").includes(first.address!) || true, status: /recorded stop 1 of 2/.test(status()) };
+  R.back = { shownFirst: text(".regs-h").includes(`stopped at ${first.address}`), status: /recorded stop 1 of 2/.test(status()) };
   c.command({ type: "debug", action: "forward" });
   await waitFor(() => !/recorded stop/.test(status()), 5000, "live again");
   c.command({ type: "dock", panel: "memory" });
@@ -43,5 +43,5 @@ export async function runDebugFlow(file: string, c: AutotestCtx, result: Record<
   await waitFor(() => c.debug()?.state === "detached", 5000, "detached");
   await sleep(100);
   R.detached = /Debugger: detached/.test(status()) && !q(".lrow.pc");
-  return R.defaultTarget === "localhost:1234" && R.stop.status && R.stop.registers && R.step.moved && R.step.changed && R.locals.rows > 0 && R.locals.inline && R.back.status && R.detached && c.errors.length === 0;
+  return R.defaultTarget === "localhost:1234" && R.stop.status && R.stop.registers && R.step.moved && R.step.changed && R.locals.rows > 0 && R.locals.inline && R.back.shownFirst && R.back.status && R.detached && c.errors.length === 0;
 }

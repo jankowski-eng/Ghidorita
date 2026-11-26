@@ -142,6 +142,7 @@ def test_a_live_breakpoint_toggle_applies_deferred_changes_first(sc, dbg):
     g = FakeG({}, [(HI, "T05")])
     attach(dbg, sc, g, HI)
     dbg.state, dbg.worker, dbg.bps = "running", None, []
+    g.running = True  # really running: the toggle interrupts it
     dbg.deferred = [(g, "Z", 0x8)]
     dbg.debug_breakpoint(hex(0x10))
     zs = [p for p in g.log if p[0] in "Zz"]
@@ -190,3 +191,62 @@ def test_unsigned_values_with_the_top_bit_set(sc, dbg):
     attach(dbg, sc, FakeG({HI + 0x100 + k: 0xFF for k in range(8)}, [(HI, "T05")]), HI)
     assert dbg.debug_memory(H(0x100), dataType="ulonglong")["items"][0]["value"] == str((1 << 64) - 1)
     assert dbg.debug_memory(H(0x100), dataType="longlong")["items"][0]["value"] == "-1"
+
+
+def test_a_toggle_waits_outside_the_lock_for_a_stop_that_is_not_published_yet(sc, dbg):
+    import time
+    g = FakeG({}, [(HI, "T05")])
+    attach(dbg, sc, g, HI)
+    dbg.state, dbg.worker, dbg.bps = "running", None, []  # the stop reply is in (g.running is false) but its handler has not published it
+    g.running = False
+
+    def handler():  # the stop handler needs the lock the toggle must not hold while it waits
+        time.sleep(0.15)
+        with dbg.lock:
+            dbg.state = "stopped"
+    threading.Thread(target=handler).start()
+    dbg.debug_breakpoint(hex(0x10))
+    assert dbg.bps == [0x10] and any(p.startswith("Z0,10") for p in g.log) and "c" not in g.log  # applied on the stopped target, no resume
+
+
+def test_restore_is_serialised_with_the_stop_handler(sc, dbg):
+    import time
+    g = FakeG({}, [(HI, "T05")])
+    attach(dbg, sc, g, HI)
+    g.running = True
+    dbg.deferred = []
+    done = threading.Event()
+    held, release = threading.Event(), threading.Event()
+
+    def holder():  # the stop handler: holds the lock while it drains the deferred list
+        with dbg.lock:
+            held.set()
+            release.wait(2)
+    th = threading.Thread(target=holder)
+    th.start()
+    held.wait(2)
+    tr = threading.Thread(target=lambda: (dbg._restore(g, "Z", 0x8), done.set()))
+    tr.start()
+    time.sleep(0.15)
+    assert not done.is_set()  # blocked behind the handler, so it cannot enqueue after the list was drained
+    release.set()
+    th.join(); tr.join()
+    assert dbg.deferred == [(g, "Z", 0x8)]
+
+
+def test_cancel_search_during_value_sampling(sc, dbg):
+    from ghidorita.core.errors import CANCELLED, RpcError
+    from ghidorita.core.lanes import Scan
+    scan = Scan(sc.ses.epoch)
+    g = FakeG({HI + 0x100 + k: 1 for k in range(8)}, [(HI, "T05")])
+    first = g.request
+
+    def request(p, timeout=5.0):
+        if p[0] == "m":
+            scan.cancelled = True  # cancel_search arrives during the first memory read
+        return first(p, timeout)
+    g.request = request
+    attach(dbg, sc, g, HI)
+    with pytest.raises(RpcError) as e:
+        dbg.debug_values(H(0), scan=scan)
+    assert e.value.code == CANCELLED

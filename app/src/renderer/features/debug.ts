@@ -12,8 +12,10 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
   const s = useSession();
   const { views, refs, store } = s;
   const state = useProgram((p) => p.debug?.state), stop = useProgram((p) => p.debug?.stop), at = useProgram((p) => p.debugAt);
+  const blocked = useProgram((p) => !!p.opening || p.closing || p.unavailable); // navigation and requests are refused meanwhile: both effects run again when the session is usable
   const was = useRef<string>("detached");
   useEffect(() => { // every stop (and every step through the history) moves the panes to its address
+    if (blocked) return;
     const d = shownDebug(store.getState());
     if (!d) return;
     if (d.state === "stopped" && d.address) {
@@ -21,10 +23,10 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
       void nav.go(d.address, "debug");
     }
     was.current = store.getState().debug?.state ?? "detached";
-  }, [state, stop, at]); // eslint-disable-line
+  }, [state, stop, at, blocked]); // eslint-disable-line
   useEffect(() => { // the function that holds a new stop, then its variables (best effort: no decompile or unreadable memory shows none)
     const d = store.getState().debug, current = s.program();
-    if (!current || !d || d.state !== "stopped" || !d.address) return;
+    if (blocked || !current || !d || d.state !== "stopped" || !d.address || d.values || d.fn === null) return; // nothing to do when its variables are in, or the stop is in no function
     const address = d.address, n = d.stop, same = () => s.program() === current && store.getState().debug?.stop === n; // a later stop makes this one obsolete
     void (async () => {
       const f = await current.lookup.containing(address);
@@ -34,7 +36,7 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
       const r = await current.api.debug.values({ entry: f.entry }).result;
       if (same() && r.pc === address) store.dispatch({ type: "debugValues", stop: n, entry: f.entry, items: r.items }); // the sidecar read the same stop
     })().catch(() => {});
-  }, [stop]); // eslint-disable-line
+  }, [stop, blocked]); // eslint-disable-line
 
   /** The first address of the listing cursor row or of the decompiler cursor line, whichever pane has the cursor. */
   const breakpointAddress = (): Address | null => {

@@ -11,7 +11,7 @@ The RPCs are on thread R (they need the language; none waits for the target to r
 import queue, threading, time
 
 from ..core.args import MASK64
-from ..core.errors import BUSY, INVALID, NOT_FOUND, TARGET, RpcError, log
+from ..core.errors import BUSY, CANCELLED, INVALID, NOT_FOUND, TARGET, RpcError, log
 from ..core.gdb import Gdb, GdbError
 from ..core.rpc import rpc
 
@@ -225,37 +225,53 @@ class Debug:
             a = None
         if a is None or a < 0:
             raise RpcError(INVALID, "A breakpoint needs an address like 0x1000")
-        with self.lock:
-            if self.g is not None:
-                g = self._live()
-                if self.state == "running" and not self.worker:  # like a debugger: stop the target, change the breakpoint, go on, without announcing a stop
-                    q = g.arm()
-                    try:
-                        g.interrupt()
-                        r = g.wait_stop(q, 5)
-                    except GdbError:
-                        raise RpcError(TARGET, "The target did not stop to change the breakpoint")
-                    if r is None or r[0] in "WX":
-                        if r is not None:
-                            self._stopped(g, r)  # the target ended: announce it
-                        raise RpcError(TARGET, "The target stopped running")
-                    self._apply_deferred(g)  # first: a change owed to an earlier timed-out step must not overwrite the one asked for now
-                    genuine = r[1:3] != "02"  # SIGINT is our own Ctrl-C; anything else (a breakpoint, a signal) is a real stop
-                    try:
-                        self._z(g, "z" if a in self.bps else "Z", a)
-                    finally:
-                        if genuine:
-                            self.state = "running"  # announced as the stop it is, the target stays stopped
-                            self._stopped(g, r)
-                        else:
-                            g.resume("c")
-                elif self.state != "stopped" or self.worker:
-                    raise RpcError(BUSY, "Pause the target before changing breakpoints")
-                else:
+        for _ in range(250):  # a stop that has arrived but is not published yet is waited for outside the lock its handler needs
+            with self.lock:
+                if self._toggle(a):
+                    self.publish()
+                    return {}
+            time.sleep(0.02)
+        raise RpcError(BUSY, "The target is changing state; try again")
+
+    def _toggle(self, a):
+        """Change the breakpoint at `a` (thread R, under the lock). False: the target has stopped but the stop is not processed yet; try again."""
+        if self.g is not None:
+            g = self._live()
+            if self.state == "running" and not self.worker:  # like a debugger: stop the target, change the breakpoint, go on, without announcing a stop
+                with g.ctl:  # excludes the start of a resume and the delivery of a stop
+                    armed = g.running
+                    q = g.arm() if armed else None
+                    if armed:
+                        try:
+                            g.interrupt()
+                        except GdbError:
+                            raise RpcError(TARGET, "The target did not stop to change the breakpoint")
+                if not armed:
+                    return False  # its stop reply is in: the handler publishes it as soon as we let go of the lock
+                try:
+                    r = g.wait_stop(q, 5)
+                except GdbError:
+                    raise RpcError(TARGET, "The target did not stop to change the breakpoint")
+                if r is None or r[0] in "WX":
+                    if r is not None:
+                        self._stopped(g, r)  # the target ended: announce it
+                    raise RpcError(TARGET, "The target stopped running")
+                self._apply_deferred(g)  # first: a change owed to an earlier timed-out step must not overwrite the one asked for now
+                genuine = r[1:3] != "02"  # SIGINT is our own Ctrl-C; anything else (a breakpoint, a signal) is a real stop
+                try:
                     self._z(g, "z" if a in self.bps else "Z", a)
-            (self.bps.remove if a in self.bps else self.bps.append)(a)
-            self.publish()
-            return {}
+                finally:
+                    if genuine:
+                        self.state = "running"  # announced as the stop it is, the target stays stopped
+                        self._stopped(g, r)
+                    else:
+                        g.resume("c")
+            elif self.state != "stopped" or self.worker:
+                raise RpcError(BUSY, "Pause the target before changing breakpoints")
+            else:
+                self._z(g, "z" if a in self.bps else "Z", a)
+        (self.bps.remove if a in self.bps else self.bps.append)(a)
+        return True
 
     def _single_step(self, g, pc, before=None):
         """One instruction, waited for, with a breakpoint at the pc taken out meanwhile (like gdb); returns the stop reply."""
@@ -285,12 +301,13 @@ class Debug:
 
     def _restore(self, g, op, addr):
         """Undo a temporary breakpoint change after a step: at once if the target is stopped, else (a step that gave up waiting) at its stop."""
-        if g.closed:
-            return
-        if g.running:
-            self.deferred.append((g, op, addr))
-        else:
-            self._z(g, op, addr)
+        with self.lock:  # one step with a stop's handler (_apply_deferred): nothing is queued after the handler looked
+            if g.closed:
+                return
+            if g.running:
+                self.deferred.append((g, op, addr))
+            else:
+                self._z(g, op, addr)
 
     def _sp_of(self, g):
         n = next((n for n, name in self.names.items() if name == self.sp), None)
@@ -575,13 +592,15 @@ class Debug:
             with self.lock:  # run control takes this lock too: the memory read belongs to the stop the registers and the pc came from
                 if self.g is not g or self.state != "stopped" or self.stops != gen:
                     raise RpcError(BUSY, "The target moved on while the values were computed")
-                items = self._sample(prog, g, places, regs, depth)
+                items = self._sample(prog, g, places, regs, depth, scan)
             return {"pc": hex(pc) if pc is not None else None, "items": items}
 
-    def _sample(self, prog, g, places, regs, depth):
+    def _sample(self, prog, g, places, regs, depth, scan=None):
         sp = regs.get(self.sp)
         items = []
         for kind, name, dt, size, st in places[:ITEMS_MAX]:
+            if scan is not None and scan.cancelled:  # cancel_search: checked between variables, outside the handler of unreadable ones
+                raise RpcError(CANCELLED, "cancelled")
             where, raw = None, None
             try:
                 if st.isStackStorage():
@@ -610,4 +629,6 @@ class Debug:
                 value = "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()
             items.append({"name": name, "kind": kind, "type": str(dt.getName()), "size": size, "where": where, "value": value,
                           "raw": "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()})
+        if scan is not None and scan.cancelled:
+            raise RpcError(CANCELLED, "cancelled")
         return items

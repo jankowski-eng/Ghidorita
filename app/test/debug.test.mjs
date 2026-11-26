@@ -108,3 +108,18 @@ test("program: the function of a stop is stored per stop; a later stop's lookup 
   s = programReducer(s, { type: "debug", state: { ...s.debug, breakpoints: ["0x8"], changed: undefined, values: undefined, fn: undefined } }); // a breakpoint toggled at the same stop keeps the lookup
   assert.equal(s.debug.fn, null); assert.deepEqual(s.debug.breakpoints, ["0x8"]);
 });
+
+test("program: while the target runs, Back reaches the newest recorded stop and Forward returns to the running view", () => {
+  const stop = (n) => ({ type: "debug", state: { state: "stopped", target: "h:1", stop: n, offset: "0x0", breakpoints: [], address: "0x" + n, registers: [{ name: "r0", value: "0x" + n }] } });
+  const running = { type: "debug", state: { state: "running", target: "h:1", stop: 2, offset: "0x0", breakpoints: [] } };
+  let s = [stop(1), running].reduce(programReducer, initialProgram);
+  s = programReducer(s, { type: "debugView", to: "back" });
+  assert.equal(s.debugAt, 0); assert.equal(shownDebug(s).stop, 1); // one recorded stop, running: Back shows it
+  s = programReducer(s, { type: "debugView", to: "forward" });
+  assert.equal(s.debugAt, null); assert.equal(shownDebug(s).state, "running");
+  s = [stop(1), stop(2), { ...running, state: { ...running.state, stop: 2 } }].reduce(programReducer, initialProgram);
+  s = programReducer(s, { type: "debugView", to: "back" }); assert.equal(shownDebug(s).stop, 2); // the newest stop is a past one while running
+  s = programReducer(s, { type: "debugView", to: "back" }); assert.equal(shownDebug(s).stop, 1);
+  const stopped = [stop(1)].reduce(programReducer, initialProgram);
+  assert.equal(programReducer(stopped, { type: "debugView", to: "back" }).debugAt, null); // one stop and stopped: nothing before it
+});

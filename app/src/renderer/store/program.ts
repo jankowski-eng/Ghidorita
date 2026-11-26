@@ -91,10 +91,12 @@ export function programReducer(s: ProgramState, a: ProgramAction): ProgramState 
       return { ...s, debug: view, debugLast: regValues(regs), debugHistory: [...s.debugHistory, view].slice(-HISTORY), debugAt: null }; // a new stop returns the panes to the live state
     }
     case "debugView": {
-      const n = s.debugHistory.length, at = s.debugAt ?? n - 1;
+      // Positions 0..n-1 are the recorded stops. The live view is the newest stop while the target is stopped (they are the same), and a position after
+      // all of them while it runs (the newest stop is then a past one).
+      const n = s.debugHistory.length, live = s.debug?.state === "stopped" ? n - 1 : n, at = s.debugAt ?? live;
       if (a.to === "live") return { ...s, debugAt: null };
       const next = at + (a.to === "back" ? -1 : 1);
-      return next < 0 || n === 0 ? s : { ...s, debugAt: next >= n - 1 ? null : next };
+      return next < 0 || n === 0 ? s : { ...s, debugAt: next >= live ? null : next };
     }
     case "debugFunction": {
       const i = s.debugHistory.findIndex((v) => v.stop === a.stop);
