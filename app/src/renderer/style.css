@@ -54,6 +54,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .hit.cur { background: #094771; } .hit .k { width: 60px; color: #888; } .hit .n { flex: 1; overflow: hidden; text-overflow: ellipsis; } .hit .a { color: #9cdcfe; }
 .msg { padding: 4px 8px; color: #888; }
 .xrefs { height: 170px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #444; }
+.empty button, .empty .btn { margin-left: 8px; }
 .xh { padding: 3px 8px; background: #2d2d30; font-size: 12px; }
 .xl { overflow: auto; flex: 1; }
 .xr { display: block; width: 100%; text-align: left; background: none; border: 0; color: #ddd; padding: 1px 8px; font: 12px ui-monospace, Menlo, monospace; cursor: pointer; }

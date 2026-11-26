@@ -5,11 +5,14 @@ import { RpcError } from "./backend";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { runEditFlow, runPhase2 } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
+import { runR5Flow } from "./autotestR5";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
   open(path: string): Promise<FunctionInfo[] | undefined>;
   select(entry: Address): Promise<void>;
+  /** navigate to any address like Go to Address does */
+  goAddr(address: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
   cancelFile: string | null;
   status(): { funcs: number; opened: boolean; opening: boolean; phase: string; notice: string };
@@ -44,7 +47,7 @@ export const typeInto = (el: HTMLInputElement | HTMLTextAreaElement, text: strin
   Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(el, text);
   el.dispatchEvent(new Event("input", { bubbles: true }));
 };
-const setSelect = (el: HTMLSelectElement, value: string) => {
+export const setSelect = (el: HTMLSelectElement, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el, value);
   el.dispatchEvent(new Event("change", { bubbles: true }));
 };
@@ -203,6 +206,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       const tooBigDisables = openBtn(d).disabled;
       typeInto(bi, "1000"); await sleep(100);
       const goodEnables = !openBtn(d).disabled;
+      setSelect(d.querySelector<HTMLSelectElement>('select[aria-label="Analysis profile"]')!, "fast"); // sent along with the options
       press(bi, "Enter");
       await waitFor(() => !dlg("Import binary") && !c.status().opening, 10000, "explicit open answered");
       const explicit = sent[1];
@@ -214,17 +218,18 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       await waitFor(() => !dlg("Import binary"), 5000, "import dialog closes on Escape");
       (rpc as any).call = orig;
       result.importDlg = { preselectedPreferred, defaultSent, explicit, badDisables, tooBigDisables, goodEnables, errorOk };
-      const importOk = preselectedPreferred && defaultSent === JSON.stringify({ path: file }) && explicit?.language === other.value && explicit?.baseAddress === "0x1000" && typeof explicit?.loader === "string"
+      const importOk = preselectedPreferred && defaultSent === JSON.stringify({ path: file }) && explicit?.language === other.value && explicit?.baseAddress === "0x1000" && explicit?.profile === "fast" && typeof explicit?.loader === "string"
         && badDisables && tooBigDisables && goodEnables && errorOk;
 
-      await c.open(file); // the edit flow below needs the default import open again
+      result.importOk = importOk;
+      await c.open(file); // the explicit-option opens above ended closed; the default import is open from here on
+      result.r5Ok = await runR5Flow(file, c, result); // strings, references from, comment prefill, labels, import profile; ends with the default import open
       result.saveOk = dirtyShown && savedClean && !m0?.dirty;
       const bo = result.browserOpen as any, cl = result.close as any;
       result.closeOk = cl.noPrompt && cl.noProgram && cl.titlePlain && bo.functions > 0 && bo.autosaved && bo.cleanAfterReopen;
-      result.importOk = importOk;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
-      result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
     } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;

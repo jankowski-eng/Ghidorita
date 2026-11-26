@@ -110,7 +110,7 @@ const symbols = () => {
   for (let k = 0; k < 20; k++) out.push({ name: `imp_${k}`, address: null, kind: "external", namespace: "libc.so", source: "imported" });
   return out;
 };
-const HUGE = 2;
+const HUGE = 4000, SLOW = 4001; // SLOW: normal size, but times out at the default timeout
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false, opening = false, openCancelled = false, openId = null;
 // Project contents (fake). Seeded so the welcome pane has something to show.
@@ -201,7 +201,7 @@ const handlers = {
   },
   cancel_open() { const c = opening && !openCancelled; if (c) openCancelled = true; return { cancelled: c }; },
   list_functions() {
-    // fn_2 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
+    // fn_4000 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
     // get_function_at keeps the real STEP so address-to-function lookups stay consistent
     const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP }));
     for (const [a, name] of S.created) out.push({ name, entry: hex(a), size: STRIDE * 4 });
@@ -210,7 +210,7 @@ const handlers = {
   decompile({ entry, timeoutSecs }, notify, rid) {
     const n = parseAddr(entry), i = idxOfEntry(n);
     if (i < 0 && !S.created.has(n)) throw { code: -32004, message: "NotFound" };
-    const slow = i === HUGE && (timeoutSecs ?? 30) < 100; // the huge function times out unless the client asks for a long timeout
+    const slowFn = i === HUGE || i === SLOW, slow = slowFn && (timeoutSecs ?? 30) < 100; // both time out unless the client asks for a long timeout
     return new Promise((resolve, reject) => {
       const done = () => {
         cancels.delete(rid);
@@ -219,7 +219,7 @@ const handlers = {
         const cached = decompCache.has(i); decompCache.add(i);
         resolve({ ...decompile(i), cached });
       };
-      const t = setTimeout(done, slow ? 400 : i >= 0 && decompCache.has(i) ? 5 : 150);
+      const t = setTimeout(done, slow ? 400 : slowFn ? 1500 : i >= 0 && decompCache.has(i) ? 5 : 150); // 1.5 s long runs leave time to click Cancel
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },

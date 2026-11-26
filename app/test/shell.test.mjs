@@ -93,3 +93,13 @@ test("tabs: preview replace, pin, reuse, close", () => {
   for (const x of [...t.tabs]) t = closeTab(t, x.id);
   assert.equal(t.active, null);
 });
+
+const { isLarge, LARGE_FUNCTION, LONG_TIMEOUT_SECS } = await load("tabs.ts");
+test("isLarge: only bodies over 30 KB get the size warning", () => {
+  assert.equal(LARGE_FUNCTION, 30 * 1024);
+  assert.equal(isLarge(0), false);
+  assert.equal(isLarge(30 * 1024), false);
+  assert.equal(isLarge(30 * 1024 + 1), true);
+  assert.equal(isLarge(101 * 1024), true);
+  assert.ok(LONG_TIMEOUT_SECS >= 600);
+});

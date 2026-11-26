@@ -5,6 +5,12 @@ export interface Tab { id: number; entry: Address; pinned: boolean }
 export interface Tabs { tabs: Tab[]; active: number | null; nextId: number }
 export const emptyTabs: Tabs = { tabs: [], active: null, nextId: 1 };
 
+/** shortcut: a function body over ~30 KB is warned about before decompiling (19-33 s at 34-101 KB, SPIKE_REPORT round 4); fixed limit, upgrade to a per-binary estimate if it annoys. */
+export const LARGE_FUNCTION = 30 * 1024;
+export const isLarge = (size: number) => size > LARGE_FUNCTION;
+/** "Decompile anyway" timeout; shortcut: 30 minutes, the user can cancel. */
+export const LONG_TIMEOUT_SECS = 1800;
+
 const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase();
 
 /** Show a function: reuse its tab, else replace the preview tab, else add a new preview tab. `pin` also pins it. */

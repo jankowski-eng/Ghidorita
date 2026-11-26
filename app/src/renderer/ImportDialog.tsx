@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
+import type { AnalysisProfile, ImportCandidate, ImportOptions, LanguageInfo } from "../../../protocol";
 import { rpc } from "./client";
 import { RpcError } from "./backend";
 import { trapTab, useRestoreFocus } from "./hooks";
-import { RAW_CANDIDATE, buildOptions, choiceError, parseBase } from "./openOptions";
+import { PROFILE_LABEL, RAW_CANDIDATE, buildOptions, choiceError, defaultProfile, parseBase } from "./openOptions";
 
 const label = (c: ImportCandidate) => `${c.loader}${c.language ? ` — ${c.language} / ${c.compilerSpec}` : " — choose language"}${c.preferred ? " (preferred)" : ""}`;
 const errText = (e: unknown) => e instanceof RpcError ? (e.code === -32005 ? "The sidecar is busy, try again in a moment." : e.code === -32004 ? "File not found." : e.message) : e instanceof Error ? e.message : String(e);
@@ -17,16 +17,17 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
   const [spec, setSpec] = useState<string | null>(null);
   const [base, setBase] = useState("");
   const [filter, setFilter] = useState("");
+  const [profile, setProfile] = useState<AnalysisProfile>("full");
 
   useEffect(() => {
     let live = true;
     (async () => {
-      const { candidates } = await rpc.call("import_candidates", { path });
+      const { candidates, sizeBytes } = await rpc.call("import_candidates", { path });
       const langs = await rpc.call("list_languages", {}).catch(() => [] as LanguageInfo[]); // optional unless the user must choose
       const cands = candidates.length ? candidates : [RAW_CANDIDATE];
       if (!live) return;
       const pre = Math.max(0, cands.findIndex((c) => c.preferred));
-      setIdx(pre); setLanguage(cands[pre].language); setSpec(cands[pre].compilerSpec);
+      setProfile(defaultProfile(sizeBytes)); setIdx(pre); setLanguage(cands[pre].language); setSpec(cands[pre].compilerSpec);
       setState({ cands, langs, note: candidates.length ? "" : "No loader recognises this file. You can import it as a Raw Binary." });
     })().catch((e) => { if (live) setState({ error: errText(e) }); });
     return () => { live = false; };
@@ -34,7 +35,7 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
 
   const ready = state && "cands" in state ? state : null;
   const cand = ready?.cands[idx];
-  const choice = cand && { cand, language, compilerSpec: spec, base };
+  const choice = cand && { cand, language, compilerSpec: spec, base, profile };
   const err = choice ? choiceError(choice) : "not ready";
   const specs = useMemo(() => ready?.langs.find((l) => l.id === language)?.compilerSpecs ?? (cand?.compilerSpec && language === cand.language ? [{ id: cand.compilerSpec, name: cand.compilerSpec }] : []), [ready, language, cand]);
   const langs = useMemo(() => {
@@ -81,6 +82,11 @@ export function ImportDialog({ path, onOpen, onCancel }: { path: string; onOpen:
             <input aria-label="Base address" aria-invalid={!!baseErr} placeholder="0x00400000" value={base} onChange={(e) => setBase(e.target.value)} />
           </label>}
           {baseErr && <div className="err" role="alert">{baseErr}</div>}
+          <label>Analysis
+            <select aria-label="Analysis profile" value={profile} onChange={(e) => setProfile(e.target.value as AnalysisProfile)}>
+              {(["full", "fast"] as const).map((p) => <option key={p} value={p}>{PROFILE_LABEL[p]}</option>)}
+            </select>
+          </label>
         </>}
         <div className="row">
           <button className="primary" disabled={!!err} onClick={submit}>Open</button>

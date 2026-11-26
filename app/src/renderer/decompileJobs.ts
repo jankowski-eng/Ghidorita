@@ -5,9 +5,9 @@ import type { Backend } from "./backend";
 export function decompileJobs(backend: Backend) {
   const jobs = new Map<number, { cancel(): void }>();
   return {
-    start(id: number, entry: Address) {
+    start(id: number, entry: Address, timeoutSecs?: number) {
       jobs.get(id)?.cancel(); // superseded by this request
-      const { result, cancel } = backend.callCancellable("decompile", { entry });
+      const { result, cancel } = backend.callCancellable("decompile", timeoutSecs ? { entry, timeoutSecs } : { entry });
       const job = { cancel };
       jobs.set(id, job);
       return { result, current: () => jobs.get(id) === job, done: () => { if (jobs.get(id) === job) jobs.delete(id); } };

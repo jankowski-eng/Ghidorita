@@ -5,7 +5,8 @@ import { latest } from "./latest";
 import { useDebounced, useRestoreFocus } from "./hooks";
 
 export type Field = "text" | "datatype" | "comment";
-export interface EditSpec { title: string; label: string; field: Field; initial: string; submit: string; kind?: CommentKind }
+/** comments: the existing text per kind (get_comments); the comment box shows the chosen kind's text and follows the kind selector. */
+export interface EditSpec { title: string; label: string; field: Field; initial: string; submit: string; kind?: CommentKind; comments?: Partial<Record<CommentKind, string>> }
 export const COMMENT_KINDS: CommentKind[] = ["eol", "pre", "post", "plate", "repeatable"];
 
 /**
@@ -17,8 +18,10 @@ export function EditDialog({ spec, onSubmit, onClose }: {
   spec: EditSpec; onSubmit: (value: string, kind: CommentKind) => Promise<void>; onClose: () => void;
 }) {
   useRestoreFocus();
-  const [value, setValue] = useState(spec.initial);
   const [kind, setKind] = useState<CommentKind>(spec.kind ?? "eol");
+  const [value, setValue] = useState(spec.comments ? spec.comments[spec.kind ?? "eol"] ?? "" : spec.initial);
+  const drafts = useRef<Partial<Record<CommentKind, string>>>({ ...spec.comments }); // text per kind, edits survive switching kinds
+  const changeKind = (k: CommentKind) => { drafts.current[kind] = value; setKind(k); setValue(drafts.current[k] ?? ""); setError(""); setTimeout(() => input.current?.focus(), 0); };
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [hits, setHits] = useState<DataTypeHit[]>([]);
@@ -53,7 +56,7 @@ export function EditDialog({ spec, onSubmit, onClose }: {
     <div className="dlg"><div className="card" role="dialog" aria-modal="true" aria-label={spec.title} onKeyDown={onKey}>
       <div className="title">{spec.title}</div>
       {spec.field === "comment" && (
-        <label>Comment kind <select aria-label="Comment kind" value={kind} disabled={busy} onChange={(e) => setKind(e.target.value as CommentKind)}>
+        <label>Comment kind <select aria-label="Comment kind" value={kind} disabled={busy} onChange={(e) => changeKind(e.target.value as CommentKind)}>
           {COMMENT_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
       )}
       <label>{spec.label}

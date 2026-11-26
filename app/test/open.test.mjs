@@ -52,3 +52,22 @@ test("windowTitle", () => {
   assert.equal(windowTitle("ls", false), "ls — Ghidrette");
   assert.equal(windowTitle("ls", true), "• ls — Ghidrette");
 });
+
+const { defaultProfile, FAST_MIN_BYTES } = await load("openOptions.ts");
+test("defaultProfile: fast above 20 MB, full otherwise", () => {
+  assert.equal(defaultProfile(4096), "full");
+  assert.equal(defaultProfile(FAST_MIN_BYTES), "full");
+  assert.equal(defaultProfile(FAST_MIN_BYTES + 1), "fast");
+  assert.equal(defaultProfile(66.7 * 1048576), "fast");
+});
+test("buildOptions: profile fast is always sent, full never", () => {
+  assert.deepEqual(buildOptions({ ...ch(macho), profile: "fast" }), { profile: "fast" });
+  assert.equal(buildOptions({ ...ch(macho), profile: "full" }), undefined);
+  assert.deepEqual(buildOptions({ ...ch(alt), profile: "fast" }), { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", profile: "fast" });
+  assert.deepEqual(buildOptions({ ...ch(macho), base: "0x10", profile: "fast" }), { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", baseAddress: "0x10", profile: "fast" });
+});
+test("optionsSummary / reopenParams carry the profile", () => {
+  assert.equal(optionsSummary({ profile: "fast" }), "fast analysis");
+  assert.equal(optionsSummary({ loader: "Raw Binary", language: "ARM:LE:32:v8", profile: "fast" }), "Raw Binary · ARM:LE:32:v8 · fast analysis");
+  assert.deepEqual(reopenParams({ programId: "x", name: "n", sizeBytes: 1, analyzed: true, sourcePath: "/p", options: { profile: "fast" } }), { path: "/p", profile: "fast" });
+});

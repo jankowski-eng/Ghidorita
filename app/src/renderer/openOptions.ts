@@ -1,4 +1,9 @@
-import type { ImportCandidate, ImportOptions, ProgramEntry } from "../../../protocol";
+import type { AnalysisProfile, ImportCandidate, ImportOptions, ProgramEntry } from "../../../protocol";
+
+export const PROFILE_LABEL: Record<AnalysisProfile, string> = { full: "Full", fast: "Fast (skips switch analysis, call-convention ID, stack)" };
+/** shortcut: fixed size threshold; fast first open is ~2.4x quicker on a 66 MB binary (SPIKE_REPORT round 4), upgrade to a time estimate once measured on more binaries. */
+export const FAST_MIN_BYTES = 20 * 1048576;
+export const defaultProfile = (sizeBytes: number): AnalysisProfile => (sizeBytes > FAST_MIN_BYTES ? "fast" : "full");
 
 /** Raw Binary needs no loader recognition. shortcut: assumed to accept a base address (real list comes from import_candidates when it is offered), upgrade if a sidecar says otherwise. */
 export const RAW_CANDIDATE: ImportCandidate = { loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true };
@@ -14,7 +19,7 @@ export function parseBase(s: string): { ok: true; value: string } | { ok: false;
   return { ok: true, value: "0x" + v.toString(16) };
 }
 
-export interface ImportChoice { cand: ImportCandidate; language: string | null; compilerSpec: string | null; base: string }
+export interface ImportChoice { cand: ImportCandidate; language: string | null; compilerSpec: string | null; base: string; profile?: AnalysisProfile }
 
 /** What the user may submit: a language is mandatory, the base address (if any) must parse and be accepted by the loader. */
 export function choiceError(c: ImportChoice): string | null {
@@ -23,17 +28,18 @@ export function choiceError(c: ImportChoice): string | null {
   return null;
 }
 
-/** undefined = plain default import (omit every option so the sha256 key is used); else all explicit options. */
+/** undefined = plain default import (omit every option so the sha256 key is used); else all explicit options. Profile "full" is the sidecar's default and is never sent; "fast" always is. */
 export function buildOptions(c: ImportChoice): ImportOptions | undefined {
   const base = c.cand.acceptsBaseAddress ? parseBase(c.base) : { ok: true as const, value: "" };
   if (!base.ok || !c.language) return undefined;
-  if (c.cand.preferred && c.language === c.cand.language && c.compilerSpec === c.cand.compilerSpec && !base.value) return undefined;
-  return { loader: c.cand.loader, language: c.language, ...(c.compilerSpec ? { compilerSpec: c.compilerSpec } : {}), ...(base.value ? { baseAddress: base.value } : {}) };
+  const profile = c.profile === "fast" ? { profile: "fast" as const } : {};
+  if (c.cand.preferred && c.language === c.cand.language && c.compilerSpec === c.cand.compilerSpec && !base.value) return c.profile === "fast" ? profile : undefined;
+  return { loader: c.cand.loader, language: c.language, ...(c.compilerSpec ? { compilerSpec: c.compilerSpec } : {}), ...(base.value ? { baseAddress: base.value } : {}), ...profile };
 }
 
 /** "Raw Binary · ARM:LE:32:v8 · @0x8000000" for the program browser; "default" for plain imports. */
 export const optionsSummary = (o: ImportOptions): string =>
-  [o.loader, o.language, o.compilerSpec, o.baseAddress && "@" + o.baseAddress].filter(Boolean).join(" · ") || "default";
+  [o.loader, o.language, o.compilerSpec, o.baseAddress && "@" + o.baseAddress, o.profile === "fast" && "fast analysis"].filter(Boolean).join(" · ") || "default";
 
 /** Parameters to reopen a stored program exactly as it was imported (undefined path = nothing to reopen). */
 export const reopenParams = (e: ProgramEntry): { path: string } & ImportOptions | null =>

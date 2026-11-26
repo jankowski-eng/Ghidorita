@@ -26,7 +26,7 @@ import { Panes, type PaneId } from "./Layout";
 import { runAutotest, runBench } from "./autotest";
 import { emptyNav, push, goBack, goForward, type Nav, type Loc, type Source } from "./nav";
 import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } from "./symbols";
-import { useTabs } from "./useTabs";
+import { useTabs, canForce } from "./useTabs";
 import { EditDialog, type EditSpec } from "./EditDialog";
 import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus, type XrefTarget } from "./editActions";
 import type { CommentKind, UndoState } from "../../../protocol";
@@ -85,7 +85,7 @@ export function App() {
   const lastPane = useRef<"listing" | "decompiler">("listing");
 
   const fail = (e: unknown) => { const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
-  const tabs = useTabs(fail, (ms) => setStats((s) => ({ ...s, decompileMs: ms })));
+  const tabs = useTabs(fail, (ms) => setStats((s) => ({ ...s, decompileMs: ms })), (entry) => funcsRef.current.find((f) => f.entry === entry)?.size ?? 0);
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
 
   const setNav = (n: Nav) => { navRef.current = n; setNavState(n); };
@@ -238,15 +238,18 @@ export function App() {
   const listingEdit = async (a: EditAction) => {
     const addr = cursorRef.current || topAddrRef.current;
     if (!addr) return;
-    const row = (window as any).__listing?.rowAt(addr) as { address: Address; label?: string; comment?: string } | undefined;
+    const row = (window as any).__listing?.rowAt(addr) as { address: Address; label?: string } | undefined;
     if (!row) return setFlash("Cursor row not loaded.");
     const at = row.address;
     if (a === "rename") {
       const f = await containingFunction(at);
-      ask({ title: "Rename", label: "New name", field: "text", initial: row.label ?? (f && f.entry === at ? f.name : ""), submit: "Rename" },
+      if (row.label || (f && f.entry === at)) ask({ title: "Rename", label: "New name", field: "text", initial: row.label ?? f!.name, submit: "Rename" },
         async (v) => { await rpc.call("rename_symbol", { address: at, newName: v.trim() }); });
+      else ask({ title: "Create label", label: "Label name", field: "text", initial: "", submit: "Create label" }, // nothing to rename here: L creates the label
+        async (v) => { await rpc.call("create_label", { address: at, name: v.trim() }); });
     } else if (a === "comment") {
-      ask({ title: "Set comment", label: "Comment", field: "comment", initial: row.comment ?? "", submit: "Set comment" },
+      const comments = await rpc.call("get_comments", { address: at });
+      ask({ title: "Set comment", label: "Comment", field: "comment", initial: comments.eol ?? "", submit: "Set comment", kind: "eol", comments },
         async (v, kind) => { await rpc.call("set_comment", { address: at, kind, text: v }); });
     } else if (a === "createFunction") await rpc.call("create_function", { address: at });
     else if (a === "clear") await rpc.call("clear_code", { address: at });
@@ -279,7 +282,8 @@ export function App() {
       const line0 = (pos?.lineNumber ?? 1) - 1;
       const at = d.tokens.find((t) => t.line === line0 && t.address)?.address;
       if (!at) return setFlash("No address on this line.");
-      ask({ title: "Set comment", label: "Comment", field: "comment", initial: "", submit: "Set comment", kind: "pre" },
+      const comments = await rpc.call("get_comments", { address: at });
+      ask({ title: "Set comment", label: "Comment", field: "comment", initial: comments.pre ?? "", submit: "Set comment", kind: "pre", comments },
         async (v, kind) => { await rpc.call("set_comment", { address: at, kind, text: v }); });
     } else setFlash("Use the listing for this action.");
   };
@@ -348,10 +352,11 @@ export function App() {
         else if (m === "error") fail((p as { message: string }).message);
       };
       autotestRef.current = !!cfg.autotest;
+      window.addEventListener("securitypolicyviolation", (e) => (window as any).__expectCsp || fail("CSP blocked " + e.violatedDirective + ": " + e.blockedURI)); // the policy in index.html must stay as tight as Monaco allows
       if (cfg.autotest) (cfg.bench ? runBench : runAutotest)(cfg.autotest, {
         open: (p) => api.current.open(p), command: (c) => api.current.handleMenu(c), lastMenu: () => menuRef.current, title: () => document.title, cancelFile: cfg.cancelFile,
         status: () => ({ funcs: funcsCountRef.current, opened: openedRef.current, opening: openingRef.current, phase: progressRef.current?.phase ?? "", notice: noticeRef.current }),
-        select: async (e) => { await api.current.go(e, "functions"); }, clickAt: (l, c) => api.current.clickAt(l, c),
+        select: async (e) => { await api.current.go(e, "functions"); }, goAddr: async (a) => { await api.current.go(a, "goto"); }, clickAt: (l, c) => api.current.clickAt(l, c),
         back: () => api.current.back(), forward: () => api.current.forward(), setPath, fail, errors: errors.current,
         selected: () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active)?.entry ?? null; },
         editor: () => editorRef.current, menu: (id) => window.host.autotestMenu(id), expect: cfg.expect, funcCount: () => funcsCountRef.current, topAddr: () => topAddrRef.current, editorText: () => editorRef.current?.getValue() ?? "",
@@ -433,8 +438,10 @@ export function App() {
             <div className="dec">
               <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
               {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
-              {ad?.status === "loading" && <div className="empty">Decompiling…</div>}
-              {ad?.status === "error" && <div className="empty err">{ad.error}</div>}
+              {ad?.status === "loading" && <div className="empty">Decompiling…{ad.long && <button aria-label="Cancel decompile" onClick={() => tabs.cancel(active!.id)}>Cancel</button>}</div>}
+              {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
+                <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
+              {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
               <div className="editor" style={{ display: active ? undefined : "none" }}>
                 <Decompiler tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>

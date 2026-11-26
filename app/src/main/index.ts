@@ -140,16 +140,22 @@ async function finishAutotest(result: { ok: boolean; persist?: unknown }) {
     writeFileSync(path.join(outDir, "screenshot.png"), img.toPNG());
   } catch (e) { console.error("screenshot failed", e); }
   if (result.persist) writeFileSync(path.join(outDir, "autotest-persist.json"), JSON.stringify(result.persist));
-  console.log("AUTOTEST_RESULT " + JSON.stringify(result));
+  const wp = (win.webContents as any).getLastWebPreferences(); // what the window really runs with (hardening check; missing from the Electron typings)
+  console.log("AUTOTEST_RESULT " + JSON.stringify({ ...result, webPreferences: { contextIsolation: wp.contextIsolation, sandbox: wp.sandbox, nodeIntegration: wp.nodeIntegration } }));
 }
 
+// The window only ever shows our own file: never navigate away, never open new windows (also for any webContents Electron creates later)
+app.on("web-contents-created", (_e, contents) => {
+  contents.on("will-navigate", (e) => e.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+});
 app.setName("Ghidrette");
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
   ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null }));
-  win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
+  win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
 });
