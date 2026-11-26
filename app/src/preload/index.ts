@@ -7,8 +7,8 @@ export type MenuCommand =
   | { type: "open-path"; path: string }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean };
-/** renderer -> main, "menu-state": enables/disables Go > Back / Forward. */
-export interface MenuState { canBack: boolean; canForward: boolean }
+/** renderer -> main, "menu-state": enables/disables Go > Back / Forward and File > Open Binary / Open Recent (disabled while an open runs). */
+export interface MenuState { canBack: boolean; canForward: boolean; canOpen: boolean }
 
 export interface Host {
   getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null }>;

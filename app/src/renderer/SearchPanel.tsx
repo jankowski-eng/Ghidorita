@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Address, SymbolHit } from "../../../protocol";
 import { searchSymbols } from "./symbols";
 import { latest } from "./latest";
-import { useDebounced } from "./hooks";
+import { useDebounced, useRestoreFocus } from "./hooks";
 
 /** Symbol search palette: type, arrows to move, Enter to navigate, Escape to close. */
 export function SearchPanel({ onGo, onClose }: { onGo: (a: Address) => void; onClose: () => void }) {
+  useRestoreFocus();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SymbolHit[]>([]);
   const [cur, setCur] = useState(0);

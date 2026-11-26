@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRestoreFocus } from "./hooks";
 
 export type Progress = { phase: string; pct: number; message: string; analyzer?: string; done?: number };
 
@@ -8,6 +9,7 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "
 export function OpenDialog({ path, progress, startedAt, cancelling, onCancel }: {
   path: string; progress: Progress | null; startedAt: number; cancelling: boolean; onCancel: () => void;
 }) {
+  useRestoreFocus();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   const p = progress ?? { phase: "import", pct: -1, message: "starting" };

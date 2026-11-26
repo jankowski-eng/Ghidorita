@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Address } from "../../../protocol";
 import { resolveGoto } from "./parseGoto";
 import { searchSymbols } from "./symbols";
+import { useRestoreFocus } from "./hooks";
 
 /** Go to address bar: Enter navigates, Escape closes, an invalid entry shows an inline error and stays open. */
 export function GoTo({ onGo, onClose }: { onGo: (a: Address) => void; onClose: () => void }) {
+  useRestoreFocus();
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const ref = useRef<HTMLInputElement>(null);

@@ -170,8 +170,8 @@ export function App() {
   }, []);
 
   const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
-  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0;
-  useEffect(() => { window.host.setMenuState({ canBack, canForward }).catch(() => {}); }, [canBack, canForward]);
+  const canBack = nav.back.length > 0, canForward = nav.forward.length > 0, busy = !!opening;
+  useEffect(() => { window.host.setMenuState({ canBack: canBack && !busy, canForward: canForward && !busy, canOpen: !busy }).catch(() => {}); }, [canBack, canForward, busy]);
 
   const progressRef = useRef(progress); progressRef.current = progress;
   const here = nav.current?.address ?? null;

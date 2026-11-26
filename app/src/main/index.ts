@@ -76,8 +76,8 @@ ipcMain.handle("pick-file", async (e) => (fromWin(e) ? pickFile() : null));
 ipcMain.handle("recent-add", (e, p: unknown) => { if (fromWin(e) && validPath(p)) menu?.addRecent(p); });
 ipcMain.handle("menu-state", (e, s: unknown) => {
   const o = s as Record<string, unknown> | null;
-  if (!fromWin(e) || !o || typeof o !== "object" || typeof o.canBack !== "boolean" || typeof o.canForward !== "boolean") return;
-  menu?.setState({ canBack: o.canBack, canForward: o.canForward });
+  if (!fromWin(e) || !o || typeof o !== "object" || typeof o.canBack !== "boolean" || typeof o.canForward !== "boolean" || typeof o.canOpen !== "boolean") return;
+  menu?.setState({ canBack: o.canBack, canForward: o.canForward, canOpen: o.canOpen });
 });
 
 ipcMain.handle("autotest-done", async (e, result: { ok: boolean }) => {
