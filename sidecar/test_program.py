@@ -81,7 +81,9 @@ def test_open_cancel_busy_failfast(tmp_path):
                 # opening another binary while one is loaded closes the old one first
                 other = os.path.join(HERE, "..", "bench", "nonexistent")
                 await c.err("open_binary", NOT_FOUND, path=other)
-                assert len(await c.ok("list_functions")) == len(fns)  # a bad path must not close the loaded program
+                await c.err("list_functions", NO_PROGRAM)  # a failed open leaves no program open (protocol.md, open_binary)
+                assert (await c.ok("open_binary", path=BIN))["persisted"] is True
+                assert len(await c.ok("list_functions")) == len(fns)
                 # now it is persisted, cancel is a no-op and reopen is quick
                 assert (await c.ok("open_binary", path=BIN))["persisted"] is True
         run(go())

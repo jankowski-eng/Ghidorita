@@ -129,21 +129,17 @@ def test_pool_concurrent_and_cancel(env):
             async def clear_cache():  # a rename clears the whole cache; undo it right after
                 await c.ok("rename_symbol", address=fns[0]["entry"], newName="cache_clear_probe")
                 await c.ok("undo")
+            # behaviour, not wall-clock: with 2 workers a tiny decompile queued behind the biggest one is answered first
+            # (a single worker would answer in arrival order). Arrival order of the replies does not depend on machine load
+            # unless the tiny one is starved for the whole decompile of the biggest function.
             await clear_cache()
-            t = time.monotonic()
-            ids = [await c.send("decompile", entry=f["entry"]) for f in big]
-            rs = [await c.reply(i) for i in ids]
-            conc = time.monotonic() - t
-            assert all("result" in r and r["result"]["cached"] is False for r in rs), rs
-            await clear_cache()
-            seq = 0.0
-            for f in big:
-                t = time.monotonic()
-                await c.ok("decompile", entry=f["entry"])
-                seq += time.monotonic() - t
-            print("pool of 2: concurrent %.3fs vs sequential %.3fs" % (conc, seq))
-            if seq > 0.3:  # only meaningful when the work is not trivially small
-                assert conc < 0.9 * seq, (conc, seq)
+            tiny = min((f for f in fns if f["size"] > 0), key=lambda f: f["size"])
+            i_big = await c.send("decompile", entry=big[0]["entry"])
+            i_tiny = await c.send("decompile", entry=tiny["entry"])
+            t_tiny, r_tiny = await asyncio.wait_for(c.waiters[i_tiny], 300)
+            t_big, r_big = await asyncio.wait_for(c.waiters[i_big], 300)
+            assert "result" in r_tiny and "result" in r_big and r_big["result"]["cached"] is False, (r_tiny, r_big)
+            assert t_tiny < t_big, "tiny decompile waited for the big one: the pool serialised"
 
             # cancel running + queued still work with the pool (3 requests, 2 workers: the third is queued)
             await clear_cache()

@@ -170,21 +170,13 @@ class Program:
         text_arg(path, "path")
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
-        if not os.path.isfile(path):
-            raise RpcError(NOT_FOUND, "no such file: %s" % path)
-        opts = self._check_options(loader, language, compilerSpec, baseAddress)
-        if profile not in (None, "full", "fast"):
-            raise RpcError(INVALID, "bad profile %r" % (profile,))
-        # no profile: SIDECAR_ANALYSIS_DISABLE if set (costs nothing), else full
-        disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
-        if sorted(disabled) == FAST_PROFILE:
-            opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
+        args = (loader, language, compilerSpec, baseAddress, profile)
         op = self.ctx.lanes.opening = Opening()
         fut = self.ctx.loop.create_future()
 
         def body():
             try:
-                res, exc = self._do_open(path, op, opts, disabled), None
+                res, exc = self._do_open(path, op, *args), None
             except BaseException as e:  # noqa
                 res, exc = None, e
             self.ctx.loop.call_soon_threadsafe(self.ctx.lanes.settle, fut, res, exc)
@@ -194,13 +186,23 @@ class Program:
         finally:
             self.ctx.lanes.opening = None
 
-    def _do_open(self, path, op, opts, disabled):
-        """Thread O. On cancel or any error: nothing is saved, the program is released, the project stays usable."""
+    def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile):
+        """Thread O. One end state for every failure (bad arguments, missing file, cancel, load error): no program is open, nothing is
+        saved, the project stays usable. The one exception is a failed save of the old program: it stays open (see close)."""
         res = prog = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
             self.ctx.lanes.on_r(lambda: self.close(strict=True))  # old program goes first (listener removed, cache cleared, interfaces disposed)
             op.check()
+            if not os.path.isfile(path):
+                raise RpcError(NOT_FOUND, "no such file: %s" % path)
+            opts = self._check_options(loader, language, compilerSpec, baseAddress)
+            if profile not in (None, "full", "fast"):
+                raise RpcError(INVALID, "bad profile %r" % (profile,))
+            # no profile: SIDECAR_ANALYSIS_DISABLE if set (costs nothing), else full
+            disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
+            if sorted(disabled) == FAST_PROFILE:
+                opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
             h, done, size = hashlib.sha256(), 0, max(1, os.path.getsize(path))
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -245,6 +247,8 @@ class Program:
             return {"programId": key, "name": os.path.basename(path), "persisted": persisted}
         except BaseException as e:  # noqa
             op.finished = True
+            if self.ses.program is None:  # not when the old program stayed open because its save failed
+                self.ses.program_id, self.ses.undo_snap = None, {"canUndo": False, "canRedo": False, "dirty": False}
             if res is not None:
                 try:
                     res.close()

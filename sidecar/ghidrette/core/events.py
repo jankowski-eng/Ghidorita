@@ -102,13 +102,15 @@ class Events:
         for fn in self.subscribers:
             fn(set(ALL_KINDS), None, True)
         with self.plock:
-            self.pending.update(ranges=[], kinds=set(), broad=False)
+            self.pending.update(ranges=[], kinds=set(), broad=False, armed=False)
 
     def _emit(self):
         with self.plock:
             p = self.pending
             kinds, broad, ranges = sorted(p["kinds"], key=ALL_KINDS.index), p["broad"], sorted(p["ranges"])
             p.update(ranges=[], kinds=set(), broad=False, armed=False)
+        if not kinds and not broad:  # reset() dropped what was pending: no spurious program_changed for a closed program
+            return
         merged = []
         for sp, s, e in ranges:
             if merged and merged[-1][0] == sp and s <= merged[-1][2] + 1:

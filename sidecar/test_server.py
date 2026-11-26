@@ -5,7 +5,7 @@ import pytest
 
 import websockets
 
-from testlib import BIN, Client, HERE, INVALID, JAVA, NOT_FOUND, Proc, ghidra_dir, run
+from testlib import BIN, Client, HERE, INVALID, JAVA, NOT_FOUND, NO_PROGRAM, Proc, ghidra_dir, run
 
 
 def test_auth_mandatory(tmp_path):
@@ -66,7 +66,9 @@ def test_bad_arguments(env):
             await c.err("open_binary", NOT_FOUND, path="/no/such/file")
             await c.err("open_binary", INVALID, path=7)
             assert (await c.ok("cancel_open")) == {"cancelled": False}
-            assert len(await c.ok("list_functions")) == len(env["fns"])  # still alive
+            await c.err("list_functions", NO_PROGRAM)  # a failed open leaves no program open, whatever the reason
+            assert (await c.ok("open_binary", path=BIN))["persisted"] is True  # and the sidecar is still alive
+            assert len(await c.ok("list_functions")) == len(env["fns"])
     run(go())
 
 

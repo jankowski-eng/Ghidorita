@@ -1,6 +1,6 @@
 """Slow reads on the scan workers (thread S): symbol search and table, strings, memory search; cancel_search on the loop.
 They never run on R, so a long scan cannot delay listing fetches. Results are cached as snapshots until the program changes."""
-import threading
+import functools, threading
 from collections import OrderedDict
 
 from ..core.args import MASK64, lim, text_arg
@@ -8,6 +8,26 @@ from ..core.errors import CANCELLED, INVALID, RpcError
 from ..core.rpc import rpc
 
 STRING_VALUE_CAP = 1000
+
+
+class StaleRead(Exception):
+    """A slow read met an object an edit deleted after its snapshot was taken."""
+
+
+def retry_stale(fn):
+    """A page read racing an edit: the snapshot is dropped by the edit's program_changed, so one retry sees fresh data. Twice stale in a row =
+    a second edit raced it: documented Cancelled (protocol.md, Concurrency), the client refetches on program_changed anyway."""
+    @functools.wraps(fn)
+    def run(self, *a, **kw):
+        try:
+            return fn(self, *a, **kw)
+        except StaleRead:
+            self.snap_clear()
+        try:
+            return fn(self, *a, **kw)
+        except StaleRead as e:
+            raise RpcError(CANCELLED, "program changed while reading, retry: %s" % e)
+    return run
 
 
 class _SymSnap:
@@ -125,6 +145,7 @@ class Search:
         return (self.SOURCES.get(str(s.getSource()), "other"), name)
 
     @rpc(lane="scan")
+    @retry_stale
     def list_symbols(self, offset=0, limit=100, query="", kinds=None, sort="address", desc=False, scan=None):
         """One page of the symbol table, in `sort` order. `total` counts all rows after the filters.
         Default view (address order, no filter): the Ghidra by-address iterator is advanced lazily and kept, so page 1 costs `limit` rows
@@ -183,7 +204,7 @@ class Search:
             try:
                 items = [self._sym_item(prog, s) for s in syms]
             except Exception as e:  # noqa  a symbol of a stale snapshot was deleted by an edit meanwhile
-                raise RpcError(CANCELLED, "program changed while reading symbols: %s" % e)
+                raise StaleRead(str(e))
             return {"total": total, "items": items}
 
     def _scan_strings(self, prog, minLength, scan):

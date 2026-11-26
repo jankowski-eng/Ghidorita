@@ -119,6 +119,10 @@ class Edits:
             mask = (1 << 64) - 1  # getOffset is a signed long: the max address of a 64-bit space reads as -1
             top = a.getAddressSpace().getMaxAddress()
             hi = top if (a.getOffset() & mask) + n - 1 > (top.getOffset() & mask) else a.add(n - 1)
+        # units overlapping the range are cleared whole (as the listing's Clear Code Bytes does): widen to their bounds, or a range
+        # inside one unit (getCodeUnits only yields units that *start* in a view) would look empty and be refused
+        first, last = listing.getCodeUnitContaining(lo), listing.getCodeUnitContaining(hi)
+        lo, hi = (first.getMinAddress() if first is not None else lo), (last.getMaxAddress() if last is not None else hi)
         view = AddressSet(lo, hi).intersect(mem)
         # ClearCmd.applyTo returns true even when it did nothing; an empty transaction would not be undoable
         if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
