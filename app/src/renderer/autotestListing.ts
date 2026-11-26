@@ -93,10 +93,11 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   if (withParts) {
     await c.goAddr(withParts.address); await waitFor(() => lineText("k-main").length > 0 && !!at(withParts!.address) && topIs(withParts!.address), 10000, "data row");
     need(lineText("k-part").length === 0, "folded by default");
-    document.querySelector<HTMLElement>('.lrow .fold[aria-label="Unfold components"]')!.click();
+    const fold = await waitFor(() => document.querySelector<HTMLElement>('.lrow .fold[aria-label="Unfold components"]'), 5000, `fold marker of ${withParts.address} (top ${c.topAddr()}; rows ${[...document.querySelectorAll(".lrow")].slice(0, 4).map((x) => x.textContent).join(" | ")})`);
+    fold.click();
     await waitFor(() => lineText("k-part").length >= Math.min(withParts!.parts!.length, 3), 5000, "components shown");
     R.parts = { at: withParts.address, parts: withParts.parts!.length, first: lineText("k-part")[0] };
-    document.querySelector<HTMLElement>('.lrow .fold[aria-label="Fold components"]')!.click();
+    (await waitFor(() => document.querySelector<HTMLElement>('.lrow .fold[aria-label="Fold components"]'), 5000, "fold marker (unfolded)")).click();
     await waitFor(() => lineText("k-part").length === 0, 5000, "components folded again");
   } else R.parts = "none in the first 10k rows";
 
