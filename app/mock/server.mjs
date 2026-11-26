@@ -210,7 +210,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -397,6 +397,7 @@ const handlers = {
   get_function_at: ({ address }) => funcAt(parseAddr(address)),
   export_symbols({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, functions: NFUNC, labels: 3, data: 2, comments: 1 }; },
   export_header({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, types: 2, functions: NFUNC, skipped: 0 }; },
+  export_gzf({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, bytes: 4096 }; },
   top_symbols({ limit }) {
     const n = Math.min(limit ?? 30, 500), f = (i, group) => ({ name: nameOf(i), address: entryOf(i), kind: "function", refs: (i * 37) % 50 + 1, group });
     return [f(0, "entry"), ...[1, 2, 3].map((i) => f(i, "import")), ...Array.from({ length: n }, (_, k) => f(k + 4, "function")).sort((a, b) => b.refs - a.refs)];

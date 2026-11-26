@@ -130,7 +130,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -179,6 +179,8 @@ export interface Methods {
   // Exports (protocol.md "Exports"): the sidecar writes the file at an absolute `path` the client picked.
   export_symbols: { params: { path: string }; result: { path: string; functions: number; labels: number; data: number; comments: number } };
   export_header: { params: { path: string }; result: { path: string; types: number; functions: number; skipped: number } };
+  // Ghidra archive (.gzf) of the open program, written at an absolute `path`; exports the in-memory state, unsaved edits included. Lane R.
+  export_gzf: { params: { path: string }; result: { path: string; bytes: number } };
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };

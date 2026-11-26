@@ -23,7 +23,7 @@ export function allowsCommand(caps: ReadonlySet<Capability>, cmd: MenuCommand): 
     case "coverage-path": case "coverage-load": case "coverage-clear": return caps.has("coverage");
     case "graph": return caps.has("controlFlowGraph") && caps.has("decompile");
     case "callgraph": return caps.has("callGraph");
-    case "export": return caps.has("export");
+    case "export": return caps.has(cmd.kind === "gzf" ? "exportGzf" : "export");
     case "xrefs": return caps.has("references");
     case "toggle-pane": return cmd.pane !== "decompiler" || caps.has("decompile");
     case "close-tab": return caps.has("decompile");

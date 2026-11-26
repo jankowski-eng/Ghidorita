@@ -108,6 +108,7 @@ export interface CoverageReads {
 export interface Exports {
   symbols(params: { path: string }): Promise<{ path: string; functions: number; labels: number; data: number; comments: number }>;
   header(params: { path: string }): Promise<{ path: string; types: number; functions: number; skipped: number }>;
+  gzf(params: { path: string }): Promise<{ path: string; bytes: number }>;
 }
 
 export interface ProjectCatalog {

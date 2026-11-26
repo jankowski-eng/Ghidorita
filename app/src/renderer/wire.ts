@@ -72,6 +72,7 @@ export const results = {
   function_graph: shape({ blocks: array(shape({ start: address, end: address, kind: oneOf("c", "asm"), lines: array(str) })), edges: array(shape({ from: address, to: address, kind: oneOf("true", "false", "uncond") })) }),
   export_symbols: shape({ path: str, functions: count, labels: count, data: count, comments: count }),
   export_header: shape({ path: str, types: count, functions: count, skipped: count }),
+  export_gzf: shape({ path: str, bytes: count }),
   list_symbols: shape({ total: count, items: array(shape({ name: str, address: nullable(address), kind: symbolKind, namespace: str, source })) }),
   list_strings: shape({ total: count, items: array(shape({ address, value: str, length: count })) }),
   search_memory: shape({ next: nullable(address), items: array(shape({ address, length: positive, bytes: str, function: optional(str) })) }),

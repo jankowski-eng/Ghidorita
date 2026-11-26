@@ -1,8 +1,8 @@
-"""Exports: a JSON symbol map and a C header, written to a path the client picked with its native save dialog (scan lane: reads only)."""
+"""Exports: a JSON symbol map and a C header (scan lane: reads only) and a Ghidra archive (.gzf, lane R), written to a path the client picked with its native save dialog."""
 import json, os, re
 
 from ..core.args import text_arg
-from ..core.errors import INVALID, RpcError
+from ..core.errors import INTERNAL, INVALID, RpcError, java_error
 from ..core.rpc import rpc
 from .listing import ROW_COMMENT_KINDS, SOURCES
 
@@ -92,3 +92,27 @@ class Exports:
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         return {"path": path, "types": len(types), "functions": len(protos), "skipped": skipped}
+
+    @rpc(lane="R")
+    def export_gzf(self, path):
+        """Ghidra archive -> `path` through GzfExporter (the whole database as a packed .gzf that Ghidra's importer opens). Lane R: it reads
+        the entire database, so no edit can be half-applied while it runs. It exports what is in memory, unsaved edits included (the project
+        copy is not touched). Not cancellable (shortcut: TaskMonitor.DUMMY, upgrade with a scan-lane monitor if big programs make the wait
+        noticeable). Once background analysis exists this must fail with Busy while it runs (shortcut: not yet checked, nothing runs in the
+        background today)."""
+        self._target(path)
+        prog = self.ses.need()
+        import jpype
+        from java.io import File
+        from ghidra.app.util.exporter import GzfExporter
+        from ghidra.util.task import TaskMonitor
+        if os.path.isdir(path):
+            raise RpcError(INVALID, "path is a folder: %r" % path[:200])
+        exp = GzfExporter()
+        try:
+            ok = bool(exp.export(File(path), prog, None, TaskMonitor.DUMMY))
+        except jpype.JException as e:
+            raise java_error(e)
+        if not ok:
+            raise RpcError(INTERNAL, "export failed: " + str(exp.getMessageLog().toString())[:500])
+        return {"path": path, "bytes": os.path.getsize(path)}

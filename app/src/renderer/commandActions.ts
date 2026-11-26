@@ -32,6 +32,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Toggle Call Graph", cmd: { type: "callgraph" } },
   { label: "Export Symbol Map (JSON)", cmd: { type: "export", kind: "symbols" } },
   { label: "Export C Header", cmd: { type: "export", kind: "header" } },
+  { label: "Export Ghidra Archive (.gzf)", cmd: { type: "export", kind: "gzf" } },
   { label: "Close Tab", cmd: { type: "close-tab" } },
   { label: "Close Program", cmd: { type: "close-program" } },
 ];

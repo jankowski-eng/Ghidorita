@@ -75,6 +75,10 @@ async function exportShot(fl: { entry: string }[], c: AutotestCtx, result: Recor
   await waitFor(() => /Exported \d+ functions, \d+ labels/.test(flash()), 30000, "symbol map exported");
   c.command({ type: "export", kind: "header" });
   await waitFor(() => /Exported \d+ types and \d+ prototypes/.test(flash()), 30000, "header exported");
+  if (c.backend.capabilities.has("exportGzf")) {
+    c.command({ type: "export", kind: "gzf" });
+    await waitFor(() => /Exported Ghidra archive/.test(flash()), 60000, "gzf exported");
+  }
   result.export = flash().match(/Exported [^|]*/g);
   await sleep(300);
   return true;

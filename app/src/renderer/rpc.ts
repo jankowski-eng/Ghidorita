@@ -225,7 +225,7 @@ export class WebSocketBackend implements ApplicationBackend {
         save: () => edit("save", "save", "save", {}),
       },
       coverage: { load: (p) => read("load_coverage", p, "coverage") },
-      exports: { symbols: (p) => read("export_symbols", p, "export"), header: (p) => read("export_header", p, "export") },
+      exports: { symbols: (p) => read("export_symbols", p, "export"), header: (p) => read("export_header", p, "export"), gzf: (p) => read("export_gzf", p, "exportGzf") },
       analysis: {
         status: () => read("analysis_status", {}, "analysis"),
         start: (profile) => read("start_analysis", profile ? { profile } : {}, "analysis"),

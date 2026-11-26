@@ -1,7 +1,7 @@
 """Exports: the JSON symbol map and the C header, after a rename and a new structure."""
-import json, re
+import json, os, re
 
-from testlib import Client, INVALID, run
+from testlib import Client, INVALID, Proc, run
 
 
 def test_export_symbols_and_header_after_rename(env, tmp_path):
@@ -34,4 +34,34 @@ def test_export_symbols_and_header_after_rename(env, tmp_path):
             finally:
                 for _ in range(4):  # comment, struct fields, struct, rename
                     await c.ok("undo")
+    run(go())
+
+
+def test_export_gzf_reopens_with_same_functions_and_unsaved_edit(env, tmp_path):
+    """Ghidra archive of /bin/ls, taken with an unsaved rename: non-empty, and a second sidecar (own project) imports it with the same functions."""
+    fns = env["fns"]
+    gzf = str(tmp_path / "ls.gzf")
+    async def go():
+        async with Client(env["proc"].port) as c:
+            target = next(f for f in fns if f["source"] != "user" and f["size"] > 8)
+            await c.err("export_gzf", INVALID, path="relative.gzf")
+            await c.err("export_gzf", INVALID, path=str(tmp_path / "no" / "such" / "x.gzf"))
+            await c.err("export_gzf", INVALID, path=str(tmp_path))
+            await c.ok("rename_symbol", address=target["entry"], newName="renamed_for_gzf")
+            try:
+                assert (await c.ok("undo_state"))["dirty"]
+                r = await c.ok("export_gzf", path=gzf)
+                assert r["path"] == gzf and r["bytes"] == os.path.getsize(gzf) > 100_000
+                assert (await c.ok("undo_state"))["dirty"], "exporting must not save the program"
+            finally:
+                await c.ok("undo")
+        proc2 = Proc(tmp_path / "projects2")
+        try:
+            async with Client(proc2.port) as c2:
+                await c2.ok("open_binary", path=gzf)
+                again = await c2.ok("list_functions")
+                assert len(again) == len(fns), (len(again), len(fns))
+                assert next(f for f in again if f["entry"] == target["entry"])["name"] == "renamed_for_gzf"
+        finally:
+            proc2.stop()
     run(go())
