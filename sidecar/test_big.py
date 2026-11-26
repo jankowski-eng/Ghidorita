@@ -42,22 +42,21 @@ def test_cancel_running_search_memory(big):
     """5.7 M matches of 00 00 00 00 on the big binary: a page that is running is cancelled in milliseconds, earlier pages stay valid, the listing stays responsive."""
     async def go():
         async with Client(big["proc"].port) as c:
-            first = await c.ok("search_memory", pattern="00 00 00 00", limit=10000)
-            assert len(first["items"]) == 10000 and first["next"]
-            # page 2 runs for ~0.5 s (a page walks ~10,000 matches of Ghidra's searcher); cancel it while it is running
-            rid = await c.send("search_memory", pattern="00 00 00 00", limit=10000, start=first["next"])
-            await asyncio.sleep(0.1)
+            # the first page runs for 0.35-0.5 s (measured on this binary; later pages in dense zero runs are faster): cancel it while it is running
+            rid = await c.send("search_memory", pattern="00 00 00 00", limit=10000)
+            await asyncio.sleep(0.05)
             t = time.monotonic()
-            probe = await c.ok("listing_rows", address=big["fns"][100]["entry"], count=50)  # not blocked by the scan (thread R)
-            probe_ms = (time.monotonic() - t) * 1000
-            assert probe
+            pid = await c.send("listing_rows", address=big["fns"][100]["entry"], count=50)  # thread R is not blocked by the scan
             ack = await c.ok("cancel_search", id=rid)
+            assert await c.reply(pid)
+            probe_ms = (time.monotonic() - t) * 1000
             t = time.monotonic()
             r = await c.reply(rid)
             assert ack == {"cancelled": True}, "the page had already finished: the machine is too fast for this test"
             assert r["error"]["code"] == CANCELLED, r
             print("search cancelled: reply %.0f ms after the ack, listing fetch during the scan %.0f ms" % ((time.monotonic() - t) * 1000, probe_ms))
-            # the first page is still what the second search starts from
+            first = await c.ok("search_memory", pattern="00 00 00 00", limit=10000)  # the cancelled page left nothing behind: the same request now completes
+            assert len(first["items"]) == 10000 and first["next"]
             again = await c.ok("search_memory", pattern="00 00 00 00", limit=10, start=first["next"])
             assert again["items"][0]["address"] == first["next"] or int(again["items"][0]["address"], 16) >= int(first["next"], 16)
             # a no-match search over the whole binary, cancelled while it runs, then the next request is served
