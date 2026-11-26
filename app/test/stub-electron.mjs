@@ -1,0 +1,4 @@
+// Stand-in for `electron` in tests that bundle main-process code: Menu.buildFromTemplate returns the template, setApplicationMenu keeps it.
+export const Menu = { buildFromTemplate: (t) => t, setApplicationMenu: (t) => { globalThis.__builtMenu = t; } };
+export const app = { getPath: () => "/tmp/ghidrette-test", on() {} };
+export const BrowserWindow = class {};
