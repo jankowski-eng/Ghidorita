@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 export interface ProviderLaunch {
@@ -21,7 +22,7 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
   const env: NodeJS.ProcessEnv = { ...ctx.env, SIDECAR_TOKEN: ctx.token };
   delete env.SIDECAR_ALLOW_NO_AUTH;
   const { appDir, packaged, resourcesPath } = ctx;
-  const provider = env.GHIDRETTE_PROVIDER ?? (env.MOCK === "1" ? "mock" : env.SIDECAR_CMD ? "external" : "pyghidra");
+  const provider = env.GHIDRETTE_PROVIDER ?? (env.MOCK === "1" ? "mock" : env.SIDECAR_CMD ? "external" : packaged ? distributionProvider(appDir) : "pyghidra");
 
   switch (provider) {
     case "fixture": {
@@ -49,6 +50,7 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
         env.JAVA_HOME = path.join(root, "jdk");
         env.GHIDRA_INSTALL_DIR = path.join(root, "ghidra");
         env.PYTHONNOUSERSITE = "1";
+        env.PYTHONPYCACHEPREFIX = path.join(ctx.userData, "pycache"); // bytecode written into the .app would break its code-signature seal
         delete env.PYTHONPATH;
         delete env.PYTHONHOME;
         resources.push(env.JAVA_HOME, env.GHIDRA_INSTALL_DIR);
@@ -58,4 +60,9 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
     default:
       throw new Error(`Unknown backend provider: ${provider}`);
   }
+}
+
+// fixture.builder.cjs stamps `ghidretteProvider: "fixture"` into the packaged package.json (extraMetadata); the full build has none.
+function distributionProvider(appDir: string): string {
+  return JSON.parse(readFileSync(path.join(appDir, "package.json"), "utf8")).ghidretteProvider ?? "pyghidra";
 }
