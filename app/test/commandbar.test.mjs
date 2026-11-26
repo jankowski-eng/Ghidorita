@@ -22,3 +22,8 @@ test("addressOf: 0x and qualified addresses go to the bar's Go-to row, bare word
   assert.equal(addressOf("add"), null);
   assert.equal(addressOf("0xzz"), null);
 });
+
+test("the copy actions are in the command bar", () => {
+  assert.deepEqual(matchActions("copy").map((a) => a.label), ["Copy Address", "Copy Bytes (Hex)", "Copy Bytes (C Array)", "Copy Decompiled Function"]);
+  assert.equal(matchActions("c array")[0].cmd.what, "carray");
+});

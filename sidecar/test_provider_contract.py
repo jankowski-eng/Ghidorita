@@ -81,10 +81,13 @@ def test_browsing_protocol(provider, tmp_path):
                 assert fn["entry"] == "overlay::fedcba9876543060"
                 assert len(ranges["ranges"]) == 3
                 await c.err("decompile", -32601, session_id=session, entry=fn["entry"])
-                for m in ("export_gzf",):  # every optional method of the quick wins: a provider without the capability does not have it
-                    await c.err(m, -32601, session_id=session, path="/tmp/x")
+                for m, p in (("export_gzf", {"path": "/tmp/x"}), ("get_bytes", {"address": fn["entry"], "length": 1})):  # every optional method of the quick wins: a provider without the capability does not have it
+                    await c.err(m, -32601, session_id=session, **p)
             else:
-                assert "exportGzf" in info["capabilities"]
+                assert {"exportGzf", "bytes"} <= set(info["capabilities"])
+                got = await c.ok("get_bytes", session_id=session, address=fn["entry"], length=4)  # same spelling as a listing row's bytes
+                row = landing[0]["bytes"].split(" ")
+                assert got["length"] == 4 and got["bytes"].split(" ")[:len(row)] == row[:4]
 
             second = await c.ok("open_binary", path=sample)
             assert first["programId"] == second["programId"]

@@ -56,6 +56,10 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" },
         { type: "separator" },
+        // Cmd+C stays the focused control's own copy (a selection in the decompiler); these copy what the cursor stands for
+        ...(([["Copy Address", "CmdOrCtrl+Shift+C", "address"], ["Copy Bytes (Hex)", "CmdOrCtrl+Alt+C", "bytes"], ["Copy Bytes (C Array)", "", "carray"], ["Copy Decompiled Function", "", "decompiled"]] as const).map(([label, accelerator, what]): MenuItemConstructorOptions =>
+          ({ id: "copy-" + what, label, accelerator: accelerator || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "copy", what }), click: () => send({ type: "copy", what }) }))),
+        { type: "separator" },
         ...(([["Rename…", "L", "rename"], ["Retype Variable…", "CmdOrCtrl+L", "retype"], ["Set Comment…", ";", "comment"], ["Create Function", "F", "createFunction"],
           ["Define Data…", "T", "defineData"], ["Create Structure from Data…", "", "createStruct"], ["Auto Create Structure (variable)…", "", "autoStruct"], ["Clear Code Bytes", "C", "clear"], ["Edit Function Signature…", "", "signature"]] as const).map(([label, key, action]): MenuItemConstructorOptions =>
           // the key is only a hint in the label: a real accelerator could swallow plain letters typed into text inputs

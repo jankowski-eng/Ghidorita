@@ -10,6 +10,7 @@ import { runListingFlow } from "./autotestListing";
 import { runFocusedFlow } from "./autotestFlows";
 import { runAddrFlow } from "./autotestAddr";
 import { runAnalysisFlow } from "./autotestAnalysis";
+import { runQuickFlow } from "./autotestQuick";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestControls {
@@ -92,6 +93,12 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       if (c.only === "addr") {
         await c.open(file);
         result.ok = (await runAddrFlow(file, await c.program().functions.list(), c, result)) && c.errors.length === 0;
+        result.errors = c.errors;
+        return window.host.autotestDone(result);
+      }
+      if (c.only === "quick") {
+        await c.open(file);
+        result.ok = (await runQuickFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
         result.errors = c.errors;
         return window.host.autotestDone(result);
       }
@@ -260,6 +267,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && result.analysisOk === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
       if (result.ok) result.ok = (await runListingFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
       if (result.ok) result.ok = (await runAddrFlow(file, await c.program().functions.list(), c, result)) && c.errors.length === 0;
+      if (result.ok) result.ok = (await runQuickFlow(await c.program().functions.list(), c, result)) && c.errors.length === 0;
       if (result.ok) {
         const ed = await runEditFlow(fl, c, result);
         let ok = ed.ok;

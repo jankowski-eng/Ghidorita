@@ -175,7 +175,7 @@ class Listing:
                 ops = str(cu.getDefaultValueRepresentation())
             if n <= 16:
                 b = bytes(x & 0xFF for x in cu.getBytes())
-            else:  # shortcut: the first 16 bytes only (bytesMore says how many are left), upgrade with a get_bytes RPC
+            else:  # the first 16 bytes only (bytesMore says how many are left; get_bytes has the rest)
                 buf = JArray(JByte)(16)
                 mem.getBytes(ca, buf)
                 b = bytes(x & 0xFF for x in buf)
@@ -211,6 +211,28 @@ class Listing:
                     row["partsTotal"] = total
             rows.append(row)
         return rows
+
+    MAX_BYTES = 64 * 1024
+
+    @rpc(lane="R")
+    def get_bytes(self, address, length):
+        """`length` bytes (1..64 KiB) at `address` as lowercase hex, "48 8b 05 ..". All of them must be loaded and initialized memory of one
+        address space: otherwise NotFound, nothing partial (no marker bytes). InvalidArgument for a bad address or a length outside 1..65536."""
+        import jpype
+        from jpype import JArray, JByte
+        if isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= self.MAX_BYTES:
+            raise RpcError(INVALID, "length must be an integer from 1 to %d" % self.MAX_BYTES)
+        prog = self.ses.need()
+        a = self.ses.addr(address, prog)
+        try:
+            end = a.add(length - 1)
+            if not prog.getMemory().getLoadedAndInitializedAddressSet().contains(a, end):
+                raise RpcError(NOT_FOUND, "%d bytes at %s are not all initialized memory" % (length, address))
+            buf = JArray(JByte)(length)
+            prog.getMemory().getBytes(a, buf)
+        except jpype.JException:  # past the end of the space, or a memory access error
+            raise RpcError(NOT_FOUND, "%d bytes at %s are not all initialized memory" % (length, address))
+        return {"address": address, "length": length, "bytes": bytes(x & 0xFF for x in buf).hex(" ")}
 
     @rpc(lane="R")
     def get_comments(self, address):

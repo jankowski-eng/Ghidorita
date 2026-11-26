@@ -7,6 +7,7 @@ import { FIRST_LISTING_PAGE as FIRST } from "./session";
 import { listingKey, type EditAction } from "./editActions";
 import { parseAddr } from "./address";
 import { indexAt, RunCache, spliceRows, type Range, type Run } from "./rowcache";
+import { useContextMenu, type MenuItem } from "./ContextMenu";
 
 const ROW_H = 16;
 // Fixed pixel height of the listing scrollbar, independent of binary size (Chromium caps elements near 33.5M px).
@@ -50,12 +51,13 @@ const bytesText = (r: ListingRow) => r.bytes + (r.bytesMore ? ` …+${r.bytesMor
  * fraction -> byte position -> address and jumps. Edits: `change` carries the program_changed ranges, only buffered rows intersecting them are
  * refetched (rowcache.ts spliceRows); no ranges (type edits) refetches from the top row. Neither moves the view or cancels a navigation.
  */
-export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, onLatency, onError, onRowClick, onGo, onEdit, onXrefs }: {
+export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRef, cursorRef, rowRef, testMode, canEdit, onLatency, onError, onRowClick, onGo, onEdit, onXrefs, menu }: {
   reader: Pick<ListingReads, "rows">; initialRows: ListingRow[]; map: AddrMap;
   rowRef: { current: (() => ListingRow | undefined) | null }; testMode: boolean; canEdit: (a: EditAction) => boolean; scrollReq: { address: Address; n: number }; change: { n: number; ranges: Range[] | null };
   topAddrRef: { current: Address }; cursorRef: { current: Address };
-  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onGo?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void;
+  onLatency: (ms: number) => void; onError: (e: unknown) => void; onRowClick?: (address: Address) => void; onGo?: (address: Address) => void; onEdit?: (a: EditAction) => void; onXrefs?: (address: Address) => void; menu?: () => MenuItem[];
 }) {
+  const ctx = useContextMenu();
   const box = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
@@ -311,12 +313,14 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
       <div className="lpane">
         {vis.map((l, i) => (
           <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "") + (l.kind === "main" ? coverage.mark(l.row.address, l.row.length) : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
-            onClick={() => { setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}>
+            onClick={() => { setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}
+            onContextMenu={menu ? (e) => { setCur(l.row.address); box.current?.focus(); render(); ctx.open(e, menu()); } : undefined}>
             {body(l)}
           </div>
         ))}
         {!vis.length && <div className="lrow ph" style={{ top: 0 }}><span>{map.total ? "…" : "No listing rows"}</span></div>}
       </div>
+      {ctx.node}
       <div className="lbar" ref={bar} onScroll={onBar} onPointerDown={() => { st.dragging = true; }}><div style={{ height: SCROLL_H }} /></div>
     </div>
   );

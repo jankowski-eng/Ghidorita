@@ -90,7 +90,7 @@ export interface ListingRow {
   xrefs?: RowXrefs;        // set when something references this address
   parts?: DataPart[];      // defined struct/array/union data: its components (the row shows them folded, the client may unfold)
   partsTotal?: number;     // component count when parts is cut (shortcut: first PARTS_MAX = 64)
-  bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16)
+  bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16; get_bytes has them all)
 }
 
 export interface FunctionHeader {
@@ -130,7 +130,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -172,6 +172,8 @@ export interface Methods {
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
   // ---- reads ----
+  // Bytes as hex ("48 8b 05"), 1..65536 of them; NotFound unless every byte is initialized memory. Lane R. Capability "bytes".
+  get_bytes: { params: { address: Address; length: number }; result: { address: Address; length: number; bytes: string } };
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };

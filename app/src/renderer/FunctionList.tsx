@@ -5,11 +5,13 @@ import type { Searches } from "./backend";
 import { latest } from "./latest";
 import { useDebounced } from "./hooks";
 import { notRenamed } from "./names";
+import { useContextMenu, type MenuItem } from "./ContextMenu";
 
 const SRC_TITLE: Record<string, string> = { user: "named by you", analysis: "named by analysis (a guess)", imported: "name from the file", default: "default name, not yet named", other: "" };
 
 /** Listbox: click/Enter opens a preview tab, double-click/Shift+Enter pins; arrows move the cursor (also from the filter box). */
-export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin }: { searchSymbols?: Searches["searchSymbols"]; funcs: FunctionInfo[]; selected: Address | null; onSelect: (e: Address) => void; onPin?: (e: Address) => void }) {
+export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin, menu }: { menu?: (entry: Address) => MenuItem[]; searchSymbols?: Searches["searchSymbols"]; funcs: FunctionInfo[]; selected: Address | null; onSelect: (e: Address) => void; onPin?: (e: Address) => void }) {
+  const ctx = useContextMenu();
   const [filter, setFilter] = useState("");
   const dq = useDebounced(filter.trim(), 150);
   const [hits, setHits] = useState<FunctionInfo[] | null>(null); // null = no filter: show everything
@@ -45,6 +47,7 @@ export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin }
   };
   return (
     <div className="funcs" onKeyDown={onKey}>
+      {ctx.node}
       <input aria-label="Filter functions" placeholder={`filter ${funcs.length} functions`} value={filter} onChange={(e) => setFilter(e.target.value)} />
       {funcs.some((f) => f.source) && <label className="chip todo"><input type="checkbox" aria-label="Not yet renamed" checked={todo} onChange={(e) => setTodo(e.target.checked)} /> not yet renamed{todo ? ` (${shown.length})` : ""}</label>}
       {!funcs.length && <div className="empty">No functions</div>}
@@ -56,7 +59,7 @@ export function FunctionList({ searchSymbols, funcs, selected, onSelect, onPin }
             return (
               <div key={f.entry} id={`fn-${f.entry}`} role="option" aria-selected={f.entry === selected}
                 className={"frow" + (f.entry === selected ? " sel" : "") + (it.index === cursor ? " cur" : "")}
-                onClick={() => { setCursor(it.index); onSelect(f.entry); }} onDoubleClick={onPin ? () => onPin(f.entry) : undefined}
+                onClick={() => { setCursor(it.index); onSelect(f.entry); }} onDoubleClick={onPin ? () => onPin(f.entry) : undefined} onContextMenu={menu ? (e) => ctx.open(e, menu(f.entry)) : undefined}
                 style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${it.start}px)` }}>
                 <span className={"psrc " + (f.source ?? src.get(f.entry) ?? "other")} title={SRC_TITLE[f.source ?? src.get(f.entry) ?? "other"]} />{f.name} <span style={{ color: "#777" }}>{f.entry}</span>
               </div>

@@ -8,7 +8,7 @@ export type MenuCommand =
   | { type: "open-path"; path: string } | { type: "coverage-path"; path: string } | { type: "coverage-clear" } | { type: "coverage-load" }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" } | { type: "datatypes" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
-  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" } | { type: "xrefs" } | { type: "graph" } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" }
+  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" } | { type: "xrefs" } | { type: "graph" } | { type: "callgraph" } | { type: "export"; kind: "symbols" | "header" | "gzf" } | { type: "copy"; what: "address" | "bytes" | "carray" | "decompiled" }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {
@@ -26,6 +26,8 @@ export interface Host {
   pickFile(): Promise<string | null>;
   /** Native save dialog for an export, suggesting `name` (a bare file name); null = cancelled. */
   pickSavePath(name: string): Promise<string | null>;
+  /** Fallback for navigator.clipboard.writeText: main validates (a string up to 8 MiB) and writes the system clipboard. */
+  writeClipboard(text: string): Promise<void>;
   autotestDone(result: unknown): Promise<void>;
   /** Subscribe to menu commands; returns the unsubscribe function. */
   onMenu(cb: (cmd: MenuCommand) => void): () => void;
@@ -46,6 +48,7 @@ const host: Host = {
   getConfig: () => ipcRenderer.invoke("get-config"),
   pickFile: () => ipcRenderer.invoke("pick-file"),
   pickSavePath: (name) => ipcRenderer.invoke("pick-save-path", name),
+  writeClipboard: (text) => ipcRenderer.invoke("clipboard-write", text),
   autotestDone: (result) => ipcRenderer.invoke("autotest-done", result),
   onMenu: (cb) => {
     const h = (_e: unknown, cmd: MenuCommand) => cb(cmd);

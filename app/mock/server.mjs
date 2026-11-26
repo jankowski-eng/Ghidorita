@@ -210,7 +210,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -394,6 +394,19 @@ const handlers = {
     return out;
   },
   // ---- reads ----
+  get_bytes({ address, length }) { // the bytes the listing rows show (padded with 00 where a row shows only its first 16)
+    if (!Number.isInteger(length) || length < 1 || length > 65536) bad("length");
+    const f = segOf(address);
+    if (!f) nf();
+    const out = [];
+    let skip = Number(BigInt("0x" + /([0-9a-f]+)$/i.exec(address)[1]) - (f[0].base + BigInt(f[1] * STRIDE)));
+    for (let i = f[1]; out.length < length; i++, skip = 0) {
+      if (i >= f[0].n) nf();
+      const r = f[0].row(i), b = r.bytes.split(" ");
+      for (let k = skip; k < r.length && out.length < length; k++) out.push(b[k] ?? "00");
+    }
+    return { address, length, bytes: out.join(" ") };
+  },
   get_function_at: ({ address }) => funcAt(parseAddr(address)),
   export_symbols({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, functions: NFUNC, labels: 3, data: 2, comments: 1 }; },
   export_header({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, types: 2, functions: NFUNC, skipped: 0 }; },

@@ -33,6 +33,8 @@ export interface ProviderEvents {
 export interface ListingReads {
   info(): Promise<{ ranges: AddrRange[]; totalBytes: number }>;
   rows(params: { address: Address; count: number; direction?: "forward" | "backward" }): Promise<ListingRow[]>;
+  /** hex bytes ("48 8b 05"), 1..65536; NotFound unless all are initialized memory. Capability "bytes". */
+  bytes(params: { address: Address; length: number }): Promise<{ address: Address; length: number; bytes: string }>;
 }
 
 export interface FunctionNavigation {

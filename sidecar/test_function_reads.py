@@ -1,6 +1,6 @@
 """Function reads and symbol search by name/address."""
 
-from testlib import Client, run
+from testlib import Client, INVALID, NOT_FOUND, run
 
 
 def test_reads(env):
@@ -48,4 +48,33 @@ def test_reads(env):
 
             u = await c.ok("undo_state")
             assert set(u) >= {"canUndo", "canRedo"}
+    run(go())
+
+
+def test_get_bytes(env):
+    """get_bytes: the bytes a listing row shows, longer ranges, caps, and NotFound for anything not initialized memory (nothing partial)."""
+    async def go():
+        async with Client(env["proc"].port) as c:
+            info = await c.ok("listing_info")
+            rows = await c.ok("listing_rows", address=info["ranges"][0]["start"], count=200)
+            row = next(r for r in rows if r["length"] > 16 or r["length"] > 4)  # a row with at least 5 bytes
+            got = await c.ok("get_bytes", address=row["address"], length=row["length"])
+            assert got == {"address": row["address"], "length": row["length"], "bytes": got["bytes"]}
+            assert got["bytes"].split(" ")[:len(row["bytes"].split(" "))] == row["bytes"].split(" ")
+            assert len(got["bytes"].split(" ")) == row["length"]
+            # two adjacent rows read as one range
+            a, b = rows[0], rows[1]
+            both = await c.ok("get_bytes", address=a["address"], length=a["length"] + b["length"])
+            assert both["bytes"].startswith(a["bytes"]) and len(both["bytes"].split(" ")) == a["length"] + b["length"]
+            first = info["ranges"][0]
+            big = min(first["size"], 65536)
+            assert len((await c.ok("get_bytes", address=first["start"], length=big))["bytes"].split(" ")) == big  # the cap itself is allowed
+            for bad in (0, -1, 65537, 1.5, "4", None):
+                await c.err("get_bytes", INVALID, address=first["start"], length=bad)
+            await c.err("get_bytes", INVALID, address="nonsense", length=4)
+            await c.err("get_bytes", NOT_FOUND, address="0x10", length=4)  # unmapped
+            last = info["ranges"][-1]
+            end = hex(int(last["start"], 16) + last["size"] - 1)
+            assert len((await c.ok("get_bytes", address=end, length=1))["bytes"].split(" ")) == 1
+            await c.err("get_bytes", NOT_FOUND, address=end, length=2)  # runs past the end of the range
     run(go())

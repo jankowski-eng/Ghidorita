@@ -56,6 +56,7 @@ export const results = {
   cancel_decompile: shape({ cancelled: bool }),
   listing_info: shape({ totalBytes: count, ranges: array(shape({ start: address, size: positive })) }),
   listing_rows: array(row),
+  get_bytes: shape({ address, length: positive, bytes: str }),
   list_functions: array(shape({ ...labelFields, source: optional(source) })),
   get_function_at: nullable(shape({ ...labelFields, signature: str })),
   decompile: shape({ text: str, cached: bool, tokens: array(shape({

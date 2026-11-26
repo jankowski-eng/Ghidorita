@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { randomBytes } from "node:crypto";
 const token = randomBytes(24).toString("hex");
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -85,6 +85,7 @@ ipcMain.handle("pick-save-path", async (e, name: unknown) => {
   const r = await dialog.showSaveDialog(win, { defaultPath: name });
   return r.canceled || !r.filePath ? null : r.filePath;
 });
+ipcMain.handle("clipboard-write", (e, text: unknown) => { if (fromWin(e) && typeof text === "string" && text.length <= 8 << 20) clipboard.writeText(text); });
 ipcMain.handle("pick-file", async (e) => (fromWin(e) ? pickFile() : null));
 
 ipcMain.handle("recent-add", (e, p: unknown) => { if (fromWin(e) && validPath(p)) menu?.addRecent(p); });

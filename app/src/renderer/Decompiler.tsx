@@ -14,9 +14,9 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, onCallClick, editorRef, onEdit, canAt, onXrefs, canEdit }: {
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
   tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
-  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void;
+  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
@@ -27,6 +27,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const editRef = useRef(onEdit); editRef.current = onEdit;
   const canRef = useRef(canAt); canRef.current = canAt;
   const xrefsRef = useRef(onXrefs); xrefsRef.current = onXrefs;
+  const copyRef = useRef(onCopy); copyRef.current = onCopy;
   const keysRef = useRef<{ set(c: CanEdit): void } | null>(null);
   const syncKeys = () => { const p = editorRef.current?.getPosition(); if (p) keysRef.current?.set(canRef.current(p.lineNumber, p.column)); };
   const onMount: OnMount = (editor, monaco) => {
@@ -41,6 +42,9 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && !findInputFocus && !replaceInputFocus");
     act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
     if (canEdit.has("references")) editor.addAction({ id: "gd.xrefs", label: "Show References To", keybindings: [monaco.KeyCode.KeyX], precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
+    // Cmd+C stays Monaco's own copy of the selection; these two are menu-only (the Edit menu has their keys)
+    editor.addAction({ id: "gd.copyAddress", label: "Copy Address", contextMenuGroupId: "gd", contextMenuOrder: 6, run: () => copyRef.current("address") });
+    editor.addAction({ id: "gd.copyDecompiled", label: "Copy Decompiled Function", contextMenuGroupId: "gd", contextMenuOrder: 7, run: () => copyRef.current("decompiled") });
     editor.onDidChangeCursorPosition(syncKeys);
     decorations.current = editor.createDecorationsCollection();
     hlDecor.current = editor.createDecorationsCollection();
