@@ -8,7 +8,8 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-let S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map() };
+const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set() });
+let S = freshS();
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
 const VARS = { param_1: "int", param_2: "char *", iVar1: "int" };
@@ -48,7 +49,8 @@ const decompCache = new Set();
 const changed = (notify, ranges, kinds) => { dirty = true; decompCache.clear(); notify("program_changed", { ranges, kinds, undo: undoState() }); };
 function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mutates S; undo/redo restore whole-state snapshots
   const before = structuredClone(S);
-  const result = fn() ?? {};
+  let result;
+  try { result = fn() ?? {}; } catch (e) { S = before; throw e; } // like a rolled-back Ghidra transaction
   undoStack.push({ name, before, after: structuredClone(S) }); redoStack.length = 0; dirty = true;
   changed(notify, ranges, kinds);
   return result;
@@ -62,7 +64,8 @@ const row = (idx) => {
     mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
   if (idx % ROWS_PER_FUNC === 0) r.label = nameOf(idx / ROWS_PER_FUNC);
   const dd = S.data.get(BASE + idx * STRIDE);
-  if (dd) { r.mnemonic = dd.mnemonic; r.length = dd.length; r.operands = ""; }
+  const live = dd && (!dd.ref || S.dt.get(dd.ref.path)); // applied data of a deleted type disappears
+  if (live) { r.mnemonic = dd.mnemonic; r.length = dd.ref ? sizeOf(S.dt.get(dd.ref.path)) * dd.ref.count : dd.length; r.operands = ""; }
   if (S.created.has(BASE + idx * STRIDE)) r.label = S.created.get(BASE + idx * STRIDE);
   if (S.labels.has(BASE + idx * STRIDE)) r.label = S.labels.get(BASE + idx * STRIDE);
   const ov = COMMENT_KINDS.map((k) => S.comments.get(`${BASE + idx * STRIDE}|${k}`)).find(Boolean);
@@ -111,6 +114,48 @@ const symbols = () => {
   return out;
 };
 const HUGE = 4000, SLOW = 4001; // SLOW: normal size, but times out at the default timeout
+// ---- data types (see protocol.md "Data types"; layout rules are a simplified copy of Ghidra's) ----
+const fill = (n) => Array.from({ length: n }, () => ({ undef: true, len: 1 }));
+const sizeOf = (t) => t.kind === "struct" ? t.comps.reduce((a, c) => a + c.len, 0) : t.kind === "union" ? Math.max(0, ...t.comps.map((c) => c.len)) : t.size;
+const nodeOf = (t) => ({ name: t.name, path: t.path, kind: t.kind, size: sizeOf(t) });
+const resolveType = (text, allowDynamic = false) => {
+  if (typeof text !== "string" || !text.trim()) bad("type");
+  const t = text.trim();
+  let m = /^(.+?)\s*\*$/.exec(t);
+  if (m) { const b = resolveType(m[1], true); return { display: b.display + " *", path: `/${b.display} *`, size: 8, kind: "pointer" }; }
+  m = /^(.+)\[(\d+)\]$/.exec(t);
+  if (m) { const b = resolveType(m[1]); return { display: `${b.display}[${m[2]}]`, path: `/${b.display}[${m[2]}]`, size: b.size * +m[2], kind: "array" }; }
+  const name = t.replace(/^\//, ""), u = S.dt.get("/" + name) ?? S.dt.get(t) ?? [...S.dt.values()].find((x) => x.name === name);
+  if (u) return { display: u.name, path: u.path, size: sizeOf(u), kind: u.kind };
+  const d = DATA_TYPES.find((d) => d.name === name);
+  if (!d || (!allowDynamic && d.size <= 0)) bad("unknown or dynamic data type");
+  return { display: d.name, path: d.path, size: d.size, kind: "builtin" };
+};
+const getDt = (path) => { const t = S.dt.get(path); if (!t) nf(); return t; };
+const parentOf = (p) => p.slice(0, p.lastIndexOf("/")) || "/";
+const catSet = () => { const out = new Set(["/"]); for (const c of S.cats) for (let p = c; p !== "/"; p = parentOf(p)) out.add(p); return out; };
+const offsets = (comps) => { let o = 0; return comps.map((c) => { const r = o; o += c.len; return r; }); };
+const detail = (t) => {
+  const d = { ...nodeOf(t), source: "program", writable: true, description: "", archive: null };
+  if (t.kind === "struct" || t.kind === "union") {
+    Object.assign(d, { packed: !!t.packed, packingValue: t.packingValue ?? null, minAlign: null, alignment: t.packed ? 4 : 1 });
+    const off = t.kind === "struct" ? offsets(t.comps) : t.comps.map(() => 0);
+    d.components = t.comps.map((c, i) => ({ ordinal: i, offset: off[i], length: c.len, type: c.undef ? "undefined" : c.display, typePath: c.undef ? "/undefined" : c.typePath, name: c.name ?? null,
+      defaultName: `field${i}_0x${off[i].toString(16)}`, comment: c.comment ?? null, undefined: !!c.undef, bitfield: false }));
+  } else if (t.kind === "enum") d.values = [...t.values].sort((a, b) => (BigInt(a.value) < BigInt(b.value) ? -1 : BigInt(a.value) > BigInt(b.value) ? 1 : a.name.localeCompare(b.name)));
+  else if (t.kind === "typedef" || t.kind === "pointer") Object.assign(d, { base: t.base, basePath: t.basePath ?? null });
+  return d;
+};
+const reqName = (n) => { if (typeof n !== "string" || !/^[^\s/]+$/.test(n)) bad("name"); return n; };
+const catOf = (c) => { if (typeof c !== "string" || !c.startsWith("/")) bad("category"); return c.length > 1 ? c.replace(/\/$/, "") : "/"; };
+const join = (cat, name) => (cat === "/" ? "" : cat) + "/" + name;
+const addType = (t) => { if (S.dt.has(t.path)) bad(`${t.name} already exists`); S.dt.set(t.path, t); return t; };
+const ord = (op, hi) => { if (!Number.isInteger(op.ordinal) || op.ordinal < 0 || op.ordinal >= hi) bad("ordinal"); return op.ordinal; };
+const optStr = (v) => { if (v !== undefined && typeof v !== "string") bad("string"); return v || undefined; };
+const mkComp = (op, t) => { const r = resolveType(op.type); if (r.path === t.path) bad("cycle"); return { len: r.size, display: r.display, typePath: r.path, name: optStr(op.name), comment: optStr(op.comment) }; };
+const startOf = (comps, i) => offsets(comps)[i];
+const parseEnumValue = (v) => { let b; try { b = typeof v === "string" ? BigInt(v) : BigInt(v); } catch { bad("value"); } if (b < -(2n ** 63n) || b >= 2n ** 64n) bad("value"); return b.toString(); };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let opened = false, opening = false, openCancelled = false, openId = null;
 // Project contents (fake). Seeded so the welcome pane has something to show.
@@ -140,7 +185,7 @@ const idFor = (path, o) => { // not a real hash: the mock only needs distinct ke
 // like the sidecar: edits are written to the program's stored state on save, on close and when another open replaces it
 const stored = new Map(); // programId -> saved S
 const autosave = () => { if (opened && openId) stored.set(openId, structuredClone(S)); };
-const resetProgram = () => { autosave(); S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map() }; undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+const resetProgram = () => { autosave(); S = freshS(); undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
 const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
@@ -333,7 +378,132 @@ const handlers = {
   },
   list_data_types({ query, limit }) {
     if (typeof query !== "string") bad("query");
-    return DATA_TYPES.filter((d) => d.name.includes(query.toLowerCase())).slice(0, parseInt0(limit, 50, "limit"));
+    const q = query.toLowerCase();
+    return [...DATA_TYPES.map((d) => ({ ...d, kind: "builtin" })), ...[...S.dt.values()].map(nodeOf)].filter((d) => d.name.toLowerCase().includes(q)).slice(0, parseInt0(limit, 50, "limit"));
+  },
+  // ---- data types ----
+  dt_sources: () => [{ id: "program", name: "mock", writable: true }, { id: "builtin", name: "BuiltInTypes", writable: false }],
+  dt_children({ source = "program", path = "/" }) {
+    if (typeof path !== "string") bad("path");
+    if (source === "builtin") { if (path !== "/") nf(); return { categories: [], types: DATA_TYPES.map((d) => ({ name: d.name, path: d.path, size: d.size, kind: "builtin" })) }; }
+    if (source !== "program") bad("source");
+    const cats = catSet(); if (!cats.has(path)) nf();
+    const byName = (a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    return { categories: [...cats].filter((c) => c !== "/" && parentOf(c) === path).map((c) => ({ name: c.split("/").pop(), path: c })).sort(byName),
+      types: [...S.dt.values()].filter((t) => parentOf(t.path) === path).map(nodeOf).sort(byName) };
+  },
+  get_data_type({ path, source = "program" }) {
+    if (typeof path !== "string") bad("path");
+    if (source === "builtin") { const d = DATA_TYPES.find((d) => d.path === path); if (!d) nf(); return { name: d.name, path, size: d.size, kind: "builtin", source, writable: false, description: "", archive: null }; }
+    if (source !== "program") bad("source");
+    return detail(getDt(path));
+  },
+  create_data_type({ kind, name, category = "/", size, base }, notify) {
+    if (!["struct", "union", "enum", "typedef", "pointer", "category"].includes(kind)) bad("kind");
+    const cat = catOf(category);
+    if (kind === "pointer") { const r = resolveType(base, true); return edit(`Create pointer`, notify, null, ["type"], () => { S.dt.set(`/${r.display} *`, { kind: "pointer", name: r.display + " *", path: `/${r.display} *`, size: 8, base: r.display, basePath: r.path }); return { path: `/${r.display} *` }; }); }
+    reqName(name);
+    if (kind === "category") { const p = join(cat, name); if (catSet().has(p)) bad("duplicate"); return edit(`Create category ${name}`, notify, null, ["type"], () => { S.cats.add(p); return { path: p }; }); }
+    const sz = size === undefined ? (kind === "enum" ? 4 : 0) : size;
+    if (!Number.isInteger(sz) || sz < 0 || (kind === "enum" && ![1, 2, 4, 8].includes(sz))) bad("size");
+    const t = { kind, name, path: join(cat, name), comps: [], values: [], size: sz };
+    if (kind === "struct") t.comps = fill(sz);
+    if (kind === "typedef") { const r = resolveType(base, true); Object.assign(t, { size: r.size, base: r.display, basePath: r.path }); }
+    if (S.dt.has(t.path)) bad("duplicate");
+    return edit(`Create ${kind} ${name}`, notify, null, ["type"], () => { addType(t); S.cats.add(cat); return { path: t.path }; });
+  },
+  delete_data_type({ path, category }, notify) {
+    if (typeof path !== "string") bad("path");
+    if (category) {
+      if (!catSet().has(path)) nf();
+      if (path === "/" || [...S.dt.values()].some((t) => t.path.startsWith(path + "/")) || [...catSet()].some((c) => c.startsWith(path + "/"))) bad("category not empty");
+      return edit(`Delete ${path}`, notify, null, ["type"], () => { S.cats.delete(path); });
+    }
+    getDt(path);
+    return edit(`Delete ${path}`, notify, null, ["type"], () => { S.dt.delete(path); });
+  },
+  rename_data_type({ path, newName }, notify) {
+    const t = getDt(path); reqName(newName);
+    const np = join(parentOf(path), newName);
+    if (S.dt.has(np)) bad("duplicate");
+    return edit(`Rename data type ${t.name} to ${newName}`, notify, null, ["type"], () => {
+      S.dt.delete(path); Object.assign(t, { name: newName, path: np }); S.dt.set(np, t);
+      for (const d of S.data.values()) if (d.ref?.path === path) { d.ref.path = np; d.mnemonic = newName; }
+      return { path: np };
+    });
+  },
+  edit_struct({ path, op }, notify) {
+    const t = getDt(path);
+    if (t.kind !== "struct" && t.kind !== "union") bad("not a struct or union");
+    if (!op || typeof op !== "object") bad("op");
+    const un = t.kind === "union";
+    return edit(`Edit ${t.name}: ${op.op}`, notify, null, ["type"], () => {
+      const c = t.comps, n = c.length;
+      switch (op.op) {
+        case "add": c.push(mkComp(op, t)); break;
+        case "insert": { if (!Number.isInteger(op.ordinal) || op.ordinal < 0 || op.ordinal > n) bad("ordinal"); c.splice(op.ordinal, 0, mkComp(op, t)); break; }
+        case "set": {
+          const i = ord(op, n), old = c[i];
+          if (old.undef && op.type === undefined) bad("give a type for an undefined byte");
+          const nc = op.type !== undefined ? mkComp({ ...op, type: op.type }, t) : { ...old };
+          if (op.name !== undefined) nc.name = optStr(op.name); else nc.name = old.name;
+          if (op.comment !== undefined) nc.comment = optStr(op.comment); else nc.comment = old.comment;
+          if (un) { c[i] = nc; break; }
+          let take = 1, need = nc.len - old.len; // a bigger type consumes following filler; a smaller one leaves filler
+          while (need > 0) { const nx = c[i + take]; if (!nx || !nx.undef) bad("not enough room"); need -= nx.len; take++; }
+          c.splice(i, take, nc, ...(need < 0 ? fill(-need) : []));
+          break;
+        }
+        case "delete": c.splice(ord(op, n), 1); break;
+        case "clear": { const i = ord(op, n); if (un) c.splice(i, 1); else c.splice(i, 1, ...fill(c[i].len)); break; }
+        case "move": { const i = ord(op, n); if (!un && !t.packed) bad("unpacked structure fields have fixed offsets"); if (!Number.isInteger(op.to) || op.to < 0 || op.to >= n) bad("to"); c.splice(op.to, 0, ...c.splice(i, 1)); break; }
+        case "resize": {
+          if (un || t.packed || !Number.isInteger(op.size) || op.size < 0) bad("resize");
+          const cur = sizeOf(t);
+          if (op.size >= cur) c.push(...fill(op.size - cur));
+          else { while (sizeOf(t) > op.size) c.pop(); c.push(...fill(op.size - sizeOf(t))); }
+          break;
+        }
+        case "pack": { if (typeof op.packed !== "boolean") bad("packed"); t.packed = op.packed; t.packingValue = op.packed ? op.packingValue || null : null; if (op.packed) t.comps = c.filter((x) => !x.undef); break; }
+        default: bad("op");
+      }
+      return {};
+    });
+  },
+  edit_enum({ path, op }, notify) {
+    const t = getDt(path);
+    if (t.kind !== "enum") bad("not an enum");
+    if (!op || typeof op !== "object") bad("op");
+    return edit(`Edit ${t.name}: ${op.op}`, notify, null, ["type"], () => {
+      if (op.op === "set") {
+        reqName(op.name); const old = op.oldName ?? op.name, value = parseEnumValue(op.value);
+        if (old !== op.name && t.values.some((v) => v.name === op.name)) bad("duplicate");
+        t.values = t.values.filter((v) => v.name !== old); t.values.push({ name: op.name, value });
+      } else if (op.op === "remove") { if (!t.values.some((v) => v.name === op.name)) nf(); t.values = t.values.filter((v) => v.name !== op.name); }
+      else if (op.op === "resize") { if (![1, 2, 4, 8].includes(op.size)) bad("size"); t.size = op.size; }
+      else bad("op");
+      return {};
+    });
+  },
+  create_struct_from_data({ address, length, name, category = "/", apply = true }, notify) {
+    const n = parseAddr(address), cat = catOf(category);
+    reqName(name);
+    if (!Number.isInteger(length) || length < 1 || n < BASE || n + length > BASE + ROWS * STRIDE) bad("range");
+    const comps = []; let off = 0;
+    while (off < length) { // the mock's listing is all instructions except what define_data created
+      const d = S.data.get(n + off);
+      if (!d) bad("instructions cannot be part of a structure");
+      const len = d.ref ? sizeOf(S.dt.get(d.ref.path)) * d.ref.count : d.length;
+      if (off + len > length) bad("the range must start and end on data item boundaries");
+      comps.push({ len, display: d.mnemonic, typePath: d.ref?.path ?? "/" + d.mnemonic }); off += len;
+    }
+    const t = { kind: "struct", name, path: join(cat, name), comps, size: 0 };
+    if (S.dt.has(t.path)) bad("duplicate");
+    return edit(`Create structure ${name}`, notify, apply ? [{ start: hex(n), end: hex(n + length - 1) }] : null, apply ? ["type", "data"] : ["type"], () => {
+      addType(t); S.cats.add(cat);
+      if (apply) S.data.set(n, { mnemonic: name, length, ref: { path: t.path, count: 1 } });
+      return { path: t.path };
+    });
   },
   get_comments({ address }) {
     const n0 = parseAddr(address);
@@ -397,11 +567,9 @@ const handlers = {
   define_data({ address, dataType }, notify) {
     const n = parseAddr(address);
     if (typeof dataType !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("dataType/address");
-    const arr = /^(\w+)\[(\d+)\]$/.exec(dataType.trim()), name = (arr ? arr[1] : dataType.trim()).replace(/^\//, "");
-    const d = name.endsWith("*") ? { size: 8 } : DATA_TYPES.find((d) => d.name === name);
-    if (!d || d.size <= 0) bad("dataType");
-    const length = d.size * (arr ? +arr[2] : 1);
-    return edit("Define data", notify, [{ start: hex(n), end: hex(n + length - 1) }], ["data", "code"], () => { S.data.set(n, { mnemonic: dataType, length }); });
+    const r = resolveType(dataType), user = r.kind === "struct" || r.kind === "union" || r.kind === "enum" || r.kind === "typedef";
+    if (r.size <= 0) bad("dataType");
+    return edit("Define data", notify, [{ start: hex(n), end: hex(n + r.size - 1) }], ["data", "code"], () => { S.data.set(n, { mnemonic: r.display, length: r.size, ref: user ? { path: r.path, count: 1 } : undefined }); });
   },
   clear_code({ address, length }, notify) {
     const n = parseAddr(address), len = parseInt0(length, STRIDE, "length");
