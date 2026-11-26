@@ -28,7 +28,7 @@ export function fill(total: number, spans: Span[], n: number): Float32Array {
 export const coverageSpans = (map: AddrMap, spans: [bigint, bigint][]): Span[] =>
   spans.map(([lo, hi]) => ({ pos: map.pos(lo), len: Number(hi - lo + 1n) })).filter((s) => s.pos < map.total);
 
-export const LAYER_COLORS = { functions: [90, 140, 220], renamed: [244, 241, 234], both: [78, 195, 107], onlyA: [255, 122, 89], onlyB: [255, 122, 89] } as const satisfies Record<string, [number, number, number]>;
+export const LAYER_COLORS = { functions: [94, 200, 229], renamed: [244, 241, 234], both: [78, 195, 107], onlyA: [255, 122, 89], onlyB: [255, 122, 89] } as const satisfies Record<string, [number, number, number]>;
 
 /**
  * The layers the map draws, bottom first: all functions, the ones named by you (`renamed`), coverage (`cov` = the shown runs A and B; the colours
