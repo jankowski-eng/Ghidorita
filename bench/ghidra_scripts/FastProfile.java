@@ -1,4 +1,4 @@
-// -preScript for bench_headless.py --fast: the same three analyzers Ghidrette's "fast" profile switches off (sidecar/ghidrette/domains/project.py FAST_PROFILE).
+// -preScript for bench_headless.py --fast: the same three analyzers Ghidorita's "fast" profile switches off (sidecar/ghidorita/domains/project.py FAST_PROFILE).
 import ghidra.app.script.GhidraScript;
 
 public class FastProfile extends GhidraScript {

@@ -88,7 +88,7 @@ def test_project_lock_clear_error(tmp_path):
             async with Client(p2.port) as c2:
                 for m, kw in (("list_programs", {}), ("open_binary", {"path": BIN})):
                     r = await c2.call(m, **kw)
-                    assert r["error"]["code"] == PROJECT_LOCKED and "in use by another Ghidrette" in r["error"]["message"], r
+                    assert r["error"]["code"] == PROJECT_LOCKED and "in use by another Ghidorita" in r["error"]["message"], r
                 assert await c2.ok("list_languages")  # the sidecar stays usable
                 assert (await c2.call("list_functions"))["error"]["code"] == NO_PROGRAM
             return True

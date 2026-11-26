@@ -1,5 +1,5 @@
 {
-  "format": "ghidrette-listing-v1",
+  "format": "ghidorita-listing-v1",
   "ranges": [
     { "start": "0x401000", "rows": [
       {"bytes": "55", "mnemonic": "push", "operands": "rbp"}, {"bytes": "90", "mnemonic": "nop"}, {"bytes": "90", "mnemonic": "nop"}, {"bytes": "90", "mnemonic": "nop"},

@@ -7,16 +7,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from ghidrette.core.events import Events
-from ghidrette.core.context import Ctx
-from ghidrette.core.errors import CANCELLED, INTERNAL, RpcError
-from ghidrette.core.lanes import Lanes
-from ghidrette.core.rpc import Dispatcher, Method
-from ghidrette.core.server import Server
-from ghidrette.core.session import Session
-from ghidrette.domains.program import Program
-from ghidrette.domains.listing import Listing
-from ghidrette.domains.highvars import HighVars
+from ghidorita.core.events import Events
+from ghidorita.core.context import Ctx
+from ghidorita.core.errors import CANCELLED, INTERNAL, RpcError
+from ghidorita.core.lanes import Lanes
+from ghidorita.core.rpc import Dispatcher, Method
+from ghidorita.core.server import Server
+from ghidorita.core.session import Session
+from ghidorita.domains.program import Program
+from ghidorita.domains.listing import Listing
+from ghidorita.domains.highvars import HighVars
 
 
 class Exited(Exception):
@@ -47,7 +47,7 @@ def test_saved_program_load_failures(monkeypatch, error, attempts):
         raise error
 
     monkeypatch.setattr(domain, "_consume", load)
-    monkeypatch.setattr("ghidrette.domains.program.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghidorita.domains.program.time.sleep", lambda _: None)
     with pytest.raises(RpcError, match=r"stored program key \(preserved\)") as caught:
         domain._load_persisted(proj, "key", op)
     assert caught.value.code == INTERNAL
@@ -64,7 +64,7 @@ def test_deferred_snapshot_retries_same_revision(monkeypatch):
         assert prog is ses.program and ses.save_lock.locked()
         return next(outcomes)
 
-    monkeypatch.setattr("ghidrette.domains.program.take_recovery_snapshot", snapshot)
+    monkeypatch.setattr("ghidorita.domains.program.take_recovery_snapshot", snapshot)
     assert domain._snapshot() is False
     assert domain._snapshot() is True
     assert domain._snapshot() is None
@@ -91,7 +91,7 @@ def test_shutdown_uses_close_result(monkeypatch, failure, expected):
             raise OSError("save failed")
 
     server = Server(SimpleNamespace(lanes=lanes, session=ses, shutdown_hooks=[close]), None)
-    monkeypatch.setattr("ghidrette.core.server.os._exit", lambda code: (_ for _ in ()).throw(Exited(code)))
+    monkeypatch.setattr("ghidorita.core.server.os._exit", lambda code: (_ for _ in ()).throw(Exited(code)))
     with pytest.raises(Exited) as exc:
         server.shutdown()
     assert exc.value.code == expected
@@ -103,7 +103,7 @@ def test_shutdown_distinguishes_queued_timeout(monkeypatch):
     lanes = SimpleNamespace(opening=None, running=set(), dj={}, sj={}, mon_lock=threading.Lock(), jobs=jobs)
     server = Server(SimpleNamespace(lanes=lanes, session=ses, shutdown_hooks=[lambda: None]), None)
     server.SHUTDOWN_QUEUE_TIMEOUT = 0
-    monkeypatch.setattr("ghidrette.core.server.os._exit", lambda code: (_ for _ in ()).throw(Exited(code)))
+    monkeypatch.setattr("ghidorita.core.server.os._exit", lambda code: (_ for _ in ()).throw(Exited(code)))
     with pytest.raises(Exited) as exc:
         server.shutdown()
     assert exc.value.code == 2
@@ -211,7 +211,7 @@ def test_prepared_variable_edit_rejects_intervening_write(monkeypatch):
         fn()
 
     ctx = SimpleNamespace(session=ses, lanes=SimpleNamespace(scanning=scanning, on_r=on_r))
-    monkeypatch.setattr("ghidrette.domains.highvars.decompile_for_edit", decompile)
+    monkeypatch.setattr("ghidorita.domains.highvars.decompile_for_edit", decompile)
     with pytest.raises(RpcError) as exc:
         HighVars(ctx)._high_edit("Rename in %s", "0x10", "local", lambda *_: None, 30,
                                  SimpleNamespace(cancelled=False, epoch=1))

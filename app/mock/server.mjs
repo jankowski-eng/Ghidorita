@@ -298,7 +298,7 @@ const handlers = {
     return {};
   },
   list_programs() {
-    if (process.env.MOCK_LOCKED === "1") throw { code: -32006, message: "projects dir in use by another Ghidrette (mock)" };
+    if (process.env.MOCK_LOCKED === "1") throw { code: -32006, message: "projects dir in use by another Ghidorita (mock)" };
     if (opening) throw { code: -32005, message: "Busy" };
     return [...programs.values()].sort((a, b) => (b.lastOpened ?? "").localeCompare(a.lastOpened ?? ""));
   },

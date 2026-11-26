@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ghidrette.app import App
-from ghidrette.core.errors import RpcError
-from ghidrette.core.rpc import Dispatcher
-from ghidrette.domains import highvars
+from ghidorita.app import App
+from ghidorita.core.errors import RpcError
+from ghidorita.core.rpc import Dispatcher
+from ghidorita.domains import highvars
 from testlib import BASE, CANCELLED, Client, INVALID, NOT_FOUND, TIMEOUT, X86, run
 
 

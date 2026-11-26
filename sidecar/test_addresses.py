@@ -5,7 +5,7 @@ import re
 import pytest
 
 from inproc import build
-from ghidrette.core.errors import NOT_FOUND, RpcError
+from ghidorita.core.errors import NOT_FOUND, RpcError
 
 HI = 0xFFFFFFFF80000000
 H = lambda o: "0x%x" % (HI + o)
@@ -17,7 +17,7 @@ OVL = bytes.fromhex("e80b000000 c3".replace(" ", "")) + bytes(0xA) + bytes.fromh
 
 
 def jobs(sc):
-    from ghidrette.core.lanes import Job, Scan
+    from ghidorita.core.lanes import Job, Scan
     return Job(sc.ses.epoch), Scan(sc.ses.epoch)
 
 
@@ -187,7 +187,7 @@ def test_raw_blob_above_2_63_over_the_wire(tmp_path):
 def test_segmented_real_mode(sc):
     """x86 16-bit real mode (segmented default space): linear and seg:off forms name the same byte; a function and its xrefs round-trip."""
     from inproc import INVALID
-    from ghidrette.core.errors import RpcError
+    from ghidorita.core.errors import RpcError
     code = bytes.fromhex("e80300c3") + bytes([0x90] * 2) + bytes.fromhex("b80100c3")  # call +3 (-> 0x6); ret; 2 nops; mov ax,1; ret
     p = build(sc, "t_seg", [("code", 0x10000, code, False)], lang="x86:LE:16:Real Mode")
     f = sc.fmtr(p)

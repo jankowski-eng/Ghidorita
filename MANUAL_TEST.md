@@ -3,7 +3,7 @@
 These are the things the automated tests cannot do: real keystrokes, the real window buttons, a real trackpad, looking at the screen.
 **Nothing here has been run by the author.** Tick a box only for what you actually saw. Write what went wrong under "Notes".
 
-Setup (once): follow README "One-time setup", then `cd app && npm start` (dev build) or open the packaged `Ghidrette.app`.
+Setup (once): follow README "One-time setup", then `cd app && npm start` (dev build) or open the packaged `Ghidorita.app`.
 Use a fresh projects dir for section 1 so the first launch is really a first launch:
 `SIDECAR_PROJECTS_DIR=$(mktemp -d) npm start`. Test binary: `/bin/ls` (analysis takes ~15 s). Tester: ________  Date: ________  Build/commit: ________
 
@@ -64,7 +64,7 @@ Do not touch the mouse from step 4.1 on (except where noted).
 | # | Step | Expected | Pass | Fail |
 |---|---|---|---|---|
 | 6.1 | Open `/bin/ls` and, while it is analysing for the first time (fresh projects dir), click Cancel in the progress dialog. | Dialog closes, the welcome pane shows "Open cancelled." (not an error). | ☐ | ☐ |
-| 6.2 | Start a second copy of the app against the same projects dir (`SIDECAR_PROJECTS_DIR=<same> npm start` in another terminal). | The second window's "Programs in this project" shows the red text `projects dir in use by another Ghidrette (<dir>)`. | ☐ | ☐ |
+| 6.2 | Start a second copy of the app against the same projects dir (`SIDECAR_PROJECTS_DIR=<same> npm start` in another terminal). | The second window's "Programs in this project" shows the red text `projects dir in use by another Ghidorita (<dir>)`. | ☐ | ☐ |
 | 6.3 | Open a program you opened before, rename its file, then choose it under File > Open Recent. | An error/notice "Could not open <path>". A failed open leaves the previously open program (and its unsaved edits) as it was; with none open you stay on the welcome pane. | ☐ | ☐ |
 | 6.4 | Open `/bin/ls`, click a listing row, then the decompiler, then press Space for the graph, then click the function list. Press `Cmd+K`, type `>`. | The status bar's right side changes with the focused view (listing: `L rename · X refs · Space graph …`; decompiler: `… ⌘L retype …`; graph: `Space back · wheel zoom …`; function list: `⌘K commands · ⌘G go to`) and never wraps. The command bar shows `L` next to Rename and `⌘⇧G` next to Toggle Call Graph. Function list dots: off-white solid = named by you, amber ring = analysis, blue solid = imports, grey dashed ring = `FUN_…`. Graph edges: true solid, false dashed, loop-back dotted. Binary map: functions light blue, renamed ones off-white. | ☐ | ☐ |
 

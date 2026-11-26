@@ -42,7 +42,7 @@ class Scan:
         return mon
 
     def java(self, fn, *args):
-        """Runs a GhidretteScans call (GIL released while it runs); a cancelled monitor surfaces as the Cancelled error."""
+        """Runs a GhidoritaScans call (GIL released while it runs); a cancelled monitor surfaces as the Cancelled error."""
         import jpype
         try:
             return fn(*args, self.monitor())

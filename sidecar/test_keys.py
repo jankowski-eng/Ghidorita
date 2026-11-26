@@ -1,5 +1,5 @@
 """programId keys (protocol.md "Persistence key"); no JVM needed."""
-from ghidrette.domains import project
+from ghidorita.domains import project
 
 SHA = "a" * 64
 

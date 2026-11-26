@@ -19,7 +19,7 @@ def electron(flow, file, projects, extra=None, timeout=1200):
 
 
 def test_project_locked_message_in_the_ui(tmp_path):
-    """A second Ghidrette on a projects dir another sidecar holds: the programs pane shows 'projects dir in use by another Ghidrette'."""
+    """A second Ghidorita on a projects dir another sidecar holds: the programs pane shows 'projects dir in use by another Ghidorita'."""
     holder = Proc(tmp_path / "projects")
 
     async def hold():
@@ -31,7 +31,7 @@ def test_project_locked_message_in_the_ui(tmp_path):
     finally:
         holder.stop()
     print(res["locked"])
-    assert res["ok"] and code == 0 and "projects dir in use by another Ghidrette" in res["locked"]["text"], res
+    assert res["ok"] and code == 0 and "projects dir in use by another Ghidorita" in res["locked"]["text"], res
 
 
 def test_big_file_defaults_to_fast_and_huge_function_flow():

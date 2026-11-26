@@ -22,7 +22,7 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
   const env: NodeJS.ProcessEnv = { ...ctx.env, SIDECAR_TOKEN: ctx.token };
   delete env.SIDECAR_ALLOW_NO_AUTH;
   const { appDir, packaged, resourcesPath } = ctx;
-  const provider = env.GHIDRETTE_PROVIDER ?? (env.MOCK === "1" ? "mock" : env.SIDECAR_CMD ? "external" : packaged ? distributionProvider(appDir) : "pyghidra");
+  const provider = env.GHIDORITA_PROVIDER ?? (env.MOCK === "1" ? "mock" : env.SIDECAR_CMD ? "external" : packaged ? distributionProvider(appDir) : "pyghidra");
 
   switch (provider) {
     case "fixture": {
@@ -37,7 +37,7 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
       // Preserve the development shortcut. A wrapper executable can handle spaces and arbitrary arguments.
       const [executable, ...args] = (env.SIDECAR_CMD ?? "").trim().split(/\s+/);
       if (!executable) throw new Error("Set SIDECAR_CMD to launch an external provider");
-      env.SIDECAR_PROJECTS_DIR ??= path.join(ctx.userData, env.GHIDRETTE_PROVIDER ? "external-projects" : "projects");
+      env.SIDECAR_PROJECTS_DIR ??= path.join(ctx.userData, env.GHIDORITA_PROVIDER ? "external-projects" : "projects");
       return { executable, args, env, resources: [] };
     }
     case "pyghidra": {
@@ -62,7 +62,7 @@ export function providerLaunch(ctx: LaunchContext): ProviderLaunch {
   }
 }
 
-// fixture.builder.cjs stamps `ghidretteProvider: "fixture"` into the packaged package.json (extraMetadata); the full build has none.
+// fixture.builder.cjs stamps `ghidoritaProvider: "fixture"` into the packaged package.json (extraMetadata); the full build has none.
 function distributionProvider(appDir: string): string {
-  return JSON.parse(readFileSync(path.join(appDir, "package.json"), "utf8")).ghidretteProvider ?? "pyghidra";
+  return JSON.parse(readFileSync(path.join(appDir, "package.json"), "utf8")).ghidoritaProvider ?? "pyghidra";
 }
