@@ -31,7 +31,7 @@ cd ../app && npm install
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
-export GHIDRA_INSTALL_DIR=$PWD/../ghidra-install/ghidra_12.3_DEV   # from app/
+export GHIDRA_INSTALL_DIR=$PWD/ghidra-install/ghidra_12.3_DEV
 cd app && npm start
 ```
 
