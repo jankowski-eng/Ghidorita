@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address, FunctionGraph } from "../../../protocol";
 import { coverage } from "./coverage";
-import { blockAt, layout } from "./graphLayout";
+import { blockAt, dedent, initialView, layout } from "./graphLayout";
 import type { Decompilation } from "./backend";
 
 const CW = 7.3, LH = 15, PAD = 8, MAXC = 90, MAXL = 40; // character width / line height of the 12px monospace, padding, caps per node
@@ -23,16 +23,24 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
   }, [source, entry, version]);
   const L = useMemo(() => {
     if (!g) return null;
-    const nodes = g.blocks.map((b) => { const ls = b.lines.slice(0, MAXL).map(cut); return { id: b.start, b, ls, more: b.lines.length > MAXL, w: Math.max(40, ...ls.map((l) => l.length)) * CW + 2 * PAD, h: (ls.length + (b.lines.length > MAXL ? 1 : 0)) * LH + 2 * PAD }; });
+    const nodes = g.blocks.map((b) => { const ls = dedent(b.lines.slice(0, MAXL)).map(cut); return { id: b.start, b, ls, more: b.lines.length > MAXL, w: Math.max(40, ...ls.map((l) => l.length)) * CW + 2 * PAD, h: (ls.length + (b.lines.length > MAXL ? 1 : 0)) * LH + 2 * PAD }; });
     return { nodes, ...layout(nodes, g.edges, entry) };
   }, [g, entry]);
-  useEffect(() => { // fit the whole graph when it changes
+  const cur = g ? blockAt(g.blocks, here)?.start : undefined;
+  const TOP = 28; // below the legend row, so the first block never covers it
+  const focusOf = (id?: string) => { const n = L?.nodes.find((x) => x.id === (id ?? entry)) ?? L?.nodes[0], p = n && L!.pos.get(n.id); return n && p ? { x: p.x, y: p.y, w: n.w } : undefined; };
+  const show = (mode: "auto" | "fit" | "1:1") => {
     const el = box.current;
     if (!L || !el) return;
-    const top = 28; // below the legend row, so the first block never covers it
-    const k = Math.min(1, (el.clientWidth - 24) / Math.max(L.width, 1), (el.clientHeight - top - 12) / Math.max(L.height, 1));
-    setView({ k, x: (el.clientWidth - L.width * k) / 2, y: top });
-  }, [L]);
+    const size = { w: el.clientWidth, h: el.clientHeight }, focus = focusOf(cur);
+    setView(initialView(size, TOP, mode === "1:1" ? { width: Infinity, height: Infinity } : L, mode === "fit" ? undefined : focus));
+  };
+  useEffect(() => show("auto"), [L]); // eslint-disable-line -- a new graph: whole graph if readable, else 1:1 at the cursor's block
+  useEffect(() => { // the cursor moved to a block off screen: bring it into view at the current zoom
+    const el = box.current, f = focusOf(cur);
+    if (!el || !f || !cur) return;
+    setView((v) => { const sx = v.x + (f.x + f.w / 2) * v.k, sy = v.y + f.y * v.k; return sx >= 0 && sx <= el.clientWidth && sy >= TOP && sy <= el.clientHeight - 20 ? v : { ...v, x: el.clientWidth / 2 - (f.x + f.w / 2) * v.k, y: TOP + 12 - f.y * v.k }; });
+  }, [cur]); // eslint-disable-line
   useEffect(() => {
     const el = box.current!;
     const wheel = (e: WheelEvent) => {
@@ -43,7 +51,6 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
   }, []);
-  const cur = g ? blockAt(g.blocks, here)?.start : undefined;
   const mark = (b: { start: string; end: string }) => {
     if (!coverage.shown || !b.start.startsWith("0x")) return "";
     return coverage.mark(b.start as Address, Number(BigInt(b.end) - BigInt(b.start) + 1n));
@@ -56,7 +63,9 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
       onPointerUp={() => { setTimeout(() => { drag.current = null; }); }}>
       {!g && !err && <div className="empty">Building graph…</div>}
       {err && <div className="empty err">{err}</div>}
-      <div className="glegend" aria-label="Legend"><span style={{ color: EDGE.true }}>── true</span> <span style={{ color: EDGE.false }}>── false</span> <span>── jump</span></div>
+      <div className="glegend" aria-label="Legend"><span style={{ color: EDGE.true }}>── true</span> <span style={{ color: EDGE.false }}>── false</span> <span>── jump</span>
+        <button className="gbtn" onPointerDown={(e) => e.stopPropagation()} onClick={() => show("fit")} title="Show the whole graph">Fit</button>
+        <button className="gbtn" onPointerDown={(e) => e.stopPropagation()} onClick={() => show("1:1")} title="Actual size at the cursor's block">1:1</button></div>
       {g && L && (
         <svg width="100%" height="100%">
           <defs>{(Object.keys(EDGE) as (keyof typeof EDGE)[]).map((k) => <marker key={k} id={`ah-${k}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L8 4L0 8z" fill={EDGE[k]} /></marker>)}</defs>

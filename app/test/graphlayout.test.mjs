@@ -31,3 +31,20 @@ test("blockAt: containing block, else none", () => {
   const bs = [{ start: "0x10", end: "0x1f" }, { start: "0x20", end: "0x2b" }];
   assert.equal(blockAt(bs, "0x1f"), bs[0]); assert.equal(blockAt(bs, "0x20"), bs[1]); assert.equal(blockAt(bs, "0x2c"), undefined); assert.equal(blockAt(bs, null), undefined);
 });
+
+test("dedent: shared indentation goes, relative indentation and blank lines stay", async () => {
+  const { dedent } = await import("data:text/javascript," + encodeURIComponent(js));
+  assert.deepEqual(dedent(["    a;", "      b;", "", "    }"]), ["a;", "  b;", "", "}"]);
+  assert.deepEqual(dedent(["x", "  y"]), ["x", "  y"]);
+});
+
+test("initialView: fits a graph that stays readable, else opens 1:1 on the focus block", async () => {
+  const { initialView, READABLE } = await import("data:text/javascript," + encodeURIComponent(js));
+  const size = { w: 824, h: 640 };
+  const small = initialView(size, 28, { width: 400, height: 300 }, { x: 0, y: 0, w: 100 });
+  assert.equal(small.k, 1); assert.equal(small.y, 28);
+  const big = initialView(size, 28, { width: 4000, height: 9000 }, { x: 1950, y: 500, w: 100 });
+  assert.equal(big.k, 1); assert.equal(big.x, 412 - 2000); assert.equal(big.y, 28 + 12 - 500);
+  const fit = initialView(size, 28, { width: 4000, height: 9000 });
+  assert.ok(fit.k < READABLE && fit.k > 0);
+});

@@ -19,3 +19,7 @@ export function rank(q: string, cands: Cand[]): Ranked[] {
   const m = (c: Cand) => (t && c.kind !== "string" ? (c.name.toLowerCase() === t ? 0 : c.name.toLowerCase().startsWith(t) ? 1 : 2) : 2);
   return cands.map((c, i) => ({ c, i })).sort((a, b) => m(a.c) - m(b.c) || tier(a.c) - tier(b.c) || (b.c.refs ?? 0) - (a.c.refs ?? 0) || a.i - b.i).map(({ c }) => ({ ...c, why: why(c) }));
 }
+
+/** Whether a string is worth suggesting as a lead on the empty bar: not a source-file path (`__FILE__` in asserts and logs, referenced
+ * from everywhere) and not a very short bare word (`main` as a `__func__`), both of which otherwise outrank every real lead by use count. */
+export const isLeadString = (v: string) => !/^\S*\/[^\s/]+\.(c|cc|cpp|cxx|h|hh|hpp|m|mm|swift|rs|go|java|kt|py)$/i.test(v) && !/^\w{1,4}$/.test(v);

@@ -26,3 +26,9 @@ test("one place is singular; no references: no reason", () => {
 test("ties keep the incoming order", () => {
   assert.deepEqual(rank("", [c("b", "function", 5), c("a", "function", 5)]).map((x) => x.name), ["b", "a"]);
 });
+
+test("isLeadString: source paths and tiny bare words are not leads; ordinary strings and other paths are", async () => {
+  const { isLeadString } = await import("data:text/javascript," + encodeURIComponent(js));
+  for (const v of ["/AppleInternal/Library/BuildRoots/x/Sources/OpenSSH/openssh/ssh-keygen.c", "src/main.cpp", "main", "eiou"]) assert.equal(isLeadString(v), false, v);
+  for (const v of ["Enter passphrase:", "/etc/ssh/ssh_config", "/usr/lib/dyld", "update_krl_from_file", "usage: ls", "main.c is missing"]) assert.equal(isLeadString(v), true, v);
+});

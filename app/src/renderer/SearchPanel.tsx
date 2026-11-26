@@ -4,7 +4,7 @@ import type { Searches } from "./backend";
 import { allowsCommand } from "../capabilities";
 import { addressOf } from "./parseGoto";
 import { latest } from "./latest";
-import { rank, type Cand } from "./rank";
+import { isLeadString, rank, type Cand } from "./rank";
 import { matchActions, type CommandAction } from "./commandActions";
 import type { MenuCommand } from "../preload";
 import { useDebounced, useRestoreFocus } from "./hooks";
@@ -36,9 +36,9 @@ export function SearchPanel({ capabilities, searchSymbols, topSymbols, listStrin
     const asStr = (s: { address: Address; value: string; refs?: number; refFrom?: { function?: string }[] }): Cand => ({ kind: "string", name: short(s.value), address: s.address, refs: s.refs ?? 0, used: s.refFrom?.[0]?.function });
     if (t.startsWith(">")) { runSyms(Promise.resolve(null)); runStrs(Promise.resolve(null)); setSyms([]); setStrs([]); setMsg(""); return; }
     if (!t) { // nothing typed: what is most worth looking at (entry point, most used strings and imports, most called functions)
-      const top = topSymbols?.({ limit: 8 }), strJob = listStrings?.({ limit: 200, minLength: 4, referencedOnly: true });
+      const top = topSymbols?.({ limit: 8 }), strJob = listStrings?.({ limit: 1000, minLength: 4, referencedOnly: true });
       if (top) runSyms(top.result).then((r) => { if (r) { setSyms(r); setCur(0); setMsg(""); } }, (e) => { setSyms([]); fail(e); }); else runSyms(Promise.resolve(null));
-      if (strJob) runStrs(strJob.result).then((r) => { if (r) setStrs(r.items.map(asStr).sort((a, b) => b.refs! - a.refs!).slice(0, 5)); }, () => setStrs([])); else runStrs(Promise.resolve(null));
+      if (strJob) runStrs(strJob.result).then((r) => { if (r) setStrs(r.items.filter((s) => isLeadString(s.value)).map(asStr).sort((a, b) => b.refs! - a.refs!).slice(0, 5)); }, () => setStrs([])); else runStrs(Promise.resolve(null));
       return () => { void runSyms(Promise.resolve(null)); void runStrs(Promise.resolve(null)); top?.cancel(); strJob?.cancel(); };
     }
     const symJob = searchSymbols?.({ query: t, limit: 100 });

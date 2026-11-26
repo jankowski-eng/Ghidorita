@@ -51,3 +51,18 @@ export function blockAt<B extends { start: string; end: string }>(blocks: B[], a
   const a = BigInt(addr);
   return blocks.find((b) => b.start.startsWith("0x") && BigInt(b.start) <= a && a <= BigInt(b.end));
 }
+
+/** Drops the indentation every line of a block shares (decompiler lines keep their nesting depth, which pushes short blocks far right). */
+export function dedent(lines: string[]): string[] {
+  const ind = Math.min(...lines.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
+  return Number.isFinite(ind) && ind > 0 ? lines.map((l) => l.slice(ind)) : lines;
+}
+
+export const READABLE = 0.7; // below this zoom the 12px block text is no longer readable
+
+/** Where the graph opens: the whole graph if it fits at a readable zoom, else 1:1 with `focus` (the cursor's block) centred horizontally near the top. */
+export function initialView(size: { w: number; h: number }, top: number, graph: { width: number; height: number }, focus?: { x: number; y: number; w: number }) {
+  const fit = Math.min(1, (size.w - 24) / Math.max(graph.width, 1), (size.h - top - 12) / Math.max(graph.height, 1));
+  if (fit >= READABLE || !focus) return { k: fit, x: (size.w - graph.width * fit) / 2, y: top };
+  return { k: 1, x: size.w / 2 - (focus.x + focus.w / 2), y: top + 12 - focus.y };
+}
