@@ -114,7 +114,7 @@ export class WebSocketBackend implements ApplicationBackend {
     open: (path, options, onProgress, mode) => {
       const id = this.nextId++;
       this.progress.set(id, onProgress);
-      const result = this.send(id, "open_binary", { ...options, path, ...(mode ? { analysis: mode } : {}) }).then((session) => {
+      const result = this.send(id, "open_binary", { ...options, path, ...(mode && this.capabilities.has("analysis") ? { analysis: mode } : {}) }).then((session) => {
         this.adopt(session);
         return session;
       }).finally(() => this.progress.delete(id));
