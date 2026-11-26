@@ -1,6 +1,10 @@
-"""Cross references (thread R): to an address, to a stack/register variable, from a code unit."""
+"""Cross references (thread R): to an address, to a stack/register variable, from a code unit; the call graph around a function."""
+from collections import deque
+
 from ..core.args import akey, lim, ref_kind, text_arg
-from ..core.errors import NOT_FOUND, RpcError
+from ..core.errors import INVALID, NOT_FOUND, RpcError
+
+CALL_GRAPH_MAX_NODES = 300
 from ..core.rpc import rpc
 
 
@@ -72,3 +76,109 @@ class Xrefs:
                 o.update(to=self.ses.fmt(r.getToAddress()), target="memory")
             out.append(o)
         return out
+
+    # ---- call graph ----
+
+    def _is_import(self, f):
+        """An external function, or a thunk (stub) to one: shown as a leaf, never expanded."""
+        if f.isExternal():
+            return True
+        t = f.getThunkedFunction(True) if f.isThunk() else None
+        return t is not None and t.isExternal()
+
+    def _callees(self, prog, f):
+        """{called function: number of call sites in f}; empty for an import."""
+        out = {}
+        if self._is_import(f):
+            return out
+        fm, rm = prog.getFunctionManager(), prog.getReferenceManager()
+        it = rm.getReferenceSourceIterator(f.getBody(), True)
+        while it.hasNext():
+            for r in rm.getReferencesFrom(it.next()):
+                if not r.getReferenceType().isCall():
+                    continue
+                t = fm.getFunctionAt(r.getToAddress()) or fm.getReferencedFunction(r.getToAddress())
+                if t is not None:
+                    out[t] = out.get(t, 0) + 1
+        return out
+
+    def _callers(self, prog, f):
+        """{calling function: number of call sites to f's entry}."""
+        out, fm = {}, prog.getFunctionManager()
+        for r in prog.getReferenceManager().getReferencesTo(f.getEntryPoint()):
+            if r.getReferenceType().isCall():
+                c = fm.getFunctionContaining(r.getFromAddress())
+                if c is not None:
+                    out[c] = out.get(c, 0) + 1
+        return out
+
+    @rpc(lane="R")
+    def call_graph(self, entry, depth=2, to=None, maxDepth=10):
+        """Without `to`: the functions within `depth` calls of `entry`, callers above and callees below. With `to`: every route from `entry` to
+        `to` of at most `maxDepth` calls (the union of all such paths). Imports (external functions and thunks to them) are leaves.
+        Routes longer than the shortest one plus one call are left out, so the answer is the few real alternatives, not most of the program.
+        Edges carry `sites`, the number of call instructions. At most CALL_GRAPH_MAX_NODES nodes; `truncated` says some were left out."""
+        prog = self.ses.need()
+        depth, maxDepth = lim(depth, 2, 6), lim(maxDepth, 10, 30)
+        fm = prog.getFunctionManager()
+        def func(a):
+            f = fm.getFunctionAt(self.ses.addr(a))
+            if f is None:
+                raise RpcError(NOT_FOUND, "no function at %s" % a)
+            return f
+        root = func(entry)
+        key = lambda f: (str(f.getEntryPoint().getAddressSpace().getName()), f.getEntryPoint().getOffset())
+        nodes, edges, truncated = {key(root): root}, {}, False
+        def add(f):
+            nonlocal truncated
+            if key(f) in nodes:
+                return True
+            if len(nodes) >= CALL_GRAPH_MAX_NODES:
+                truncated = True
+                return False
+            nodes[key(f)] = f
+            return True
+        def edge(a, b, n):
+            if add(a) and add(b):
+                edges[(key(a), key(b))] = n
+        if to is None:
+            for step, near in ((self._callees, lambda u, v, n: edge(u, v, n)), (self._callers, lambda u, v, n: edge(v, u, n))):
+                frontier, seen = [root], {key(root)}
+                for _ in range(depth):
+                    nxt = []
+                    for u in frontier:
+                        for v, n in step(prog, u).items():
+                            near(u, v, n)
+                            if key(v) not in seen and key(v) in nodes:
+                                seen.add(key(v)); nxt.append(v)
+                    frontier = nxt
+        else:
+            if not isinstance(to, str):
+                raise RpcError(INVALID, "to must be an address")
+            target = func(to)
+            add(target)  # shown even when no route reaches it
+            back, q = {key(target): 0}, deque([target])  # calls from each function to the target, along callers
+            while q:
+                v = q.popleft()
+                if back[key(v)] >= maxDepth:
+                    continue
+                for u in self._callers(prog, v):
+                    if key(u) not in back:
+                        back[key(u)] = back[key(v)] + 1
+                        q.append(u)
+            if key(root) in back:  # forward from the root, only through functions that can still reach the target in time
+                maxDepth = min(maxDepth, back[key(root)] + 1)  # the shortest route and those one call longer
+                fwd, q = {key(root): 0}, deque([root])
+                while q:
+                    u = q.popleft()
+                    for v, n in self._callees(prog, u).items():
+                        d = fwd[key(u)] + 1
+                        if key(v) in back and d + back[key(v)] <= maxDepth:
+                            edge(u, v, n)
+                            if key(v) not in fwd:
+                                fwd[key(v)] = d
+                                q.append(v)
+        fmt = self.ses.fmtr(prog)
+        out = [{"entry": fmt(f.getEntryPoint()), "name": str(f.getName()), "kind": "import" if self._is_import(f) else "function"} for f in nodes.values()]
+        return {"nodes": out, "edges": [{"from": fmt(nodes[a].getEntryPoint()), "to": fmt(nodes[b].getEntryPoint()), "sites": n} for (a, b), n in edges.items()],
+                "truncated": truncated}

@@ -14,7 +14,7 @@ export type RangeList = { start: Address; end: Address }[] | null;
 export interface EditDialogState { spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> }
 export interface FormDialogState { title: string; submit: string; fields: FormField[]; go: (v: Record<string, string>) => Promise<void> }
 
-/** What the panes show about the open program (position, panels, dialogs). Everything but `visible`, `graphOn`, `covVersion`, `dataVersion`, `typesVersion` and `importFor` is dropped on a reset. */
+/** What the panes show about the open program (position, panels, dialogs). Everything but `visible`, `graphOn`, `callGraphOn`, `covVersion`, `dataVersion`, `typesVersion` and `importFor` is dropped on a reset. */
 export interface Views {
   nav: Nav;
   fn: FuncAt | null;
@@ -25,6 +25,7 @@ export interface Views {
   useHl: { name: string; address: Address } | null; // a clicked decompiler-variable use: its token is highlighted
   dock: DockId | null;
   graphOn: boolean;                    // the decompiler pane shows the control-flow graph of the active function
+  callGraphOn: boolean;                // ... or the call graph around it (never both)
   searchOpen: boolean; gotoOpen: boolean; typesOpen: boolean;
   dlg: EditDialogState | null; formDlg: FormDialogState | null;
   visible: Record<PaneId, boolean>;
@@ -35,7 +36,7 @@ export interface Views {
 }
 export const initialViews: Views = {
   nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, xrefTarget: null, useHl: null,
-  dock: null, graphOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
+  dock: null, graphOn: false, callGraphOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
   visible: { functions: true, listing: true, decompiler: true }, dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };
 
@@ -43,6 +44,6 @@ export type ViewsAction = { type: "set"; patch: Partial<Views> | ((v: Views) => 
 export function viewsReducer(v: Views, a: ViewsAction): Views {
   if (a.type === "set") return { ...v, ...(typeof a.patch === "function" ? a.patch(v) : a.patch) };
   // the scroll request keeps counting so the listing notices the new position
-  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, visible: v.visible, graphOn: v.graphOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
+  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, visible: v.visible, graphOn: v.graphOn, callGraphOn: v.callGraphOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
 }
 export const createViews = () => createStore(viewsReducer, initialViews);

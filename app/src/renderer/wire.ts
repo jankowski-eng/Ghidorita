@@ -68,6 +68,7 @@ export const results = {
   variable_uses: xrefTo,
   search_symbols: array(shape({ name: str, address, kind: symbolKind, refs: optional(count) })),
   top_symbols: array(shape({ name: str, address, kind: symbolKind, refs: count, group: oneOf("entry", "import", "function") })),
+  call_graph: shape({ nodes: array(shape({ entry: address, name: str, kind: oneOf("function", "import") })), edges: array(shape({ from: address, to: address, sites: positive })), truncated: bool }),
   function_graph: shape({ blocks: array(shape({ start: address, end: address, kind: oneOf("c", "asm"), lines: array(str) })), edges: array(shape({ from: address, to: address, kind: oneOf("true", "false", "uncond") })) }),
   export_symbols: shape({ path: str, functions: count, labels: count, data: count, comments: count }),
   export_header: shape({ path: str, types: count, functions: count, skipped: count }),

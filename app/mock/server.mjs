@@ -210,7 +210,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "suggestions", "export", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -449,6 +449,24 @@ const handlers = {
       }, 60);
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
+  },
+  call_graph({ entry, depth, to, maxDepth }) { // the CALLS pattern (three callees each, three callers each); same rules as the sidecar
+    const i = idxOfEntry(parseAddr(entry)), t = to === undefined ? -1 : idxOfEntry(parseAddr(to));
+    if (i < 0 || (to !== undefined && t < 0)) nf();
+    const outs = (u) => CALLS.map((c) => calleeOf(u, c)), ins = (u) => CALLS.map((c) => (((u - c[1]) % NFUNC + NFUNC) * INV[c[0]]) % NFUNC).filter((j, k) => calleeOf(j, CALLS[k]) === u);
+    const nodes = new Set([i]), edges = new Map(), edge = (a, b) => { if (nodes.size < 300 || (nodes.has(a) && nodes.has(b))) { nodes.add(a); nodes.add(b); edges.set(a + ">" + b, (edges.get(a + ">" + b) ?? 0) + 1); } };
+    if (to === undefined) {
+      const d = Math.min(6, parseInt0(depth, 2, "depth"));
+      for (const [step, add] of [[outs, (u, v) => edge(u, v)], [ins, (u, v) => edge(v, u)]]) { let f = [i]; const seen = new Set(f); for (let k = 0; k < d; k++) { const n = []; for (const u of f) for (const v of step(u)) { add(u, v); if (!seen.has(v)) { seen.add(v); n.push(v); } } f = n; } }
+    } else {
+      const md = Math.min(30, parseInt0(maxDepth, 10, "maxDepth")), back = new Map([[t, 0]]), q = [t];
+      nodes.add(t);
+      while (q.length) { const v = q.shift(); if (back.get(v) >= md) continue; for (const u of ins(v)) if (!back.has(u)) { back.set(u, back.get(v) + 1); q.push(u); } }
+      const lim = Math.min(md, (back.get(i) ?? 0) + 1); // the shortest route and those one call longer
+      if (back.has(i)) { const fwd = new Map([[i, 0]]), q2 = [i]; while (q2.length) { const u = q2.shift(); for (const v of outs(u)) { const d = fwd.get(u) + 1; if (back.has(v) && d + back.get(v) <= lim) { edge(u, v); if (!fwd.has(v)) { fwd.set(v, d); q2.push(v); } } } } }
+    }
+    return { nodes: [...nodes].map((u) => ({ entry: entryOf(u), name: nameOf(u), kind: "function" })),
+      edges: [...edges].map(([k, n]) => { const [a, b] = k.split(">").map(Number); return { from: entryOf(a), to: entryOf(b), sites: n }; }), truncated: nodes.size >= 300 };
   },
   function_graph({ entry }) { // four blocks: entry -> (true: then | false: else) -> join; the graph's second block gets C, the others assembly
     const n = parseAddr(entry), i = idxOfEntry(n);

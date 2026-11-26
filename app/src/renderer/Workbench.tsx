@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
+import { CallGraphView } from "./CallGraphView";
 import { Decompiler } from "./Decompiler";
 import { FunctionList } from "./FunctionList";
 import { Listing } from "./Listing";
@@ -21,7 +22,7 @@ export function Workbench({ tabs, nav, editing, testMode }: { tabs: TabsApi; nav
   const program = useProgram((p) => p.program)!, map = useProgram((p) => p.map), funcs = useProgram((p) => p.funcs);
   const initialRows = useProgram((p) => p.initialRows), reading = useProgram((p) => p.reading), browseError = useProgram((p) => p.browseError);
   const busy = useProgram((p) => !!p.opening || p.closing || p.unavailable);
-  const { xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, dataVersion } = useViews((v) => v);
+  const { xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, dataVersion } = useViews((v) => v);
   const ops = program.api;
   const set = (patch: Partial<Views>) => views.dispatch({ type: "set", patch });
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
@@ -60,7 +61,8 @@ export function Workbench({ tabs, nav, editing, testMode }: { tabs: TabsApi; nav
             <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
           {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
           {graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
-          <div className="editor" style={{ display: active && !graphOn ? undefined : "none" }}>
+          {callGraphOn && active && <CallGraphView source={ops.references.callGraph} entry={active.entry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
+          <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
             <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} />
           </div>
         </div>

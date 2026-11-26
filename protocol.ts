@@ -70,6 +70,8 @@ export interface DecompileResult {
 export interface GraphBlock { start: Address; end: Address; kind: "c" | "asm"; lines: string[] } // end = last byte of the block; lines: C source lines or "addr  instruction"
 export interface GraphEdge { from: Address; to: Address; kind: "true" | "false" | "uncond" } // from/to = block starts; true/false only after a conditional branch (false = fall through)
 export interface FunctionGraph { blocks: GraphBlock[]; edges: GraphEdge[] } // blocks in address order; the first is not necessarily the entry
+export interface CallGraphNode { entry: Address; name: string; kind: "function" | "import" } // import: an external function or a thunk to one (a leaf)
+export interface CallGraph { nodes: CallGraphNode[]; edges: { from: Address; to: Address; sites: number }[]; truncated: boolean } // sites: call instructions from `from` to `to`
 
 export interface ListingRow {
   address: Address;
@@ -128,7 +130,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "suggestions", "export", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -164,6 +166,8 @@ export interface Methods {
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   // Control-flow graph of one function: basic blocks (C lines where the decompiler maps them, else assembly) and edges. Decompiler lane, cancellable with cancel_decompile.
   function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
+  // Call graph (thread R): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
+  call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };

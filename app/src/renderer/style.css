@@ -185,6 +185,7 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .sw { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; } .sw.both { background: #4ec36b; } .sw.a { background: #e0a93b; } .sw.b { background: #5aa0e0; }
 .graph { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #1e1e1e; cursor: grab; outline: none; } .graph:active { cursor: grabbing; }
 .glegend { position: absolute; top: 4px; left: 8px; font-size: 11px; color: #888; z-index: 1; pointer-events: none; background: #1e1e1e; padding: 0 4px; border-radius: 3px; }
+.glegend.cgbar { display: flex; gap: 6px; align-items: center; right: 8px; } .cgbar input { pointer-events: auto; width: 200px; background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 1px 6px; font-size: 11px; } .cgbar .dim { color: #777; }
 .glegend .gbtn { pointer-events: auto; font-size: 11px; padding: 0 6px; margin-left: 6px; }
 .bmapcol { flex: none; display: flex; flex-direction: column; width: 44px; } .bmapcol > .bmap { flex: 1; min-height: 0; }
 .bmap-layers { display: flex; gap: 1px; background: #1b1b1c; border-right: 1px solid #444; } .bmap-layers button { flex: 1; padding: 0; font-size: 10px; line-height: 14px; border-radius: 0; } .bmap-layers button[aria-pressed=true] { background: #094771; color: #fff; }

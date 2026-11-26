@@ -32,6 +32,11 @@ The function list filters by name; tick **not yet renamed** to see only function
 
 ![Control-flow graph at C level](screenshots/graph.png)
 
+### Call graph (`Cmd+Shift+G`)
+View > Call Graph (or the command bar) swaps the decompiler for the functions around the current one: callers above, callees below, two calls each way. Imports are dashed leaves, `×n` on an edge counts its call sites, a pink dot marks functions you named, and with coverage loaded each function says whether the shown runs reached it (**never ran** = 0×). Type a function into **routes to function…** and **Find routes** to see every way from here to it: the shortest route and those one call longer. A click on a function goes there.
+
+![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
+
 ### Strings, symbols, memory search
 View > Defined Strings (`Cmd+Shift+E`) lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default. Symbol Table (`Cmd+Shift+Y`) filters by kind and shows each symbol's source. Search Memory (`Cmd+Shift+F`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text. All of them open in the dock under the panes.
 

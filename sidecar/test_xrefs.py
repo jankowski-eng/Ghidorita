@@ -42,6 +42,49 @@ def test_xref_kinds_and_variables(env):
     run(go())
 
 
+
+def test_call_graph_neighbourhood_and_routes(env):
+    fns = env["fns"]
+    async def go():
+        async with Client(env["proc"].port) as c:
+            byname = {f["entry"]: f for f in fns}
+            # a caller -> callee pair from the references themselves
+            pair = None
+            for fn in fns[:400]:
+                for r in await c.ok("xrefs_to", address=fn["entry"]):
+                    if r["kind"] == "call" and r.get("function"):
+                        caller = (await c.ok("get_function_at", address=r["from"]))["entry"]
+                        if caller != fn["entry"]:
+                            pair = (caller, fn["entry"]); break
+                if pair:
+                    break
+            caller, callee = pair
+            g = await c.ok("call_graph", entry=caller)
+            ids = {n["entry"] for n in g["nodes"]}
+            assert caller in ids and callee in ids and g["truncated"] in (True, False)
+            assert all(e["from"] in ids and e["to"] in ids and e["sites"] >= 1 for e in g["edges"])
+            assert any(e["from"] == caller and e["to"] == callee for e in g["edges"]), g["edges"][:5]
+            assert all(n["kind"] in ("function", "import") and n["name"] for n in g["nodes"])
+            assert any(n["kind"] == "import" for n in g["nodes"]) or len(g["nodes"]) < 3, g["nodes"][:5]  # ls calls libc through stubs
+            assert not [e for e in g["edges"] if e["from"] in {n["entry"] for n in g["nodes"] if n["kind"] == "import"}]  # imports are leaves
+            up = await c.ok("call_graph", entry=callee, depth=1)
+            assert any(e["from"] == caller and e["to"] == callee for e in up["edges"])  # callers come along
+            # routes: the direct one at least; every node of a route lies on a path from caller to callee
+            p = await c.ok("call_graph", entry=caller, to=callee)
+            assert any(e["from"] == caller and e["to"] == callee for e in p["edges"])
+            outs, ins = {e["from"] for e in p["edges"]}, {e["to"] for e in p["edges"]}
+            for n in p["nodes"]:
+                assert n["entry"] == caller or n["entry"] in ins, n
+                assert n["entry"] == callee or n["entry"] in outs, n
+            mids = {n["entry"] for n in p["nodes"]} - {caller, callee}  # a direct call: only routes of two calls besides it
+            assert all((caller, m) in {(e["from"], e["to"]) for e in p["edges"]} and (m, callee) in {(e["from"], e["to"]) for e in p["edges"]} for m in mids), mids
+            none = await c.ok("call_graph", entry=callee, to=caller, maxDepth=1)
+            assert {callee, caller} <= {n["entry"] for n in none["nodes"]}  # both shown, a route only if the callee calls back
+            await c.err("call_graph", NOT_FOUND, entry=hex(int(fns[0]["entry"], 16) + 1))
+            await c.err("call_graph", INVALID, entry=caller, to=5)
+            assert byname  # fns came from list_functions
+    run(go())
+
 def test_xrefs_from_external_on_pe(tmp_path):
     exe = win_exe()
     if not exe:
