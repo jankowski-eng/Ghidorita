@@ -42,7 +42,7 @@ Other modes:
 ```bash
 MOCK=1 npm start                    # fake sidecar, 2M fake rows (MOCK_LOCKED=1: every project call answers ProjectLocked)
 AUTOTEST=/bin/ls npm start          # scripted flow, prints AUTOTEST_RESULT, writes app/out/screenshot.png
-cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: test_smoke.py (timings.json) + test_backend.py (v1 API)
+cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: test_smoke.py (timings.json) + one test_<domain>.py per sidecar module (layout: sidecar/ARCHITECTURE.md)
 cd ../app && npm test                                          # address map unit test
 BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompile measurements in the renderer
 ../sidecar/.venv/bin/python ../bench/bench_sidecar.py <binary> /tmp/bench-projects out.json   # sidecar-level measurements
@@ -72,7 +72,7 @@ What the bundle contains (`Contents/Resources/`):
 - `jdk/`: `jlink` runtime with the modules found by `jdeps -s` over every Ghidra jar and `org.jpype.jar` (java.base, desktop, sql, xml, naming, rmi, management, scripting, net.http, jdk.compiler, jdk.unsupported, …) plus `jdk.zipfs jdk.crypto.ec jdk.management jdk.charsets java.prefs`. Verified by running analysis + decompile + the edit flow with it.
 - `ghidra/`: copy of the distribution minus FunctionID databases, docs, Extensions, Debug (debugger), GhidraServer, BSim, x86_64/other-OS natives, `*-src.zip`, unused `support/` launchers (sizes in `app/bundle/trim-log.txt`). The `os/mac_arm_64` decompiler binary is kept and `chmod +x`'d; electron-builder preserves the mode. Also cut: `Features/FunctionID/data` (195 MB; the Function ID analyzer stays but has no databases, so it names no library functions in PE/ELF binaries). Kept although large: `Features/Base/data/typeinfo` (124 MB, data type archives), all processors.
 - `python/`: python-build-standalone 3.12 with websockets, jpype1, packaging, typing_extensions, pyghidra (wheel from the Ghidra build). Links only against system libs.
-- `sidecar/main.py`.
+- `sidecar/main.py` and the `sidecar/ghidrette/` package (code layout: [sidecar/ARCHITECTURE.md](sidecar/ARCHITECTURE.md)).
 
 The main process (`startSidecar`, `app/src/main/index.ts`) uses these when `app.isPackaged` (JAVA_HOME, GHIDRA_INSTALL_DIR, PYTHONNOUSERSITE set; the shell's values are ignored); in dev it still uses the env vars and `sidecar/.venv`. `SIDECAR_MAXMEM`, `SIDECAR_ANALYSIS_DISABLE`, `SIDECAR_PROJECTS_DIR` (default `userData/projects`) pass through. Autotest output in the packaged app goes to `userData/out` (asar is read-only). `MOCK`/`AUTOTEST`/`BENCH` work as before.
 
