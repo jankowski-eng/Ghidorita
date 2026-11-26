@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { randomBytes } from "node:crypto";
 const token = randomBytes(24).toString("hex");
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createMenu } from "./menu";
 import { validPath } from "./recent";
@@ -142,11 +142,6 @@ app.on("web-contents-created", (_e, contents) => {
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
 });
 app.setName("Ghidorita");
-// shortcut: before the rename the data folder was "Ghidrette"; move its projects and recent files once (Electron has already created the new
-// folder, so item by item, never over existing ones). Drop when no pre-rename install is left.
-const userData = app.getPath("userData"), oldUserData = path.join(path.dirname(userData), "Ghidrette");
-for (const f of ["projects", "recent.json"])
-  if (existsSync(path.join(oldUserData, f)) && !existsSync(path.join(userData, f))) { mkdirSync(userData, { recursive: true }); renameSync(path.join(oldUserData, f), path.join(userData, f)); }
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
