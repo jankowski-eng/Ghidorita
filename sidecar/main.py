@@ -10,8 +10,10 @@ from collections import OrderedDict
 
 import websockets
 
-NO_PROGRAM, CANCELLED, TIMEOUT, NOT_FOUND, BUSY, INTERNAL, NO_METHOD, INVALID = -32001, -32002, -32003, -32004, -32005, -32603, -32601, -32602
-PROJECT_LOCKED = -32006
+from ghidrette.core.args import hx, lim, name_arg, text_arg
+from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_METHOD, NO_PROGRAM, NOT_FOUND,
+                                   PROJECT_LOCKED, TIMEOUT, RpcError, java_error, log)
+
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
 # program_changed kinds, see protocol.md. Everything not listed is "other".
@@ -32,39 +34,6 @@ def _akey(s):
 FAST_PROFILE = ["Call Convention ID", "Decompiler Switch Analysis", "Stack"]
 RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a base address option ("-loader-baseAddr")
 KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
-INVALID_JAVA = {"InvalidInputException", "DuplicateNameException", "ParseException", "InvalidDataTypeException",
-                "IllegalArgumentException", "CancelledException", "UsrException", "AddressOutOfBoundsException",
-                "LoadException", "LanguageNotFoundException", "CompilerSpecNotFoundException", "InvalidNameException"}
-
-
-def log(*a):
-    print(*a, file=sys.stderr, flush=True)
-
-
-class RpcError(Exception):
-    def __init__(self, code, message):
-        super().__init__(message)
-        self.code = code
-
-
-MASK64 = (1 << 64) - 1
-
-
-def hx(off):
-    return "0x%x" % (off & MASK64)  # Ghidra offsets are signed longs: addresses above 2^63 read negative
-
-
-def lim(v, default, hi=None):
-    v = default if v is None else int(v)
-    if v < 0:
-        raise RpcError(INVALID, "negative argument")
-    return min(v, hi) if hi else v
-
-
-def text_arg(v, what):
-    if not isinstance(v, str):
-        raise RpcError(INVALID, "%s must be a string" % what)
-    return v
 
 
 class Job:
@@ -1785,20 +1754,14 @@ class Sidecar:
             r = fn(prog)
             ok = True
         except jpype.JException as e:
-            kind = str(e.getClass().getSimpleName())
-            raise RpcError(INVALID if kind in INVALID_JAVA else INTERNAL, str(e.getMessage() or kind))
+            raise java_error(e)
         finally:
             prog.endTransaction(tx, ok)  # not ok => rolled back, nothing on the undo stack
             prog.flushEvents()  # also on rollback: a decompile that saw the half-applied state must not be cached
         self.undo_snap = self.undo_state(prog)
         return r
 
-    @staticmethod
-    def _name_arg(v, what="name"):
-        text_arg(v, what)
-        if not v or any(c.isspace() for c in v):
-            raise RpcError(INVALID, "invalid %s %r" % (what, v))
-        return v
+    _name_arg = staticmethod(name_arg)
 
     @staticmethod
     def _cmd(cmd):
