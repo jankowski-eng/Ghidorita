@@ -65,3 +65,36 @@ test("lineStarts and statementRange: statement starts, and the instructions behi
   assert.deepEqual(statementRange(tokens, 3, "0x1000"), { start: "0x1000", end: "0x101f" }); // the prologue before the first statement belongs to it
   assert.equal(statementRange(tokens, 5, "0x1000"), null);
 });
+
+const { lineValues, hexRows } = await load("debug.ts");
+const { shownDebug } = await load("store/program.ts");
+
+test("lineValues: the variables of a line with their values, and what they were", () => {
+  const text = "  a = f(b);\n  return a;", toks = [{ line: 0, colStart: 2, colEnd: 3, kind: "variable" }, { line: 0, colStart: 8, colEnd: 9, kind: "param" }, { line: 0, colStart: 4, colEnd: 5, kind: "default" }, { line: 1, colStart: 9, colEnd: 10, kind: "variable" }];
+  const items = [{ name: "a", value: "5" }, { name: "b", value: "2" }];
+  assert.deepEqual(lineValues(toks, text, items, { a: "3", b: "2" }), [{ line: 0, text: "   ← a = 5 (was 3), b = 2" }, { line: 1, text: "   ← a = 5 (was 3)" }]);
+  assert.deepEqual(lineValues(toks, text, [], {}), []);
+});
+
+test("hexRows: rows of 16, ASCII, bytes that changed since the earlier read", () => {
+  const rows = hexRows(0x1000n, "41424300" + "ff".repeat(12), "41424300" + "00".repeat(12));
+  assert.equal(rows.length, 1); assert.equal(rows[0].address, "0x1000"); assert.equal(rows[0].ascii, "ABC" + ".".repeat(13));
+  assert.deepEqual(rows[0].bytes.map((b) => b.changed).slice(2, 5), [false, false, true]);
+  assert.equal(hexRows(0x10n, "00".repeat(20)).length, 2);
+});
+
+test("program: stepping back through the recorded stops, values with what they were, a new stop is live again", () => {
+  const stop = (n, r0) => ({ type: "debug", state: { state: "stopped", target: "h:1", stop: n, offset: "0x0", breakpoints: [], address: "0x" + n, registers: [{ name: "r0", value: r0 }] } });
+  let s = [stop(1, "0x1"), stop(2, "0x2"), stop(3, "0x3")].reduce(programReducer, initialProgram);
+  assert.equal(s.debugHistory.length, 3); assert.equal(shownDebug(s).stop, 3);
+  s = programReducer(s, { type: "debugView", to: "back" }); assert.equal(shownDebug(s).stop, 2);
+  s = programReducer(s, { type: "debugView", to: "back" }); s = programReducer(s, { type: "debugView", to: "back" }); assert.equal(shownDebug(s).stop, 1); // the oldest: no further back
+  s = programReducer(s, { type: "debugView", to: "forward" }); s = programReducer(s, { type: "debugView", to: "forward" }); assert.equal(s.debugAt, null); assert.equal(shownDebug(s).stop, 3); // forward from the newest recorded one is the live stop
+  s = programReducer(s, { type: "debugView", to: "back" }); assert.equal(s.debugAt, 1);
+  s = programReducer(s, stop(4, "0x4")); assert.equal(s.debugAt, null); assert.equal(shownDebug(s).stop, 4); // a new stop returns to live
+  s = programReducer(s, { type: "debugValues", stop: 3, entry: "0x10", items: [{ name: "a", value: "1" }] });
+  s = programReducer(s, { type: "debugValues", stop: 4, entry: "0x10", items: [{ name: "a", value: "2" }] });
+  assert.deepEqual(s.debug.values.was, { a: "1" }); assert.deepEqual(s.debugHistory[3].values.items[0].value, "2");
+  s = programReducer(s, { type: "debugValues", stop: 99, entry: "0x10", items: [] }); assert.equal(s.debugHistory.length, 4);
+  assert.deepEqual(programReducer(s, { type: "debug", state: { state: "detached", target: "", stop: 4, offset: "0x0", breakpoints: [] } }).debugHistory, []);
+});

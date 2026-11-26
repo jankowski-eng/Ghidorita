@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, DebugState, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
+  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -143,12 +143,14 @@ export interface AnalysisControl {
 
 /** `debugger` capability: a GDB remote stub (QEMU). The calls return nothing: the state arrives through `events.onDebug`. */
 export interface DebugControl {
-  attach(params: { host?: string; port?: number }): Promise<{}>;
+  attach(params: { host?: string; port?: number; offset?: string }): Promise<{}>;
   detach(): Promise<{}>;
   breakpoint(params: { address: Address }): Promise<{}>;
   continue(): Promise<{}>;
   /** mode "statement": run to the next of `boundaries` (program addresses where a statement of the pc's function starts) */
-  step(params?: { mode?: "instruction" | "statement"; boundaries?: Address[] }): Promise<{}>;
+  step(params?: { mode?: "instruction" | "statement" | "into" | "out"; boundaries?: Address[] }): Promise<{}>;
+  memory(params: { address: Address; length?: number; dataType?: string }): Promise<DebugMemory>;
+  values(params: { entry: Address }): Job<{ pc: Address | null; items: DebugValue[] }>;
   pause(): Promise<{}>;
   status(): Promise<DebugState>;
 }

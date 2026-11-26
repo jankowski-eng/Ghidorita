@@ -171,13 +171,17 @@ export interface Methods {
   // Call graph (thread R): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
   call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
   // Debugger (thread R; the new state arrives as `debug_state`, results are empty except debug_status). debug_attach connects to a GDB remote stub (QEMU's -gdb), reads its register description, stops there and installs the breakpoints; Target error if refused, lost or of another architecture than the program. Breakpoint toggles, continue, step and pause need the target stopped (resp. running for pause): Busy otherwise.
-  debug_attach: { params: { host?: string; port?: number }; result: {} };
+  debug_attach: { params: { host?: string; port?: number; offset?: string }; result: {} }; // offset: hex, runtime address minus program address (default "0x0")
   debug_detach: { params: {}; result: {} };
   debug_status: { params: {}; result: DebugState };
   debug_breakpoint: { params: { address: Address }; result: {} };
   debug_continue: { params: {}; result: {} };
   // mode "statement": runs instruction by instruction until the pc is at one of `boundaries` (program addresses where a statement of the pc's function starts: the client's decompiler line mapping; at most 5000), at a breakpoint or outside the function; a call is run over, a return stops in the caller; debug_pause ends it. The state is `running` meanwhile.
-  debug_step: { params: { mode?: "instruction" | "statement"; boundaries?: Address[] }; result: {} };
+  debug_step: { params: { mode?: "instruction" | "statement" | "into" | "out"; boundaries?: Address[] }; result: {} };
+  // Memory of the stopped target at a RUNTIME address (the values of registers), up to 4096 bytes; with dataType (a Ghidra type name or path) one item per component of a structure or array, else one item. Busy while running, Target error for unreadable memory.
+  debug_memory: { params: { address: Address; length?: number; dataType?: string }; result: DebugMemory };
+  // The variables of the function at `entry` with their values in the stopped target (decompiler parameters, locals, the globals it uses). Scan lane, cancellable with cancel_search.
+  debug_values: { params: { entry: Address }; result: { pc: Address | null; items: DebugValue[] } };
   debug_pause: { params: {}; result: {} };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
@@ -368,6 +372,10 @@ export interface DebugState {
   registers?: { name: string; value: string }[]; // state "stopped": the program language's names, target order, "0x" + hex of the register's width
   error?: string;                 // state "detached": why the connection ended (target exited, connection lost)
 }
+
+export interface DebugMemory { address: Address; bytes: string; items?: { offset: number; length: number; type: string; name: string; value: string }[] } // bytes: hex
+/** A variable of the function at the stop. where: "stack+8" (offset from the stack at function entry), a register name, or a global's program address; value: the data type's display value; raw: "0x" + hex of the value. */
+export interface DebugValue { name: string; kind: "param" | "local" | "global"; type: string; size: number; where: string; value: string; raw: string }
 
 export interface Notifications {
   // Whenever the debug state changes (attach, every stop, continue, breakpoint toggle, detach, target exit, lost connection). The methods' results are empty: this is how a client learns the state.

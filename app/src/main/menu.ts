@@ -79,6 +79,8 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: "CmdOrCtrl+Shift+B", click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
         { id: "registers", label: "Registers", enabled: state.hasProgram && caps.has(dockCapability.registers), click: () => send({ type: "dock", panel: "registers" }) },
+        { id: "locals", label: "Locals", enabled: state.hasProgram && caps.has(dockCapability.locals), click: () => send({ type: "dock", panel: "locals" }) },
+        { id: "memory", label: "Target Memory", enabled: state.hasProgram && caps.has(dockCapability.memory), click: () => send({ type: "dock", panel: "memory" }) },
         { id: "memsearch", label: "Search Memory…", enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },
         { type: "separator" }, { role: "toggleDevTools" },
@@ -94,7 +96,7 @@ export function createMenu({ getWin, pick }: Deps) {
       ] },
       { label: "Debug", submenu: ([
         ["Attach to QEMU…", "", "attach"], ["Detach", "", "detach"], [null, "", ""],
-        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Statement", "F7", "step"], ["Step Instruction", "F8", "stepi"], ["Toggle Breakpoint", "F9", "breakpoint"],
+        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Over Statement", "F7", "step"], ["Step Into", "F10", "stepinto"], ["Step Out", "Shift+F10", "stepout"], ["Step Instruction", "F8", "stepi"], [null, "", ""], ["Back in History", "Shift+F7", "back"], ["Forward in History", "Shift+F8", "forward"], ["Toggle Breakpoint", "F9", "breakpoint"],
       ] as const).map(([label, key, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
         : { id: "debug-" + action, label, accelerator: key || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
       { role: "windowMenu" },

@@ -112,6 +112,8 @@ export const results = {
   edit_struct: object,
   edit_enum: object,
   debug_attach: object, debug_detach: object, debug_breakpoint: object, debug_continue: object, debug_step: object, debug_pause: object, debug_status: shape(debugFields),
+  debug_memory: shape({ address, bytes: str, items: optional(array(shape({ offset: count, length: positive, type: str, name: str, value: str }))) }),
+  debug_values: shape({ pc: nullable(address), items: array(shape({ name: nonempty, kind: oneOf("param", "local", "global"), type: str, size: positive, where: str, value: str, raw: str })) }),
   undo_state: undo,
   undo,
   redo: undo,

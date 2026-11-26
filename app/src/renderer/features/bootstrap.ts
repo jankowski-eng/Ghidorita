@@ -35,7 +35,7 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
         if (!current) throw new Error("No program open");
         return current.api;
       },
-      open: (p) => s.open(p), openBg: (p, o) => s.open(p, o, undefined, "background"), analysis: () => store.getState().analysis, command: (c) => api().handleMenu(c), lastMenu: () => s.menu.current, title: () => document.title,
+      open: (p) => s.open(p), openBg: (p, o) => s.open(p, o, undefined, "background"), analysis: () => store.getState().analysis, debug: () => store.getState().debug, command: (c) => api().handleMenu(c), lastMenu: () => s.menu.current, title: () => document.title,
       status: () => { const g = store.getState(); return { funcs: g.funcs.length, opened: !!g.program, opening: !!g.opening, phase: g.progress?.phase ?? "", notice: g.notice }; },
       select: (e) => api().go(e, "functions"), goAddr: (a) => api().go(a, "goto"), clickAt: (l, c) => api().clickAt(l, c),
       back: () => api().back(), forward: () => api().forward(), fail: s.fail, errors: s.errors,

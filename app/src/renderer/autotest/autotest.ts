@@ -1,4 +1,5 @@
 import type { Address, AnalysisState, FunctionInfo } from "../../../../protocol";
+import type { DebugView } from "../debug";
 import { AddrMap } from "../addrmap";
 import type { ApplicationBackend, ProgramOperations } from "../backend";
 import type { ImportOptions } from "../../../../protocol";
@@ -28,6 +29,8 @@ export interface AutotestCtx extends AutotestControls {
   /** open with analysis "background" (open() above waits for the analysis, the older flows need that) */
   openBg(path: string, opts?: ImportOptions): Promise<FunctionInfo[] | undefined>;
   analysis(): AnalysisState | null;
+  /** the last debug_state (`debugger` capability) with the registers that changed at its stop */
+  debug(): DebugView | null;
   select(entry: Address): Promise<void>;
   /** navigate to any address like Go to Address does */
   goAddr(address: Address): Promise<void>;

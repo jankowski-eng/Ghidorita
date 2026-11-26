@@ -14,7 +14,8 @@ type Monaco = Parameters<OnMount>[1];
  * Call tokens of the active tab are underlined and clickable.
  */
 export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+  values?: { line: number; text: string }[]; // debugger: text after a line (the variables' values at the stop)
   pcLine?: number | null; pcSeq?: number; bpLines?: number[]; onGutter?: (line1: number) => void; // debugger: the stop line (0-based) and which stop it is, the breakpoint lines, a click in the glyph margin
   tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
   canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void;
@@ -22,6 +23,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const covDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
+  const widgets = useRef<Parameters<Ed["addContentWidget"]>[0][]>([]);
   const pcDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlKey = useRef(""), pcKey = useRef("");
   const gutterRef = useRef(onGutter); gutterRef.current = onGutter;
@@ -34,7 +36,7 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const keysRef = useRef<{ set(c: CanEdit): void } | null>(null);
   const syncKeys = () => { const p = editorRef.current?.getPosition(); if (p) keysRef.current?.set(canRef.current(p.lineNumber, p.column)); };
   const onMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor; monacoRef.current = monaco;
+    editorRef.current = editor; monacoRef.current = monaco; 
     // Ghidra's keys through Monaco's action API (also the context menu); preconditions follow the token under the cursor
     const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false) };
     keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); } };
@@ -98,6 +100,19 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
       return c ? [{ range: { startLineNumber: line + 1, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, options: { isWholeLine: true, className: "d" + c } }] : [];
     }));
   }, [tokens, text, tabId, covVersion]);
+  useEffect(() => { // the values after the lines that name a variable: content widgets (injected text and inlay hints did not render in this editor)
+    const ed = editorRef.current, monaco = monacoRef.current;
+    if (!ed || !monaco) return;
+    for (const w of widgets.current) ed.removeContentWidget(w);
+    const model = ed.getModel();
+    widgets.current = (values ?? []).filter((v) => model && v.line + 1 <= model.getLineCount()).map((v) => {
+      const node = document.createElement("span");
+      node.className = "dval"; node.textContent = v.text;
+      return { getId: () => "gd.val." + v.line, getDomNode: () => node, allowEditorOverflow: false,
+        getPosition: () => ({ position: { lineNumber: v.line + 1, column: model!.getLineMaxColumn(v.line + 1) }, preference: [monaco.editor.ContentWidgetPositionPreference.EXACT] }) };
+    });
+    for (const w of widgets.current) ed.addContentWidget(w);
+  }, [(values ?? []).map((v) => v.line + v.text).join("|"), text, tabId]); // eslint-disable-line
   useEffect(() => { // the stop line and the breakpoint glyphs; the view follows a new stop (once per stop)
     const whole = (line0: number, options: object) => ({ range: { startLineNumber: line0 + 1, startColumn: 1, endLineNumber: line0 + 1, endColumn: 1 }, options });
     pcDecor.current?.set([...(bpLines ?? []).map((l) => whole(l, { glyphMarginClassName: "dbp" })), ...(pcLine != null ? [whole(pcLine, { isWholeLine: true, className: "dpc" })] : [])]);

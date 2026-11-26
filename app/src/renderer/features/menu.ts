@@ -41,7 +41,8 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
     if (!opened()) return;
     if (c.action === "attach") t.debug.attachDialog();
     else if (c.action === "breakpoint") { const a = t.debug.breakpointAddress(); if (a) void s.debugAction("breakpoint", a); else s.flash("No address here for a breakpoint."); }
-    else if (c.action === "step") void t.debug.stepStatement();
+    else if (c.action === "back" || c.action === "forward") s.store.dispatch({ type: "debugView", to: c.action });
+    else if (c.action === "step" || c.action === "stepinto" || c.action === "stepout") void t.debug.stepStatement(c.action === "step" ? "statement" : c.action === "stepinto" ? "into" : "out");
     else void s.debugAction(c.action === "stepi" ? "step" : c.action);
   }
   else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn, callGraphOn: false }); }

@@ -204,3 +204,9 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .reg { display: flex; gap: 10px; padding: 1px 4px; border-radius: 2px; } .reg .rn { min-width: 6ch; color: #9cdcfe; }
 .reg.changed { background: #4d3a12; color: #ffd866; } .reg.changed .rn { color: #ffd866; font-weight: 700; } .reg.stale { opacity: .5; }
 .lrow.stmt { background: #2b2a12; box-shadow: inset 3px 0 0 #8a7a2e; } .lrow.stmt.cursor { background: #094771; }
+.vals { border-collapse: collapse; width: 100%; } .vals th { text-align: left; color: #888; font-weight: normal; padding: 1px 12px 1px 4px; } .vals td { padding: 1px 12px 1px 4px; }
+.vals tr.changed td { background: #4d3a12; color: #ffd866; }
+.mem-bar { display: flex; gap: 14px; align-items: center; padding-bottom: 6px; color: #888; } .mem-bar input { font: inherit; background: #1e1e1e; color: #ddd; border: 1px solid #454545; }
+.hexdump { margin: 0; font: inherit; } .hexdump .hx-a { color: #9cdcfe; } .hexdump .hx-t { color: #6a9955; } .hexdump .hx-c { background: #4d3a12; color: #ffd866; }
+.dval { color: #6a9955; font-style: italic; opacity: .9; }
+.dval { white-space: pre; }

@@ -492,7 +492,6 @@ const handlers = {
   debug_status() { return { state: dbg.state, target: dbg.target, stop: dbg.stop, offset: "0x0", breakpoints: dbg.bps.map(hex), ...(dbg.state === "stopped" ? { address: hex(dbg.pc), registers: dbgRegs() } : {}) }; },
   debug_breakpoint({ address }, notify) {
     const a = parseAddr(address); if (a < 0) bad("address");
-    if (dbg.state === "running") throw { code: -32005, message: "Pause the target before changing breakpoints" };
     dbgNotify = notify; dbg.bps = dbg.bps.includes(a) ? dbg.bps.filter((x) => x !== a) : [...dbg.bps, a]; dbgPublish(); return {};
   },
   debug_step({ mode = "instruction", boundaries } = {}, notify) {
@@ -501,7 +500,24 @@ const handlers = {
       const b = (boundaries ?? []).map(parseAddr).filter((a) => a >= 0).sort((x, y) => x - y); if (!b.length) bad("boundaries");
       dbgStopAt(b.find((a) => a > dbg.pc) ?? b[0]); return {};
     }
+    if (mode === "into" || mode === "out") { // into: the next boundary; out: the instruction after the function (a return lands in the caller)
+      if (mode === "out") { dbgStopAt(f + STEP); return {}; }
+      const b = (boundaries ?? []).map(parseAddr).filter((a) => a >= 0).sort((x, y) => x - y); if (!b.length) bad("boundaries");
+      dbgStopAt(b.find((a) => a > dbg.pc) ?? b[0]); return {};
+    }
     dbgStopAt(f + ((dbg.pc - f + 4) % 0x30)); return {};
+  },
+  debug_memory({ address, length, dataType }) { // bytes follow the address and the stop count; a type gives int components (an array of n, else one)
+    dbgNeed("stopped"); const a = parseAddr(address); if (a < 0) bad("address");
+    const arr = /\[(\d+)\]$/.exec(dataType ?? ""), n = length ?? (dataType ? (arr ? +arr[1] * 4 : 4) : 64);
+    const bytes = Array.from({ length: n }, (_, k) => ((a + k + dbg.stop) & 0xff).toString(16).padStart(2, "0")).join("");
+    const items = dataType ? Array.from({ length: arr ? +arr[1] : 1 }, (_, i) => ({ offset: i * 4, length: 4, type: dataType.replace(/\[\d+\]$/, ""), name: arr ? `[${i}]` : "", value: String(a + i + dbg.stop) })) : undefined;
+    return { address: hex(a), bytes, ...(items ? { items } : {}) };
+  },
+  debug_values({ entry }) { // the variables of the mock decompile, their values follow the stop count
+    dbgNeed("stopped"); const i = idxOfEntry(parseAddr(entry)); if (i < 0) nf();
+    const mk = (name, kind, type, v, where) => ({ name, kind, type, size: 4, where, value: String(v), raw: "0x" + (v >>> 0).toString(16).padStart(8, "0") });
+    return { pc: hex(dbg.pc), items: [mk(v(i, "param_1"), "param", "int", dbg.stop * 3, "r0"), mk(v(i, "iVar1"), "local", "int", dbg.stop, "stack-8"), mk("g_state", "global", "int", dbg.stop >> 1, GLOBAL)] };
   },
   debug_continue(_, notify) {
     dbgNotify = notify; dbgNeed("stopped"); const from = dbg.pc; dbg.state = "running"; dbgPublish();

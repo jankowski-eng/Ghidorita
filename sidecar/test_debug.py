@@ -138,3 +138,109 @@ def test_statement_step(qemu, proc):
             assert st["address"] == WORK_B, st["address"]  # the breakpoint inside the call ended the step
             await c.ok("debug_detach")
     run(go())
+
+
+async def open_fw(c):
+    await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x0")
+    await c.ok("clear_code", address=WORK_A, length=0x2a)  # a raw image has no functions yet: the analysis left data after the vectors
+    for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop")):
+        await c.ok("create_function", address=a, name=n)
+
+
+def test_memory_values_into_out_and_live_breakpoints(qemu, proc):
+    async def go():
+        async with Client(proc.port) as c:
+            await open_fw(c)
+            await c.err("debug_memory", TARGET, address="0x20000000")  # not attached
+            assert "offset" in (await c.call("debug_attach", host="127.0.0.1", port=qemu, offset="zz"))["error"]["message"]
+            await c.ok("debug_breakpoint", address=WORK_A)
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu, offset="0x0")
+            n, st = await stop_at(c)
+            await c.ok("debug_continue")
+            n, st = await stop_at(c, n)
+            assert st["address"] == WORK_A
+            # memory: the global counter at 0x20000000, raw and through types
+            m = await c.ok("debug_memory", address="0x20000000", length=8)
+            assert m["bytes"] == "00" * 8 and "items" not in m, m
+            t = await c.ok("debug_memory", address="0x20000000", dataType="uint[2]")
+            assert [i["name"] for i in t["items"]] == ["[0]", "[1]"] and t["items"][0]["type"] == "uint", t
+            await c.err("debug_memory", INVALID, address="0x20000000", dataType="no_such_type")
+            await c.err("debug_memory", TARGET, address="0xf0000000", length=4)  # unmapped
+            # values: the function's variables, here the global written by work_a
+            v = await c.ok("debug_values", entry=WORK_A)
+            g = next(i for i in v["items"] if i["kind"] == "global")
+            assert g["where"] == "0x20000000" and g["size"] == 4 and g["raw"] == "0x00000000", v
+            # a statement step out of work_a lands in main_loop, and the counter has changed
+            await c.ok("debug_breakpoint", address=WORK_A)  # off: the next loop must not stop here
+            n, _ = await stop_at(c, n)
+            await c.ok("debug_step", mode="out")
+            n, st = await stop_at(c, n)
+            assert int(st["address"], 16) >= 0x28, st["address"]
+            assert (await c.ok("debug_values", entry=WORK_A))["items"][0]["raw"] == "0x00000001"
+            # step into: from the call in main_loop to the callee's entry (work_b); main_loop is not decompiled for boundaries here, so use its own
+            toks = (await c.ok("decompile", entry=MAIN))["tokens"]
+            starts = sorted({t["address"] for t in toks if t.get("address")})
+            await c.ok("debug_step", mode="into", boundaries=starts)
+            n, st = await stop_at(c, n)
+            assert st["address"] in (WORK_A, WORK_B, *starts), st["address"]
+            # breakpoint toggled while running: no stop is announced, the breakpoint works
+            await c.ok("debug_breakpoint", address=WORK_B)
+            n, _ = await stop_at(c, n)
+            await c.ok("debug_continue")
+            await stop_at(c, n, "running")
+            n2 = len([1 for _, m in c.notes if m["method"] == "debug_state"])
+            await c.ok("debug_breakpoint", address=WORK_A)
+            n3, st = await stop_at(c, n2, "stopped")  # the toggle's own announcement is `running`-state; the next stop is a breakpoint hit
+            assert st["address"] in (WORK_A, WORK_B), st
+            await c.ok("debug_detach")
+    run(go())
+
+
+QEMU64 = shutil.which("qemu-system-aarch64") or ("/opt/homebrew/bin/qemu-system-aarch64" if os.path.exists("/opt/homebrew/bin/qemu-system-aarch64") else None)
+FW64 = os.path.join(HERE, "testdata", "fw64", "fw.bin")
+LEAF, MAIN64, BASE64 = "0x4020000c", "0x402000a8", "0x40200000"
+
+
+@pytest.fixture()
+def qemu64():
+    if not QEMU64:
+        pytest.skip("qemu-system-aarch64 is not installed (brew install qemu)")
+    port = free_port()
+    p = subprocess.Popen([QEMU64, "-M", "virt", "-cpu", "cortex-a57", "-device", "loader,file=%s,addr=0x40200000" % FW64, "-device", "loader,addr=0x40200000,cpu-num=0",
+                          "-S", "-gdb", "tcp::%d" % port, "-display", "none", "-serial", "none"], stderr=subprocess.DEVNULL)
+    for _ in range(100):
+        try:
+            socket.create_connection(("127.0.0.1", port), 0.2).close()
+            break
+        except OSError:
+            time.sleep(0.05)
+    yield port
+    p.kill()
+    p.wait()
+
+
+def test_aarch64_registers_and_stack_values(qemu64, proc):
+    """A second architecture: the register names map through Ghidra's AARCH64 language, and -O0 code keeps parameters and locals on the stack."""
+    async def go():
+        async with Client(proc.port) as c:
+            await c.ok("open_binary", path=FW64, loader="Raw Binary", language="AARCH64:LE:64:v8A", baseAddress=BASE64)
+            await c.ok("clear_code", address=BASE64, length=0x118)
+            for a, n in ((LEAF, "leaf"), (MAIN64, "main_loop")):
+                await c.call("create_function", address=a, name=n)  # the analysis may have found it already
+            assert {LEAF, MAIN64} <= {f["entry"] for f in await c.ok("list_functions")}
+            await c.ok("debug_breakpoint", address=LEAF)  # at the entry: leaf's ninth parameter is on the stack at sp
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu64)
+            n, st = await stop_at(c)
+            assert {"x0", "x30", "sp", "pc"} <= {r["name"] for r in st["registers"]}, [r["name"] for r in st["registers"]]
+            await c.ok("debug_continue")
+            n, st = await stop_at(c, n)
+            assert st["address"] == LEAF, st["address"]
+            v = await c.ok("debug_values", entry=LEAF)
+            params = [i for i in v["items"] if i["kind"] == "param"]
+            assert len(params) == 9 and params[0]["raw"] == "0x00000000" and params[1]["raw"] == "0x00000002", params  # leaf(0, 2, ...) on the first loop, from w0 and w1
+            stack = [i for i in params if i["where"].startswith("stack")]
+            assert [i["raw"] for i in stack] == ["0x00000009"], params  # the ninth argument: read from the frame at sp-at-entry + 0
+            m = await c.ok("debug_memory", address=next(r["value"] for r in st["registers"] if r["name"] == "sp"), length=16)
+            assert len(m["bytes"]) == 32
+            await c.ok("debug_detach")
+    run(go())

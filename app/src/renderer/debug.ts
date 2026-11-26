@@ -1,7 +1,10 @@
-import type { Address, DebugState, Token } from "../../../protocol";
+import type { Address, DebugState, DebugValue, Token } from "../../../protocol";
 
 /** The debugger state the store keeps: the provider's state plus the registers that differ from the previous stop. */
-export type DebugView = DebugState & { changed: Record<string, string> }; // changed: register -> its value at the stop before
+export type DebugView = DebugState & {
+  changed: Record<string, string>; // register -> its value at the stop before
+  values?: { entry: Address; items: DebugValue[]; was: Record<string, string> }; // the function's variables at this stop; was: name -> value at the stop before (same function)
+};
 
 const num = (a: Address) => (a.startsWith("0x") ? BigInt(a) : null); // shortcut: only the default space is mapped (the coverage tint does the same); upgrade with qualified stop addresses
 
@@ -77,4 +80,33 @@ export function statementRange(tokens: Token[], line: number, pc: Address): { st
   if (m === null || p === null) return null;
   const next = lineStarts(tokens).map((s) => num(s)!).find((a) => a > m);
   return { start: "0x" + (p < m ? p : m).toString(16), end: "0x" + ((next ?? m + 1n) - 1n).toString(16) };
+}
+
+/** What to show after a decompiler line: the variables of the line with their values, and what they were before this step. One entry per line that names one. */
+export function lineValues(tokens: Token[], text: string, items: DebugValue[], was: Record<string, string>): { line: number; text: string }[] {
+  const by = new Map(items.map((i) => [i.name, i])), lines = text.split("\n"), out = new Map<number, string[]>();
+  for (const t of tokens) {
+    if (t.kind !== "variable" && t.kind !== "param") continue;
+    const name = lines[t.line]?.slice(t.colStart, t.colEnd), it = name ? by.get(name) : undefined;
+    if (!it) continue;
+    const parts = out.get(t.line) ?? [], label = `${it.name} = ${it.value}` + (it.name in was && was[it.name] !== it.value ? ` (was ${was[it.name]})` : "");
+    if (!parts.includes(label)) out.set(t.line, [...parts, label]);
+  }
+  return [...out].sort((a, b) => a[0] - b[0]).map(([line, parts]) => ({ line, text: "   ← " + parts.join(", ") }));
+}
+
+/** A run of bytes (hex) as hexdump rows of 16: address, bytes, ASCII; `was` marks bytes that differ from an earlier read of the same range. */
+export function hexRows(base: bigint, hex: string, was?: string): { address: string; bytes: { v: string; changed: boolean }[]; ascii: string }[] {
+  const rows = [];
+  for (let i = 0; i < hex.length; i += 32) {
+    const bytes = [];
+    let ascii = "";
+    for (let j = i; j < Math.min(i + 32, hex.length); j += 2) {
+      const v = hex.slice(j, j + 2), n = parseInt(v, 16);
+      bytes.push({ v, changed: !!was && was.length === hex.length && was.slice(j, j + 2) !== v });
+      ascii += n >= 32 && n < 127 ? String.fromCharCode(n) : ".";
+    }
+    rows.push({ address: "0x" + (base + BigInt(i / 2)).toString(16), bytes, ascii });
+  }
+  return rows;
 }
