@@ -1,7 +1,7 @@
 """The RPC method table and each method's lane, locked down (no JVM). A new method means a new line here, in protocol.ts and in protocol.md."""
 import os, re
 
-import main
+from ghidrette.app import App
 
 # lane: R (thread R), R+job (R, cancellable by request id), scan (S pool), decomp (D pool), project (R, Busy during an open),
 # project+busy_ok (same, but answered during an open), loop (asyncio loop), open (own thread O)
@@ -24,7 +24,7 @@ GOLDEN = {
 
 def actual():
     """method -> lane, from the registry the running sidecar dispatches with."""
-    return main.Sidecar().registry.describe()
+    return App(start=False).registry.describe()
 
 
 def test_method_table_is_golden():
