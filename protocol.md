@@ -8,18 +8,32 @@ JSON-RPC 2.0 over WebSocket, text frames, one JSON object per frame. Types: `pro
 - Addresses are hex strings, `"0x401000"` (lowercase). There are no row indexes: the listing is addressed by address only.
 
 ## Requests (client → server; replies are standard JSON-RPC results)
-Params/results are in `protocol.ts`; all addresses are lowercase hex strings. Missing or malformed params fail with `InvalidArgument` (-32602). Every method except `open_binary`, `cancel_open` and `cancel_decompile` fails with `NoProgram` until a program is open (and while an open is in progress).
+Params/results are in `protocol.ts`; all addresses are lowercase hex strings. Missing or malformed params fail with `InvalidArgument` (-32602). Every method except `open_binary`, `cancel_open`, `cancel_decompile`, `import_candidates`, `list_languages`, `list_programs`, `delete_program` and `close_program` fails with `NoProgram` until a program is open (and while an open is in progress).
 
 ### Open / decompile / listing
 | method | params | result | semantics / errors |
 |---|---|---|---|
-| `open_binary` | `{path}` | `{programId, name, persisted}` | `programId` is the file's sha256; the analyzed program is stored in a Ghidra project (`$SIDECAR_PROJECTS_DIR`, default `~/Library/Application Support/ghidra-desktop-spike/projects`); `persisted` is true when loaded from there without re-analysis. Otherwise imports, analyzes, saves; emits `progress`; replies when done. `Busy` if another open is running; `Cancelled` after `cancel_open`. |
+| `open_binary` | `{path, loader?, language?, compilerSpec?, baseAddress?}` | `{programId, name, persisted}` | Options: see *Import options* below; all omitted = default import. `programId` is the file's sha256 (default import) or `sha256-<12 hex>` (explicit options); the analyzed program is stored in a Ghidra project (`$SIDECAR_PROJECTS_DIR`, default `~/Library/Application Support/ghidra-desktop-spike/projects`); `persisted` is true when loaded from there without re-analysis. Otherwise imports, analyzes, saves; emits `progress`; replies when done. `Busy` if another open is running; `Cancelled` after `cancel_open`. |
 | `cancel_open` | `{}` | `{cancelled}` | Cancels the running `open_binary` (it fails with `Cancelled`, nothing is saved). `false` if no open is running. |
 | `list_functions` | `{}` | `[{name, entry, size}]` | Sorted by entry. |
 | `decompile` | `{entry, timeoutSecs?=30}` | `{text, tokens[], cached}` | `NotFound` if no function at `entry`; `Timeout`; `Cancelled`. |
 | `cancel_decompile` | `{id}` | `{cancelled}` | Cancels the `decompile` request with that JSON-RPC id, queued or running; that request fails with `Cancelled`. `false` if unknown or finished. |
 | `listing_info` | `{}` | `{ranges:[{start,size}], totalBytes}` | The loaded+initialized address set (ascending, bytes). The client maps scroll position ↔ address by cumulative range size (see `app/src/renderer/addrmap.ts`). |
 | `listing_rows` | `{address, count, direction?="forward"}` | `[{address, length, bytes, mnemonic, operands, label?, comment?}]` | See below. |
+
+### Import, save, close, project
+| method | params | result | semantics / errors |
+|---|---|---|---|
+| `import_candidates` | `{path}` | `{candidates:[{loader, language, compilerSpec, preferred, acceptsBaseAddress}]}` | The LoadSpecs Ghidra offers for the file (from PyGhidra's `ProgramLoader`/loader `findSupportedLoadSpecs`, not reimplemented). Exactly one `preferred` when non-empty (Ghidra's preferred spec). `language`/`compilerSpec` are `null` when the loader needs the user to choose (Raw Binary). Empty list = nothing recognises the file (only Raw Binary would). Needs no program, fails `Busy` while an open runs, `NotFound` if the file is missing. |
+| `list_languages` | `{}` | `[{id, description, compilerSpecs:[{id,name}]}]` | All installed Ghidra languages; feeds the language picker for `language: null` candidates. Needs no program. |
+| `save` | `{}` | `{}` | Saves the open program to its DomainFile. Thread R, in order with edits. Fires `program_changed` with `ranges: []`, `kinds: []` and `undo.dirty = false`. Saving an unchanged program is a no-op success. |
+| `close_program` | `{}` | `{}` | Releases the program and discards unsaved changes (the client prompts first). In-flight and queued `decompile`s fail with `Cancelled`; later program requests fail `NoProgram`. Idempotent: succeeds with no program. `Busy` while an open is in progress (use `cancel_open`). |
+| `list_programs` | `{}` | `[{programId, name, sourcePath?, sizeBytes, analyzed, lastOpened?, options}]` | Programs stored in the project, newest `lastOpened` first. `options` is `{}` for default imports. Needs no program (works while one is open); `Busy` while an open runs. |
+| `delete_program` | `{programId}` | `{}` | Removes the program from the project. `Busy` if it is the open program (or an open is running), `NotFound` if unknown. |
+
+### Import options
+- `open_binary` options are all optional: `loader` (a candidate's loader name), `language` (LanguageID), `compilerSpec` (default: language's default), `baseAddress` (hex string, `0x…`, must fit the address space; only valid if the chosen candidate has `acceptsBaseAddress`). Unknown loader/language/compilerSpec or a malformed/out-of-range base address → `InvalidArgument`.
+- **Persistence key.** No options → `programId = sha256(file)`, the project file is named by it: unchanged, so existing projects still load. Any option present → `programId = sha256(file) + "-" + hex(sha256(canonical)[:6])`, where `canonical` = JSON of `{"loader","language","compilerSpec","baseAddress"}` (keys in that order, absent = `null`, `baseAddress` normalised to lowercase `0x…` without leading zeros). The same file with different options never collides with the default import or with each other. Passing the preferred spec explicitly is a different key from the default (the UI omits options for the default path). Opening with options whose key is already persisted loads it without re-analysis.
 
 ### Reads
 | method | params | result | semantics / errors |
@@ -30,7 +44,7 @@ Params/results are in `protocol.ts`; all addresses are lowercase hex strings. Mi
 | `xrefs_from` | `{address}` | `[{to, type}]` | References from the instruction at `address`. |
 | `list_strings` | `{offset?=0, limit?=100, minLength?=4}` | `{total, items:[{address, value, length}]}` | Defined strings; `total` counts all matches (after `minLength`), `items` is the page. |
 | `list_data_types` | `{query, limit?=50}` | `[{name, path, size}]` | Substring match on data type names; `size` -1 = dynamic/unsized. |
-| `undo_state` | `{}` | `{canUndo, canRedo, undoName?, redoName?}` | Current undo/redo availability and labels. |
+| `undo_state` | `{}` | `{canUndo, canRedo, undoName?, redoName?, dirty}` | Current undo/redo availability and labels; `dirty` = unsaved changes since open or the last `save` (Ghidra `Program.isChanged()`). Undoing back to the saved state stays dirty (Ghidra does not track that). |
 
 ### Edits
 Each edit is one Ghidra transaction, named as the undo label (e.g. "Rename symbol"), runs on thread R, and fires `program_changed`. Result `{}` unless noted.
@@ -52,7 +66,7 @@ Each edit is one Ghidra transaction, named as the undo label (e.g. "Rename symbo
 
 ## Notifications (server → client, no id)
 - `progress {phase, pct, message, analyzer?, done?, total?}` — phase order: `import` → `analysis` → `saving` → `ready` (only while `open_binary` runs; a persisted program goes straight to `ready`). `pct` is 0–100 or -1 (indeterminate). During `analysis` `pct` is -1 because Ghidra's AutoAnalysisManager has no global total; `analyzer` is the current analyzer name; `pct` is the per-analyzer progress/max when that analyzer reports a maximum (else -1); `done` is the number of analyzer runs finished so far; `total` is omitted.
-- `program_changed {ranges, kinds, undo}` — the program was modified. `ranges` is `[{start,end}]` (Ghidra address ranges, `end` inclusive) or `null` = unknown/broad, refetch everything. `kinds` ⊆ symbol|comment|function|data|code|type|other tells the client what to refetch. `undo` is the new `UndoState`. Coalesced over ~50 ms (ranges merged, kinds unioned). Fired for edits and for `undo`/`redo` (which send `ranges: null`); never during `open_binary`.
+- `program_changed {ranges, kinds, undo}` — the program was modified. `ranges` is `[{start,end}]` (Ghidra address ranges, `end` inclusive) or `null` = unknown/broad, refetch everything. `kinds` ⊆ symbol|comment|function|data|code|type|other tells the client what to refetch. `undo` is the new `UndoState` (including `dirty`). Coalesced over ~50 ms (ranges merged, kinds unioned). Fired for edits, for `undo`/`redo` (which send `ranges: null`) and for `save` (`ranges: []`, `kinds: []`: only `dirty` changed, nothing to refetch); never during `open_binary`.
 - `error {message}` — non-fatal, out-of-band.
 
 ## Errors
@@ -60,8 +74,15 @@ Standard JSON-RPC error object. Codes in `protocol.ts` `ErrorCode`: NoProgram -3
 
 ## Concurrency
 - **Thread R** (the event loop dispatches to it) handles all program reads (`list_functions`, `listing_*`, xrefs, search, strings, ...) and ALL writes, `undo` and `redo`, in arrival order.
+- `save`, `close_program` run on R like edits (in order); `import_candidates`, `list_languages`, `list_programs`, `delete_program` also run on R (they touch the project or loaders only when no open is running, hence `Busy` during an open; `close_program` waits for running decompiles to be cancelled as in `_close`). `open_binary` on top of an open program discards its unsaved changes.
 - **Thread O** runs `open_binary` (import + analysis + save). While an open is in progress, R requests and `decompile` fail fast with `NoProgram`, and a second `open_binary` fails with `Busy`.
 - `cancel_open` is handled on the event loop (bypasses the queues): it cancels the TaskMonitor, `open_binary` fails with `Cancelled`, nothing is saved to the project, and the sidecar stays usable.
 - **Decompiler pool**: N threads (env `SIDECAR_DECOMP_WORKERS`, default 2), each owning its own `DecompInterface` and all sharing one queue. A slow decompile never delays listing fetches. `cancel_decompile` (event loop, bypasses queues) works by request id for queued and running requests.
 - **Decompile cache**: shared and thread-safe, keyed by function entry, invalidated on `program_changed` (functions overlapping the changed ranges; `ranges` null or kind `type` clears everything), so results are never stale (`cached` is false after an invalidating edit).
 - `rename_variable` / `retype_variable` run entirely on thread R with a short-lived `DecompInterface`, so no edit can interleave between obtaining the `HighFunction` and committing the change.
+
+## Save and undo
+`save` writes the program to the project; the in-memory edits live there until then, so quitting, closing or opening another binary without saving loses them (the client prompts Save / Don't Save / Cancel). Whether saving clears Ghidra's undo stack: **TO BE MEASURED by the backend work and recorded here** (placeholder).
+
+## Auth
+`SIDECAR_TOKEN` is mandatory: the sidecar exits with status 2 and a stderr message when it is unset or empty, unless `SIDECAR_ALLOW_NO_AUTH=1` is set (test-only escape hatch). The WebSocket path is `/<token>`; the mock server ignores the token.

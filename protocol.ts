@@ -74,8 +74,14 @@ export interface AddrRange {
 }
 
 export interface Methods {
-  open_binary: { params: { path: string }; result: { programId: string; name: string; persisted: boolean } };
+  open_binary: { params: { path: string } & ImportOptions; result: { programId: string; name: string; persisted: boolean } };
   cancel_open: { params: {}; result: { cancelled: boolean } };
+  import_candidates: { params: { path: string }; result: { candidates: ImportCandidate[] } };
+  list_languages: { params: {}; result: LanguageInfo[] };
+  save: { params: {}; result: {} };
+  close_program: { params: {}; result: {} };
+  list_programs: { params: {}; result: ProgramEntry[] };
+  delete_program: { params: { programId: string }; result: {} };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
@@ -100,13 +106,38 @@ export interface Methods {
   redo: { params: {}; result: UndoState };
 }
 
+/** All optional. Omit all = Ghidra's default import (preferred LoadSpec); programId stays the plain sha256. Any field present = explicit import, programId = sha256 + "-" + 12 hex of the options hash (protocol.md). */
+export interface ImportOptions {
+  loader?: string;        // ImportCandidate.loader, e.g. "Raw Binary"
+  language?: string;      // Ghidra LanguageID, e.g. "ARM:LE:32:v8"
+  compilerSpec?: string;  // CompilerSpecID, e.g. "default"; defaults to the language's default spec
+  baseAddress?: Address;  // hex "0x08000000"; only for candidates with acceptsBaseAddress
+}
+export interface ImportCandidate {
+  loader: string;
+  language: string | null;      // null = the loader needs the user to pick one (Raw Binary); see list_languages
+  compilerSpec: string | null;
+  preferred: boolean;           // exactly one candidate has this set when any candidate exists
+  acceptsBaseAddress: boolean;
+}
+export interface LanguageInfo { id: string; description: string; compilerSpecs: { id: string; name: string }[] }
+export interface ProgramEntry {
+  programId: string;
+  name: string;
+  sourcePath?: string;          // path at first import; may no longer exist
+  sizeBytes: number;            // size of the source file at import
+  analyzed: boolean;
+  lastOpened?: string;          // ISO-8601 UTC
+  options: ImportOptions;       // {} = default import
+}
+
 export type CommentKind = "eol" | "pre" | "post" | "plate" | "repeatable";
 export interface SymbolHit { name: string; address: Address; kind: "function" | "label" | "data" | "external" | "other" }
 export interface XrefTo { from: Address; type: string; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; function: name of function containing `from`
 export interface XrefFrom { to: Address; type: string }
 export interface StringItem { address: Address; value: string; length: number }
 export interface DataTypeHit { name: string; path: string; size: number } // size -1 = dynamic/unsized
-export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string }
+export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty = unsaved changes since open or last save
 
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */
 export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "other";
@@ -114,7 +145,7 @@ export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "
 export interface Notifications {
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
   progress: { phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
-  // ranges null = unknown/broad, refetch everything; start/end inclusive. Coalesced ~50 ms. Fired for edits, undo and redo; not during open_binary.
+  // ranges null = unknown/broad, refetch everything; start/end inclusive. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); not during open_binary.
   program_changed: { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }

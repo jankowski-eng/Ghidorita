@@ -41,9 +41,10 @@ const CALLS = [[7, 1, 3, "UNCONDITIONAL_CALL"], [13, 2, 5, "CONDITIONAL_CALL"], 
 const calleeOf = (i, [mul, add]) => (i * mul + add) % NFUNC;
 const fnRange = (i) => ({ start: entryOf(i), end: hex(BASE + (i + 1) * STEP - 1) });
 const undoStack = [], redoStack = [];
-const undoState = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoName: undoStack.at(-1)?.name, redoName: redoStack.at(-1)?.name });
+let dirty = false;
+const undoState = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoName: undoStack.at(-1)?.name, redoName: redoStack.at(-1)?.name, dirty });
 const decompCache = new Set();
-const changed = (notify, ranges, kinds) => { decompCache.clear(); notify("program_changed", { ranges, kinds, undo: undoState() }); };
+const changed = (notify, ranges, kinds) => { dirty = true; decompCache.clear(); notify("program_changed", { ranges, kinds, undo: undoState() }); };
 function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mutates S; undo/redo restore whole-state snapshots
   const before = structuredClone(S);
   const result = fn() ?? {};
@@ -93,14 +94,70 @@ function decompile(i) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let opened = false, opening = false, openCancelled = false;
+let opened = false, opening = false, openCancelled = false, openId = null;
+// Project contents (fake). Seeded so the welcome pane has something to show.
+const programs = new Map([
+  ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, lastOpened: "2026-11-01T10:00:00Z", options: {} }],
+  ["b".repeat(64) + "-0123456789ab", { programId: "b".repeat(64) + "-0123456789ab", name: "firmware.bin", sourcePath: "/mock/firmware.bin", sizeBytes: 65536, analyzed: true, lastOpened: "2026-10-20T08:30:00Z", options: { loader: "Raw Binary", language: "ARM:LE:32:v8", compilerSpec: "default", baseAddress: "0x8000000" } }],
+]);
+const LANGS = [
+  { id: "x86:LE:64:default", description: "Intel/AMD 64-bit x86", compilerSpecs: [{ id: "gcc", name: "GNU gcc" }, { id: "clang", name: "clang" }] },
+  { id: "ARM:LE:32:v8", description: "ARM 32-bit little endian", compilerSpecs: [{ id: "default", name: "default" }] },
+  { id: "AARCH64:LE:64:v8A", description: "Generic ARM64 v8.5-A LE", compilerSpecs: [{ id: "default", name: "default" }] },
+];
+const hexAddr = (a) => { if (typeof a !== "string" || !/^0x[0-9a-f]+$/i.test(a) || BigInt(a) >= 2n ** 64n) bad("baseAddress"); return "0x" + BigInt(a).toString(16); };
+const optsOf = (p) => {
+  const o = {};
+  for (const k of ["loader", "language", "compilerSpec"]) if (p[k] !== undefined) { if (typeof p[k] !== "string" || !p[k]) bad(k); o[k] = p[k]; }
+  if (p.language !== undefined && !LANGS.some((l) => l.id === p.language)) bad("language");
+  if (p.baseAddress !== undefined) o.baseAddress = hexAddr(p.baseAddress);
+  return o;
+};
+const idFor = (path, o) => { // not a real hash: the mock only needs distinct keys
+  const base = "mock:" + path;
+  return Object.keys(o).length ? base + "-" + [o.loader, o.language, o.compilerSpec, o.baseAddress].map((x) => x ?? "").join("|") : base;
+};
+const resetProgram = () => { S = { names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map() }; undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
 const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
-  async open_binary({ path }, notify) {
+  import_candidates({ path }) {
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
-    opening = true; openCancelled = false;
+    if (/missing/.test(path)) throw { code: -32004, message: "NotFound" }; // mock: paths containing "missing"
+    if (/\.(bin|rom|img)$/i.test(path)) return { candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
+    return { candidates: [
+      { loader: "Mach-O", language: "AARCH64:LE:64:v8A", compilerSpec: "default", preferred: true, acceptsBaseAddress: true },
+      { loader: "Mach-O", language: "x86:LE:64:default", compilerSpec: "gcc", preferred: false, acceptsBaseAddress: true },
+      { loader: "Raw Binary", language: null, compilerSpec: null, preferred: false, acceptsBaseAddress: true }] };
+  },
+  list_languages() { if (opening) throw { code: -32005, message: "Busy" }; return LANGS; },
+  save(_, notify) {
+    if (dirty) { dirty = false; notify("program_changed", { ranges: [], kinds: [], undo: undoState() }); }
+    return {};
+  },
+  close_program() {
+    if (opening) throw { code: -32005, message: "Busy" };
+    for (const c of [...cancels.values()]) c(); // in-flight decompiles fail Cancelled
+    opened = false; openId = null; resetProgram();
+    return {};
+  },
+  list_programs() {
+    if (opening) throw { code: -32005, message: "Busy" };
+    return [...programs.values()].sort((a, b) => (b.lastOpened ?? "").localeCompare(a.lastOpened ?? ""));
+  },
+  delete_program({ programId }) {
+    if (typeof programId !== "string") bad("programId");
+    if (opening || (opened && programId === openId)) throw { code: -32005, message: "Busy" };
+    if (!programs.delete(programId)) nf();
+    return {};
+  },
+  async open_binary(p, notify) {
+    const { path } = p;
+    if (typeof path !== "string") bad("path");
+    if (opening) throw { code: -32005, message: "Busy" };
+    const opts = optsOf(p);
+    opening = true; openCancelled = false; opened = false; resetProgram();
     const an = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
     const steps = [
       { phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" },
@@ -112,8 +169,11 @@ const handlers = {
         notify("progress", p); await sleep(200);
         if (openCancelled) throw { code: -32002, message: "Cancelled" };
       }
-      opened = true;
-      return { programId: "mock", name: path.split("/").pop(), persisted: false };
+      const programId = idFor(path, opts);
+      const persisted = programs.has(programId), name = path.split("/").pop();
+      programs.set(programId, { programId, name, sourcePath: path, sizeBytes: 4096, analyzed: true, lastOpened: new Date().toISOString(), options: opts });
+      opened = true; openId = programId;
+      return { programId, name, persisted };
     } finally { opening = false; }
   },
   cancel_open() { const c = opening && !openCancelled; if (c) openCancelled = true; return { cancelled: c }; },
@@ -246,7 +306,7 @@ wss.on("connection", (ws) => {
     try {
       const h = handlers[req.method];
       if (!h) throw { code: -32601, message: "MethodNotFound" };
-      if (req.method !== "open_binary" && (!opened || opening)) throw { code: -32001, message: "NoProgram" };
+      if (!["open_binary", "import_candidates", "list_languages", "close_program", "list_programs", "delete_program"].includes(req.method) && (!opened || opening)) throw { code: -32001, message: "NoProgram" };
       const result = await h(req.params ?? {}, notify, req.id);
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: req.id, result }));
     } catch (e) {
