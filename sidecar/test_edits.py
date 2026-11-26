@@ -54,7 +54,7 @@ def test_function_source_and_load_coverage(env, tmp_path):
         async with Client(env["proc"].port) as c:
             assert all(f["source"] in ("user", "analysis", "imported", "default") for f in await c.ok("list_functions"))
             f = fns[0]
-            await c.ok("rename_symbol", address=f["entry"], name="cov_renamed")
+            await c.ok("rename_symbol", address=f["entry"], newName="cov_renamed")
             assert next(g for g in await c.ok("list_functions") if g["entry"] == f["entry"])["source"] == "user"
             p = tmp_path / "cov.txt"
             p.write_text("# trace\n0x401000-0x40100f\n\n0x401020  # one\n")
