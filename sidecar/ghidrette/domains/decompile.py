@@ -13,6 +13,7 @@ KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5:
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code"}
+GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 
 @contextlib.contextmanager
@@ -101,6 +102,54 @@ class Decompile:
         text_arg(name, "name")
         uses, _ = self._run(entry, timeoutSecs, job, ("uses",), self._uses)
         return uses.get(name, [])
+
+    @rpc(lane="decomp")
+    def function_graph(self, entry, timeoutSecs=30, job=None):
+        """Basic blocks of the function at `entry` with their decompiled C (or assembly) and the flow edges between them; see protocol.md."""
+        return self._run(entry, timeoutSecs, job, ("graph",), self._graph)[0]
+
+    def _graph(self, prog, func, res):
+        """Blocks: Ghidra's BasicBlockModel. C lines go to the block holding their first addressed token (lines without an address follow the
+        previous line; the header before the first addressed line is dropped); a block that gets no C line shows its instructions.
+        shortcut: a C line that spans several blocks is shown once, in its first; upgrade by splitting on token addresses."""
+        from ghidra.program.model.block import BasicBlockModel
+        from ghidra.util.task import TaskMonitor
+        mon, fa, lst = TaskMonitor.DUMMY, self.ses.fmtr(prog), prog.getListing()
+        model, body = BasicBlockModel(prog), func.getBody()
+        blocks, it = [], model.getCodeBlocksContaining(body, mon)
+        while it.hasNext() and len(blocks) < GRAPH_MAX_BLOCKS:
+            blocks.append(it.next())
+        blocks.sort(key=lambda b: akey(fa(b.getMinAddress())))
+        starts = {fa(b.getMinAddress()): i for i, b in enumerate(blocks)}
+        c_lines = [[] for _ in blocks]
+        parsed = self._tokens(prog, res)
+        first = {}
+        for t in parsed["tokens"]:
+            if "address" in t:
+                first.setdefault(t["line"], t["address"])
+        owner = None
+        for ln, text in enumerate(parsed["text"].split("\n")):
+            if ln in first:
+                b = model.getFirstCodeBlockContaining(self.ses.addr(first[ln], prog), mon)
+                owner = starts.get(fa(b.getMinAddress())) if b is not None else owner
+            if owner is not None:
+                c_lines[owner].append(text)
+        out, edges = [], []
+        for i, b in enumerate(blocks):
+            asm = ["%s  %s" % (fa(x.getAddress()), x) for x in lst.getInstructions(b, True)][:GRAPH_MAX_LINES]
+            out.append({"start": fa(b.getMinAddress()), "end": fa(b.getMaxAddress()), "kind": "c" if c_lines[i] else "asm", "lines": c_lines[i][:GRAPH_MAX_LINES] or asm})
+            last = lst.getInstructionContaining(b.getMaxAddress())
+            cond = last is not None and last.getFlowType().isConditional()
+            seen, dests = set(), b.getDestinations(mon)
+            while dests.hasNext():
+                r = dests.next()
+                to = fa(r.getDestinationAddress())
+                if r.getFlowType().isCall() or to not in starts or to in seen:
+                    continue
+                seen.add(to)
+                kind = "uncond" if not cond else "false" if r.getDestinationAddress().equals(b.getMaxAddress().next()) else "true"
+                edges.append({"from": out[i]["start"], "to": to, "kind": kind})
+        return {"blocks": out, "edges": edges}
 
     def _run(self, entry, timeoutSecs, job, tag, work):
         """The pool worker's decompile: returns (work(prog, func, results), cached). The cache key is the entry's (space, offset) plus `tag`."""

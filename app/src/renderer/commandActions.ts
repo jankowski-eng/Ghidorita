@@ -28,6 +28,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Coverage", cmd: { type: "dock", panel: "coverage" } },
   { label: "Load Coverage…", cmd: { type: "coverage-load" } },
   { label: "Clear Coverage", cmd: { type: "coverage-clear" } },
+  { label: "Toggle Control-Flow Graph", cmd: { type: "graph" } },
   { label: "Close Tab", cmd: { type: "close-tab" } },
   { label: "Close Program", cmd: { type: "close-program" } },
 ];

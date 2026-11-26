@@ -395,6 +395,13 @@ const handlers = {
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },
+  function_graph({ entry }) { // four blocks: entry -> (true: then | false: else) -> join; the graph's second block gets C, the others assembly
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (i < 0) nf();
+    const at = (k) => hex(n + k * STRIDE), blk = (k, len, lines, kind = "asm") => ({ start: at(k), end: hex(n + (k + len) * STRIDE - 1), kind, lines });
+    return { blocks: [blk(0, 3, [`${at(0)}  push rbp`, `${at(1)}  mov rbp, rsp`, `${at(2)}  jz ${at(6)}`]), blk(3, 3, ["  puts(\"then\");", "  iVar1 = 1;"], "c"), blk(6, 2, [`${at(6)}  xor eax, eax`, `${at(7)}  jmp ${at(8)}`]), blk(8, 2, [`${at(8)}  pop rbp`, `${at(9)}  ret`])],
+      edges: [{ from: at(0), to: at(3), kind: "false" }, { from: at(0), to: at(6), kind: "true" }, { from: at(3), to: at(8), kind: "uncond" }, { from: at(6), to: at(8), kind: "uncond" }] };
+  },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);
     if (!(i >= 0 && i < NFUNC)) return [];

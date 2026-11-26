@@ -153,3 +153,24 @@ def test_pool_concurrent_and_cancel(env):
                 assert "result" in r or r["error"]["code"] == CANCELLED
             assert (await c.ok("cancel_decompile", id=999999)) == {"cancelled": False}
     run(go())
+
+
+def test_function_graph_blocks_edges_and_c(env):
+    fns = env["fns"]
+    async def go():
+        async with Client(env["proc"].port) as c:
+            f = next(f for f in sorted(fns, key=lambda f: f["size"]) if f["size"] > 300)
+            g = await c.ok("function_graph", entry=f["entry"])
+            starts = [b["start"] for b in g["blocks"]]
+            assert len(starts) > 2 and f["entry"] in starts and starts == sorted(starts, key=lambda s: int(s, 16)), starts
+            assert all(b["lines"] and b["kind"] in ("c", "asm") for b in g["blocks"])
+            assert any(b["kind"] == "c" for b in g["blocks"]), "no block got C lines"
+            assert g["edges"] and all(e["from"] in starts and e["to"] in starts for e in g["edges"]), g["edges"][:3]
+            kinds = {e["kind"] for e in g["edges"]}
+            assert {"true", "false"} <= kinds, kinds
+            for s in starts:  # a conditional branch has exactly one true and one false edge
+                ks = sorted(e["kind"] for e in g["edges"] if e["from"] == s and e["kind"] != "uncond")
+                assert ks in ([], ["false", "true"]), (s, ks)
+            assert await c.ok("function_graph", entry=f["entry"]) == g  # cached
+            await c.err("function_graph", NOT_FOUND, entry=hex(int(f["entry"], 16) + 1))
+    run(go())

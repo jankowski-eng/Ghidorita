@@ -1,6 +1,6 @@
 import type { Address } from "../../../protocol";
 
-export type Source = "listing" | "decompiler" | "functions" | "goto" | "history" | "open" | "search" | "xrefs";
+export type Source = "listing" | "decompiler" | "functions" | "goto" | "history" | "open" | "search" | "xrefs" | "graph";
 export interface Loc { address: Address; source: Source }
 /** Browser-style history: one current location, a back stack and a forward stack. Immutable. */
 export interface Nav { current: Loc | null; back: Loc[]; forward: Loc[] }

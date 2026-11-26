@@ -5,6 +5,7 @@ import { Listing } from "./Listing";
 import { FunctionList } from "./FunctionList";
 import { BinaryMap } from "./BinaryMap";
 import { Decompiler } from "./Decompiler";
+import { GraphView } from "./GraphView";
 import { Toolbar } from "./Toolbar";
 import { OpenDialog, type Progress } from "./OpenDialog";
 import { Confirm } from "./Confirm";
@@ -107,6 +108,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
   const formRef = useRef(formDlg); formRef.current = formDlg;
   const [covVersion, setCovVersion] = useState(0); // bumped whenever the coverage runs or their selection change
   const [typesOpen, setTypesOpen] = useState(false);
+  const [graphOn, setGraphOn] = useState(false); // the decompiler pane shows the control-flow graph of the active function
   const [typesVersion, setTypesVersion] = useState(0);
   const lastPane = useRef<"listing" | "decompiler">("listing");
 
@@ -445,6 +447,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
     else if (c.type === "edit") void edit(c.action);
     else if (c.type === "dock") { if (openedRef.current) setDock(c.panel); }
     else if (c.type === "xrefs") showXrefs();
+    else if (c.type === "graph") { if (openedRef.current) setGraphOn((g) => !g); }
     else if (c.type === "datatypes") { if (openedRef.current) setTypesOpen((o) => !o); }
     else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
   };
@@ -485,6 +488,13 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
       void api.current.edit(e.shiftKey ? "redo" : "undo");
     };
     window.addEventListener("keydown", undoKey, true);
+    // Space toggles the graph, but only where it types nothing: the listing, the decompiler, the graph or the bare page (never a dialog or text field)
+    const spaceKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey || !openedRef.current || !(t === document.body || t.closest(".lbox, .editor, .graph"))) return;
+      e.preventDefault(); api.current.handleMenu({ type: "graph" });
+    };
+    window.addEventListener("keydown", spaceKey);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") lastPane.current = k; };
     window.addEventListener("focusin", pane);
     // quit: save first (the status bar shows "Saving…"), then main stops the sidecar
@@ -501,7 +511,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); offChanged(); offError(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", spaceKey); window.removeEventListener("focusin", pane); };
   }, []);
 
   const tabsRef = useRef(() => tabs.state); tabsRef.current = () => tabs.state;
@@ -569,7 +579,8 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
               {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
                 <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
-              <div className="editor" style={{ display: active ? undefined : "none" }}>
+              {graphOn && active && <GraphView entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
+              <div className="editor" style={{ display: active && !graphOn ? undefined : "none" }}>
                 <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>
             </div>

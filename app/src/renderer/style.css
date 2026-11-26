@@ -182,3 +182,5 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .lrow.cov-a::before, .lrow.cov-b::before { position: absolute; left: 4px; font-size: 9px; font-weight: 700; } .lrow.cov-a::before { content: "A"; color: #e0a93b; } .lrow.cov-b::before { content: "B"; color: #5aa0e0; }
 .covlegend { display: flex; gap: 16px; padding: 2px 8px; } .covlegend b { font-weight: normal; color: #888; }
 .sw { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; } .sw.both { background: #4ec36b; } .sw.a { background: #e0a93b; } .sw.b { background: #5aa0e0; }
+.graph { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #1e1e1e; cursor: grab; outline: none; } .graph:active { cursor: grabbing; }
+.glegend { position: absolute; top: 4px; left: 8px; font-size: 11px; color: #888; z-index: 1; pointer-events: none; }

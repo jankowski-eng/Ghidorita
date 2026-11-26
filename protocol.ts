@@ -67,6 +67,10 @@ export interface DecompileResult {
   cached: boolean;
 }
 
+export interface GraphBlock { start: Address; end: Address; kind: "c" | "asm"; lines: string[] } // end = last byte of the block; lines: C source lines or "addr  instruction"
+export interface GraphEdge { from: Address; to: Address; kind: "true" | "false" | "uncond" } // from/to = block starts; true/false only after a conditional branch (false = fall through)
+export interface FunctionGraph { blocks: GraphBlock[]; edges: GraphEdge[] } // blocks in address order; the first is not necessarily the entry
+
 export interface ListingRow {
   address: Address;
   length: number;    // code unit length in bytes; next row (if contiguous) starts at address + length
@@ -152,6 +156,8 @@ export interface Methods {
   delete_program: { params: { programId: string }; result: {} };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
+  // Control-flow graph of one function: basic blocks (C lines where the decompiler maps them, else assembly) and edges. Decompiler lane, cancellable with cancel_decompile.
+  function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
