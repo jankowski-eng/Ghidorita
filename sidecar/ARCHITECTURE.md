@@ -32,7 +32,7 @@ sidecar/
       search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidretteScans)
       exports.py       export_symbols (JSON symbol map), export_header (C header), export_gzf (Ghidra archive, lane R)
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
-      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from, call_graph, function_calls (scan lane)
+      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from (R); function_calls, call_graph (scan lane; call_graph is bounded by visited functions and seconds as well as output nodes, checks cancel in its loops, `truncated` says a bound hit)
       bookmarks.py     list_bookmarks (scan lane, snapshot of plain dicts dropped on program_changed), set_bookmark, remove_bookmark {address, type, category?} (BookmarkManager; set/remove are edits on R that announce their address)
       datatypes.py     list_data_types and the data-type-manager RPCs
   jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
@@ -49,7 +49,7 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 |---|---|---|
 | `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
 | `edit` | S pool, then R | variable edits decompile and infer structure fields on S, then queue the write on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. Structure inference shares a deadline across the initial decompile, direct callees, and pointer tracing. The commit checks program epoch and write revision |
-| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `list_bookmarks`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
+| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `list_bookmarks`, `function_calls`, `call_graph`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
 | `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile`, `variable_uses`, `function_graph`. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `file` | asyncio file thread | `load_coverage` parses its file without occupying R and checks the program epoch before returning |
 | `project` | R | `list_programs`, `delete_program`, `import_candidates`, `list_languages`, `close_program`. `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |

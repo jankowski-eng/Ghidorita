@@ -141,3 +141,67 @@ def test_function_calls_on_ls(env):
             await c.err("function_calls", NOT_FOUND, entry="0x10")
             await c.err("function_calls", INVALID, entry="zz")
     run(go())
+
+
+# ---- call_graph on the scan lane: bounded, cancellable, never on R (in-process, a hand-built two-function program: f1 calls f2) ----
+import asyncio, threading, time
+
+from ghidrette.core.errors import RpcError
+from ghidrette.domains import xrefs as xrefs_mod
+from testlib import BASE, CANCELLED, X86, blob, inproc
+
+
+async def two_functions(call, tmp_path):
+    await call("open_binary", path=blob(tmp_path), loader="Raw Binary", language=X86, baseAddress=BASE, analysis="blocking")
+    have = {f["entry"] for f in await call("list_functions")}
+    f2 = "0x%x" % (int(BASE, 16) + 0x10)
+    for entry, name in ((BASE, "f1"), (f2, "f2")):
+        if entry not in have:
+            await call("create_function", address=entry, name=name)
+    return BASE, f2
+
+
+def test_call_graph_bounds_truncate(sc, tmp_path, monkeypatch):
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            f1, f2 = await two_functions(call, tmp_path)
+            g = await call("call_graph", entry=f1)
+            assert g["truncated"] is False and {n["entry"] for n in g["nodes"]} == {f1, f2}, g
+            r = await call("call_graph", entry=f1, to=f2)
+            assert r["truncated"] is False and [(e["from"], e["to"]) for e in r["edges"]] == [(f1, f2)], r
+            with monkeypatch.context() as patch:
+                patch.setattr(xrefs_mod, "CALL_GRAPH_MAX_VISITED", 1)  # depth 2 needs two visits per side, a route search two as well
+                assert (await call("call_graph", entry=f1))["truncated"] is True
+                assert (await call("call_graph", entry=f1, to=f2))["truncated"] is True
+            with monkeypatch.context() as patch:
+                patch.setattr(xrefs_mod, "CALL_GRAPH_MAX_SECS", -1.0)
+                assert (await call("call_graph", entry=f1))["truncated"] is True
+            assert (await call("call_graph", entry=f1))["truncated"] is False  # the bounds are per request
+    run(go())
+
+
+def test_call_graph_cancel_and_listing_stays_responsive(sc, tmp_path, monkeypatch):
+    entered = threading.Event()
+
+    def endless(self, prog, f, scan):  # a traversal that takes as long as it is allowed to
+        entered.set()
+        while True:
+            scan.check()
+            time.sleep(0.01)
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            f1, f2 = await two_functions(call, tmp_path)
+            with monkeypatch.context() as patch:
+                patch.setattr(xrefs_mod.Xrefs, "_callees", endless)
+                req = asyncio.create_task(call("call_graph", rid=9, entry=f1))
+                assert await asyncio.to_thread(entered.wait, 5)
+                for _ in range(5):
+                    assert await asyncio.wait_for(call("listing_rows", address=f1, count=5), 1)  # R is free
+                assert await asyncio.wait_for(call("undo_state"), 1) is not None
+                assert await call("cancel_search", id=9) == {"cancelled": True}
+                with pytest.raises(RpcError) as caught:
+                    await asyncio.wait_for(req, 3)
+                assert caught.value.code == CANCELLED
+            assert (await call("call_graph", entry=f1))["truncated"] is False  # the scan lane is free again
+    run(go())

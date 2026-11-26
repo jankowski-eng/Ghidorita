@@ -54,7 +54,7 @@ export interface References {
   xrefsToVariable(params: { entry: Address; name: string; limit?: number }): Promise<XrefTo[]>;
   variableUses(params: { entry: Address; name: string; timeoutSecs?: number }): Job<XrefTo[]>;
   /** Callers and callees around `entry`, or every route to `to` (callGraph capability). */
-  callGraph(params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }): Promise<CallGraph>;
+  callGraph(params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }): Job<CallGraph>; // a scan: cancel it when the view's target changes
   /** callers and callees of a function; capability "calls" */
   calls(params: { entry: Address }): Job<FunctionCalls>;
 }

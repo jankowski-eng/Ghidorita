@@ -182,7 +182,7 @@ export class WebSocketBackend implements ApplicationBackend {
         xrefsFrom: (p) => read("xrefs_from", p, "references"),
         xrefsToVariable: (p) => read("xrefs_to_variable", p, "variableReferences"),
         variableUses: (p) => job("variableReferences", "variable_uses", p, "cancel_decompile"),
-        callGraph: (p) => read("call_graph", p, "callGraph"),
+        callGraph: (p) => job("callGraph", "call_graph", p, "cancel_search"),
         calls: (p) => job("calls", "function_calls", p, "cancel_search"),
       },
       searches: {
