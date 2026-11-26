@@ -200,16 +200,23 @@ class Program:
 
     @rpc(lane="open")
     async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None, analysis=None, *, _request_id=None):
+        return await self._open(_request_id, lambda op: self._do_open(path, op, loader, language, compilerSpec, baseAddress, profile, analysis))
+
+    @rpc(lane="open")
+    async def open_program(self, programId, analysis=None, *, _request_id=None):
+        """Open a stored program by its key: no source file is read, hashed or needed."""
+        return await self._open(_request_id, lambda op: self._do_open(None, op, None, None, None, None, None, analysis, stored=programId))
+
+    async def _open(self, request_id, run):
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
-        args = (loader, language, compilerSpec, baseAddress, profile, analysis)
-        op = self.ctx.lanes.opening = Opening(_request_id)
+        op = self.ctx.lanes.opening = Opening(request_id)
         fut = self.ctx.loop.create_future()
         self.ctx.progress("import", 0, "starting import")
 
         def body():
             try:
-                res, exc = self._do_open(path, op, *args), None
+                res, exc = run(op), None
             except BaseException as e:  # noqa
                 res, exc = None, e
             self.ctx.loop.call_soon_threadsafe(self.ctx.lanes.settle, fut, res, exc)
@@ -232,37 +239,45 @@ class Program:
             if fut.done() and self.ctx.lanes.opening is op:
                 self.ctx.lanes.opening = None
 
-    def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile, analysis=None):
-        """Thread O. Stage the replacement before touching the active program on R."""
+    def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile, analysis=None, stored=None):
+        """Thread O. Stage the replacement before touching the active program on R. `stored` = a programId: load that program, path is None."""
         res = prog = consumer = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
             op.check()
-            text_arg(path, "path")
             if analysis not in (None, "background", "blocking"):
                 raise RpcError(INVALID, "bad analysis %r" % (analysis,))
             blocking = analysis == "blocking"
-            if not os.path.isfile(path):
-                raise RpcError(NOT_FOUND, "no such file: %s" % path)
-            opts = self._check_options(loader, language, compilerSpec, baseAddress)
-            if profile not in (None, "full", "fast"):
-                raise RpcError(INVALID, "bad profile %r" % (profile,))
-            # no profile: SIDECAR_ANALYSIS_DISABLE if set (costs nothing), else full
-            disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
-            if sorted(disabled) == FAST_PROFILE:
-                opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
-            size = os.path.getsize(path)
-            h, done = hashlib.sha256(), 0
-            with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    op.check()
-                    h.update(chunk)
-                    done += len(chunk)
-                    self.ctx.progress("import", min(10, done * 10 // max(1, size)), "hashing")
-            key = program_key(h.hexdigest(), opts, disabled)
             proj = self.ctx.project.ghidra_project()
+            if stored is not None:
+                text_arg(stored, "programId")
+                key, opts = stored, self.ctx.project.meta_get(stored).get("options") or {}
+                name = self.ctx.project.meta_get(stored).get("name") or stored
+                if proj.getProjectData().getFile("/" + key) is None:
+                    raise RpcError(NOT_FOUND, "no stored program %s" % key)
+            else:
+                text_arg(path, "path")
+                if not os.path.isfile(path):
+                    raise RpcError(NOT_FOUND, "no such file: %s" % path)
+                opts = self._check_options(loader, language, compilerSpec, baseAddress)
+                if profile not in (None, "full", "fast"):
+                    raise RpcError(INVALID, "bad profile %r" % (profile,))
+                # no profile: SIDECAR_ANALYSIS_DISABLE if set (costs nothing), else full
+                disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
+                if sorted(disabled) == FAST_PROFILE:
+                    opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
+                name = os.path.basename(path)
+                size = os.path.getsize(path)
+                h, done = hashlib.sha256(), 0
+                with open(path, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        op.check()
+                        h.update(chunk)
+                        done += len(chunk)
+                        self.ctx.progress("import", min(10, done * 10 // max(1, size)), "hashing")
+                key = program_key(h.hexdigest(), opts, disabled)
             t0 = time.monotonic()
-            persisted = proj.getProjectData().getFile("/" + key) is not None
+            persisted = stored is not None or proj.getProjectData().getFile("/" + key) is not None
             if persisted:
                 self.ctx.progress("import", 100, "loading persisted analysis")
                 prog, consumer = self._load_persisted(proj, key, op)
@@ -287,7 +302,7 @@ class Program:
                                             analyzed=blocking, analysis=rec, analysisProfile=prof, options=opts)
             # Claim the commit before queueing it, so shutdown waits for the whole swap.
             op.begin_commit()
-            session = self.ctx.lanes.on_r(lambda: self._publish(prog, res, consumer, key, os.path.basename(path), rec != "done"))
+            session = self.ctx.lanes.on_r(lambda: self._publish(prog, res, consumer, key, name, rec != "done"))
             published, res, prog, consumer = prog, None, None, None  # the session now owns the staged program
             self.ctx.analysis.reset(rec, prof)
             if rec != "done":  # background open of a new import, or of an interrupted analysis: resume

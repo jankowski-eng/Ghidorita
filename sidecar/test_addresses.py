@@ -244,3 +244,29 @@ def test_function_calls_thunks_and_externals(sc):
     assert t == {"name": "stub_t", "entry": "0x401020", "external": False, "thunk": True, "target": {"name": "real_b", "entry": "0x401040", "external": False}}, t
     assert t2["name"] == "stub_t2" and t2["thunk"] and t2["entry"] == "0x401030" and t2["target"] == {"name": "ext_printf", "entry": None, "external": True}, t2
     assert [c["name"] for c in sc.function_calls("0x401040", scan=jobs(sc)[1])["callees"]] == []
+
+
+def test_change_in_a_far_block_of_a_discontiguous_function_is_announced_at_its_entry(sc):
+    """The client treats a function as [entry, entry+size): the event for an edit in a distant block must name the entry too."""
+    from ghidra.program.model.address import AddressSet
+    from ghidra.program.model.symbol import SourceType
+    p = build(sc, "t_disc", [("b", 0x1000, bytes([0xC3]) * 0x40, False)])
+    sp = p.getAddressFactory().getDefaultAddressSpace()
+    body = AddressSet(sp.getAddress(0x1000), sp.getAddress(0x1003))
+    body.add(sp.getAddress(0x1030), sp.getAddress(0x1033))
+    tx = p.startTransaction("f")
+    p.getFunctionManager().createFunction("disc", sp.getAddress(0x1000), body, SourceType.USER_DEFINED)
+    p.endTransaction(tx, True)
+    sent = []
+    sc.app.ctx.notify = lambda method, params, generation=None: sent.append(params)
+    ev = sc.app.ctx.events
+    ev._emit(ev.generation)  # flush what creating the function itself recorded
+    far = sp.getAddress(0x1031)
+    ev.record({"comment"}, [sc.ses.rng(far, far)])
+    ev._emit(ev.generation)
+    assert {"start": "0x1031", "end": "0x1031"} in sent[-1]["ranges"]
+    assert {"start": "0x1000", "end": "0x1000"} in sent[-1]["ranges"]
+    near = sp.getAddress(0x1010)  # outside the function: nothing is added
+    ev.record({"comment"}, [sc.ses.rng(near, near)])
+    ev._emit(ev.generation)
+    assert sent[-1]["ranges"] == [{"start": "0x1010", "end": "0x1010"}]

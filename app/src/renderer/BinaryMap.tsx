@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address, FunctionInfo } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
-import { describeAt, fill, mapLayers, type Layer } from "./binmap";
+import { describeAt, fill, goAddr, mapLayers, type Layer } from "./binmap";
 import { coverage } from "./coverage";
 
 /** Vertical map of the whole program next to the function list: top = first loaded byte, bottom = last. Click or drag to go there; a line marks the current address. */
@@ -30,7 +30,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
     if (pos >= 0 && map.total > 0) { g.fillStyle = "#fff"; g.fillRect(0, Math.min(h - 2, Math.floor((pos / map.total) * h)), w, 2); }
   }, [fills, all, h, pos, map]);
   const at = (e: React.PointerEvent) => Math.max(0, Math.min(1, (e.clientY - box.current!.getBoundingClientRect().top) / box.current!.clientHeight)) * map.total;
-  const go = (e: React.PointerEvent) => onGo(map.addr(at(e)));
+  const go = (e: React.PointerEvent) => { const a = goAddr(map, at(e)); if (a) onGo(a); };
   const toggle = (k: "renamed" | "coverage", label: string, tip: string, off?: boolean) => (
     <button aria-label={`${label} layer`} title={`${label} layer (${on[k] && !off ? "shown" : off ? "load coverage to use it" : "hidden"}): ${tip}. Click to ${on[k] ? "hide" : "show"}.`} aria-pressed={on[k] && !off} disabled={off} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>{label[0]}</button>
   );
@@ -40,7 +40,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
       aria-description={`Layers: ${all.map((l) => l.name).join(", ")}. Click or drag to go to an address.`}
       onPointerDown={(e) => { drag.current = true; e.currentTarget.setPointerCapture(e.pointerId); go(e); }}
       onPointerMove={(e) => { if (drag.current) go(e); if (map.total) setTip({ y: e.clientY - box.current!.getBoundingClientRect().top, text: describeAt(map, funcs, at(e)) }); }} onPointerLeave={() => setTip(null)} onPointerUp={() => { drag.current = false; }} onPointerCancel={() => { drag.current = false; }}
-      onKeyDown={(e) => { const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0; if (d && pos >= 0) { e.preventDefault(); onGo(map.addr(pos + d * Math.max(1, map.total / 100))); } }}>
+      onKeyDown={(e) => { const d = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0; if (d && pos >= 0) { e.preventDefault(); const a = goAddr(map, pos + d * Math.max(1, map.total / 100)); if (a) onGo(a); } }}>
       <canvas ref={cv} />
       {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
     </div>

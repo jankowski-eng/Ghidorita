@@ -15,7 +15,7 @@ export function ChangesPanel({ onGo }: { onGo: (a: Address) => void }) {
             <button disabled={!c.address} onClick={() => c.address && onGo(c.address)}>
               <span className="t">{new Date(c.at).toLocaleTimeString()}</span>
               <span className="n">{c.label}</span>
-              <span className="a">{c.address ?? ""}{c.undone ? " · undone" : c.saved ? " · saved" : ""}</span>
+              <span className="a">{c.address ?? ""}{c.undone ? " · undone" : c.saved ? " · saved" : c.locked ? " · unsaved, can no longer be undone" : ""}</span>
             </button>
           </li>
         ))}

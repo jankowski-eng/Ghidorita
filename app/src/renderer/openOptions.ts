@@ -34,10 +34,6 @@ export function buildOptions(c: ImportChoice): ImportOptions | undefined {
 export const optionsSummary = (o: ImportOptions): string =>
   [o.loader, o.language, o.compilerSpec, o.baseAddress && "@" + o.baseAddress, o.profile === "fast" && "fast analysis"].filter(Boolean).join(" · ") || "default";
 
-/** Parameters to reopen a stored program exactly as it was imported (undefined path = nothing to reopen). */
-export const reopenParams = (e: ProgramEntry): { path: string } & ImportOptions | null =>
-  e.sourcePath ? { path: e.sourcePath, ...e.options } : null;
-
 /** Plain-language read of an entropy profile (bits/byte per slice): mostly 7.5+ is packed or encrypted, a high tail is a likely appended or packed section. */
 export function entropyHint(e: number[]): string {
   if (!e.length) return "";

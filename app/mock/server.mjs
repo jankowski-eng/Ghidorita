@@ -309,6 +309,11 @@ const handlers = {
     stored.delete(programId);
     return {};
   },
+  async open_program({ programId, analysis }, notify, rid) {
+    const e = typeof programId === "string" && programs.get(programId);
+    if (!e) throw { code: -32004, message: "NotFound" };
+    return handlers.open_binary({ path: e.sourcePath, ...e.options, analysis, programId }, notify, rid); // programId: the catalog entry, not idFor(path) (seeded entries differ)
+  },
   async open_binary(p, notify, rid) {
     const { path } = p;
     if (typeof path !== "string") bad("path");
@@ -320,7 +325,7 @@ const handlers = {
       throw { code: -32603, message: "Failed to flush pending changes" };
     }
     opening = true; openingRequest = rid; openCancelled = false;
-    const programId = idFor(path, opts), known = programs.get(programId), persisted = !!known;
+    const programId = p.programId ?? idFor(path, opts), known = programs.get(programId), persisted = !!known;
     const stat = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
     const steps = [{ phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" }];
     if (blocking && !(persisted && known.analysis === "done")) steps.push(stat("Decompiler Parameter ID", 0, 0), stat("Decompiler Parameter ID", 50, 0), stat("Function Start Search", -1, 1), stat("Stack", 30, 2, 8),
@@ -823,7 +828,7 @@ function step(from, to, side, notify) {
   return undoState();
 }
 
-const unscoped = new Set(["provider_info", "active_session", "open_binary", "import_candidates", "list_languages", "list_programs", "delete_program"]);
+const unscoped = new Set(["provider_info", "active_session", "open_binary", "open_program", "import_candidates", "list_languages", "list_programs", "delete_program"]);
 const token = process.env.SIDECAR_TOKEN;
 const wss = new WebSocketServer({ host: "127.0.0.1", port: 0, verifyClient: ({ req }) => !token || req.url === "/" + token }, () => console.log(wss.address().port));
 wss.on("connection", (ws) => {

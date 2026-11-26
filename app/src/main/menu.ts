@@ -42,9 +42,9 @@ export function createMenu({ getWin, pick }: Deps) {
         } },
         { label: "Clear All Coverage", enabled: state.hasProgram && caps.has("coverage"), click: () => send({ type: "coverage-clear" }) },
         { label: "Export", enabled: state.hasProgram && (caps.has("export") || caps.has("exportGzf")), submenu: [
-          { label: "Symbol Map (JSON)…", click: () => send({ type: "export", kind: "symbols" }) },
-          { label: "C Header…", click: () => send({ type: "export", kind: "header" }) },
-          { label: "Ghidra Archive (.gzf)…", click: () => send({ type: "export", kind: "gzf" }) },
+          { label: "Symbol Map (JSON)…", enabled: allowsCommand(caps, { type: "export", kind: "symbols" }), click: () => send({ type: "export", kind: "symbols" }) },
+          { label: "C Header…", enabled: allowsCommand(caps, { type: "export", kind: "header" }), click: () => send({ type: "export", kind: "header" }) },
+          { label: "Ghidra Archive (.gzf)…", enabled: allowsCommand(caps, { type: "export", kind: "gzf" }), click: () => send({ type: "export", kind: "gzf" }) },
         ] },
         { label: "Open Recent", enabled: state.canOpen, submenu: recentItems },
         { id: "save", label: "Save", accelerator: acc("save"), enabled: state.hasProgram && caps.has("save") && state.dirty, click: () => send({ type: "edit", action: "save" }) },

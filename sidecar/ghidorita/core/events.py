@@ -143,9 +143,17 @@ class Events:
                 out = None
             else:
                 f = ses.fmtr(prog)
+                def at_(sp, off):
+                    return prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off)
                 def at(sp, off):
-                    return f(prog.getAddressFactory().getAddressSpace(sp).getAddress(off - (1 << 64) if off >= 1 << 63 else off))
+                    return f(at_(sp, off))
                 out = [{"start": at(sp, s), "end": at(sp, e)} for sp, s, e in merged]
+                # the client takes a function to be [entry, entry+size): a change in another block of a discontiguous function is announced at its entry too
+                from ghidra.program.model.address import AddressSet
+                for sp, s, e in merged:
+                    for fn in prog.getFunctionManager().getFunctionsOverlapping(AddressSet(at_(sp, s), at_(sp, e))):
+                        if fn.getBody().getNumAddressRanges() > 1:
+                            out.append({"start": f(fn.getEntryPoint()), "end": f(fn.getEntryPoint())})
             undo, session_id = ses.undo_snap, ses.session_id
         with self.plock:
             if generation == self.generation:
