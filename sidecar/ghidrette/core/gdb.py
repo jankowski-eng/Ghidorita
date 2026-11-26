@@ -39,6 +39,7 @@ class Gdb:
         self.sock.settimeout(None)
         self.on_stop, self.on_lost = on_stop, on_lost
         self.replies, self.lock, self.running, self.closed = queue.Queue(), threading.Lock(), False, False
+        self.route = threading.Lock()  # where a stop reply goes (the waiter's queue or on_stop) is decided and handed over under this lock
         self.ctl = threading.Lock()  # a resume's start and a pause's check of `running` exclude each other: no Ctrl-C is lost between them
         self.sync = None  # a queue.Queue while a resume is waited for on the calling thread (step over a breakpoint)
         threading.Thread(target=self._read, daemon=True, name="gdb-reader").start()
@@ -79,8 +80,13 @@ class Gdb:
 
     def _packet(self, p):
         if self.running and p[:1] in ("T", "S", "W", "X"):
-            self.running = False
-            (self.sync.put(p) if self.sync is not None else self.on_stop(p))
+            with self.route:  # a waiter that times out takes the same lock: the stop is consumed by it or delivered to on_stop, never dropped
+                self.running = False
+                q = self.sync
+                if q is not None:
+                    q.put(p)
+            if q is None:
+                self.on_stop(p)
         elif self.running and p[:1] == "O":  # console output while running: not a reply
             pass
         else:
@@ -119,7 +125,7 @@ class Gdb:
             with self.ctl:
                 if before is not None and not before():
                     return "T02"
-                self.sync = queue.Queue() if wait else None
+                self.arm() if wait else None
                 self.running = True
                 try:
                     self._send(frame(payload))
@@ -128,15 +134,32 @@ class Gdb:
                     raise
             if not wait:
                 return None
-            try:
-                r = self.sync.get(timeout=timeout)
-            except queue.Empty:
-                raise GdbError("The target did not stop")
-            finally:
-                self.sync = None
+            r = self.wait_stop(self.sync, timeout)
             if r is None:
                 raise GdbError("Lost the connection to the target")
             return r
+
+    def arm(self):
+        """Route the next stop reply to a queue the caller waits on (see wait_stop)."""
+        with self.route:
+            self.sync = queue.Queue()
+            return self.sync
+
+    def wait_stop(self, q, timeout):
+        """The stop reply that arrives in q (None: the connection ended). On timeout the target is left running, and its stop will go to on_stop
+        unless it raced the timeout, in which case it is returned here."""
+        try:
+            r = q.get(timeout=timeout)
+        except queue.Empty:
+            with self.route:
+                self.sync = None
+                try:
+                    return q.get_nowait()
+                except queue.Empty:
+                    raise GdbError("The target did not stop")
+        with self.route:
+            self.sync = None
+        return r
 
     def interrupt(self):
         self._send(b"\x03")

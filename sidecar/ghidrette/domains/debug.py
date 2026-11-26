@@ -36,7 +36,7 @@ class Debug:
         self.stops = 0  # stops announced since the process started: a client tells a new stop from a repeated state (a breakpoint toggled while stopped)
         self.address, self.registers, self.bps = None, [], []  # bps: program addresses (ints) in the order they were set
         self.regs, self.pc, self.sp, self.big, self.bp_kind = [], None, None, False, 4
-        self.worker = False  # a statement step is running on its own thread
+        self.worker = None  # the token of the statement step thread that is running (only that thread clears it), else None
         ctx.shutdown_hooks.append(self.close)
         ctx.debug = self
 
@@ -59,6 +59,7 @@ class Debug:
         with self.lock:
             g, self.g = self.g, None
             self.state, self.error, self.address, self.registers = "detached", error, None, []
+            self.deferred = []  # owed to a connection that is gone
         if g is not None:
             g.close(polite=False)
         self.publish()
@@ -115,9 +116,7 @@ class Debug:
             with self.lock:
                 if self.g is not g:
                     return
-                for op, a in self.deferred:
-                    self._z(g, op, a)
-                self.deferred = []
+                self._apply_deferred(g)
                 sig = self._sig(packet)
                 self.signal = sig if sig not in (None, 5, 2) else None
                 regs = self._read_registers(g)
@@ -204,6 +203,7 @@ class Debug:
                 g.close(polite=True)
                 self.g = None
                 self.state, self.error, self.address, self.registers = "detached", "", None, []
+                self.deferred = []
                 self.publish()
             return {}
 
@@ -228,19 +228,17 @@ class Debug:
             if self.g is not None:
                 g = self._live()
                 if self.state == "running" and not self.worker:  # like a debugger: stop the target, change the breakpoint, go on, without announcing a stop
-                    q = queue.Queue()
-                    g.sync = q
+                    q = g.arm()
                     try:
                         g.interrupt()
-                        r = q.get(timeout=5)
-                    except (GdbError, queue.Empty):
+                        r = g.wait_stop(q, 5)
+                    except GdbError:
                         raise RpcError(TARGET, "The target did not stop to change the breakpoint")
-                    finally:
-                        g.sync = None
                     if r is None or r[0] in "WX":
                         if r is not None:
                             self._stopped(g, r)  # the target ended: announce it
                         raise RpcError(TARGET, "The target stopped running")
+                    self._apply_deferred(g)  # first: a change owed to an earlier timed-out step must not overwrite the one asked for now
                     genuine = r[1:3] != "02"  # SIGINT is our own Ctrl-C; anything else (a breakpoint, a signal) is a real stop
                     try:
                         self._z(g, "z" if a in self.bps else "Z", a)
@@ -278,12 +276,18 @@ class Debug:
         """The signal of a stop reply (T05..., S05), None for anything else."""
         return int(r[1:3], 16) if r[:1] in ("T", "S") and len(r) >= 3 else None
 
+    def _apply_deferred(self, g):
+        """Breakpoint changes owed by a step that gave up waiting, now that the target is stopped; those of another (closed) connection are dropped."""
+        mine, self.deferred = [(op, a) for gg, op, a in self.deferred if gg is g], []
+        for op, a in mine:
+            self._z(g, op, a)
+
     def _restore(self, g, op, addr):
         """Undo a temporary breakpoint change after a step: at once if the target is stopped, else (a step that gave up waiting) at its stop."""
         if g.closed:
             return
         if g.running:
-            self.deferred.append((op, addr))
+            self.deferred.append((g, op, addr))
         else:
             self._z(g, op, addr)
 
@@ -317,10 +321,10 @@ class Debug:
             pc = self.address
             if mode != "instruction":
                 self.cancel.clear()
-                self.worker = True
+                token = self.worker = object()
                 self.state, self.address, self.registers, self.error = "running", None, [], ""
                 self.publish()
-                threading.Thread(target=self._statement, args=(g, pc, starts, mode), daemon=True, name="debug-statement").start()
+                threading.Thread(target=self._statement, args=(g, pc, starts, mode, token), daemon=True, name="debug-statement").start()
                 return {}
             try:
                 r = self._single_step(g, pc)
@@ -332,7 +336,21 @@ class Debug:
             self._stopped(g, r)
             return {}
 
-    def _statement(self, g, pc, starts, mode):
+    @staticmethod
+    def _frame_ended(ins, npc):
+        """The instruction just executed ended the frame: a terminal flow (return, exit) that was taken. A conditional return that was not taken
+        (the pc is at the fall-through) continues in the same frame."""
+        if ins is None or not ins.getFlowType().isTerminal():
+            return False
+        ft = ins.getFallThrough()
+        return ft is None or npc != ft.getOffset() & MASK64
+
+    def _release(self, token):
+        with self.lock:
+            if self.worker is token:  # not a newer step's token
+                self.worker = None
+
+    def _statement(self, g, pc, starts, mode, token):
         """Worker: instruction by instruction until the pc is at a statement start (statement, into), a user breakpoint, outside the function
         (a return, or "into" a callee; "out" and "statement" run a call over to the instruction after it), or pause. A call is run over with a
         temporary breakpoint after it, ignoring returns of deeper (recursive) frames by comparing sp."""
@@ -383,14 +401,14 @@ class Debug:
                     if r[0] in "WX" or self._sig(r) != 5 or self.cancel.is_set() or pc != back or pc in self.bps or (pc in starts and mode != "out"):
                         break
                     continue
-                if ins is not None and ins.getFlowType().isTerminal():  # a return (or an exit): this frame is done, also when the caller is the same function
+                if self._frame_ended(ins, npc):  # a return (or an exit) that was taken: this frame is done, also when the caller is the same function
                     break
                 if body is None or not inside:  # left the function by a jump (a tail call)
                     break
                 if npc in starts and mode != "out":
                     break
                 pc = npc
-            self.worker = False  # before the stop is announced: the client's next step must find the target free
+            self._release(token)  # before the stop is announced: the client's next step must find the target free
             self._stopped(g, r)
         except (GdbError, RpcError) as e:
             if g.running:  # the stop will still arrive (on_stop) when the target stops
@@ -402,7 +420,7 @@ class Debug:
             if self.g is g:
                 self._drop("The statement step failed: %s" % e)
         finally:
-            self.worker = False
+            self._release(token)
 
     @rpc(lane="R")
     def debug_continue(self):
@@ -418,6 +436,9 @@ class Debug:
                         return {}
                 g.resume("c")
             except GdbError as e:
+                if g.running:  # the step off the breakpoint has not stopped yet: the target is running, and pausable
+                    self.state, self.address, self.registers = "running", None, []
+                    self.publish()
                 raise RpcError(TARGET, str(e))
             self.state, self.address, self.registers, self.error = "running", None, [], ""
             self.publish()
@@ -465,7 +486,7 @@ class Debug:
         from ghidra.program.model.scalar import Scalar
         v = dt.getValue(buf, SettingsImpl.NO_SETTINGS, len(data))
         if isinstance(v, Scalar):  # integers in decimal (the default representation is hex with an "h")
-            return str(int(v.getSignedValue() if v.isSigned() else v.getUnsignedValue()))
+            return str(int(v.getSignedValue() if v.isSigned() else v.getUnsignedValue() & MASK64))
         return str(dt.getRepresentation(buf, SettingsImpl.NO_SETTINGS, len(data)))
 
     @rpc(lane="R")

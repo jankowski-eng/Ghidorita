@@ -87,3 +87,28 @@ def test_resume_can_be_vetoed_under_the_pause_lock():
     g = Gdb("127.0.0.1", port, print, print)
     assert g.resume("c", wait=True, before=lambda: False) == "T02" and not g.running
     assert g.request("p0") == "2a000000"
+
+
+def test_a_stop_that_races_the_waiters_timeout_is_not_dropped():
+    """The stop arrives after the waiter's get timed out but before it handed over: it is returned to the waiter; one after the handover goes to on_stop."""
+    port = serve(lambda read, send, c: read())
+    stops = []
+    g = Gdb("127.0.0.1", port, stops.append, print)
+
+    class Racy(queue.Queue):
+        def get(self, block=True, timeout=None):  # the stop is routed into this queue just as the waiter gives up
+            if block:
+                g._packet("T05")
+                raise queue.Empty
+            return super().get(block=False)
+
+    g.running = True
+    q = Racy()
+    g.sync = q
+    assert g.wait_stop(q, 0.01) == "T05" and not stops
+    g.running = True
+    q2 = g.arm()
+    with pytest.raises(GdbError, match="did not stop"):
+        g.wait_stop(q2, 0.01)
+    g._packet("T05")  # after the handover: on_stop gets it
+    assert stops == ["T05"]

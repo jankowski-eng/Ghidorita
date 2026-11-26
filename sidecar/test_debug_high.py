@@ -37,8 +37,17 @@ class FakeG:
         self.i = min(self.i + 1, len(self.stops) - 1)
         return self.stops[self.i][1]
 
+    def arm(self):
+        import queue
+        self.sync = queue.Queue()
+        return self.sync
+
+    def wait_stop(self, q, timeout):
+        return q.get(timeout=timeout)
+
     def interrupt(self):
-        pass
+        if self.sync is not None:
+            self.sync.put("T02")
 
     def close(self, polite=True):
         self.closed = True
@@ -80,8 +89,8 @@ def test_statement_step_runs_over_a_call_at_a_high_pc(sc, dbg):
     g = FakeG({}, stops)
     attach(dbg, sc, g, HI)
     dbg.cancel.clear()
-    dbg.worker = True
-    dbg._statement(g, HI, {HI + 0x19}, "statement")
+    dbg.worker = tok = object()
+    dbg._statement(g, HI, {HI + 0x19}, "statement", tok)
     assert dbg.state == "stopped" and dbg.address == HI + 0x19 and not g.closed, (dbg.state, hex(dbg.address or 0), g.log)
     assert "c" in g.log and any(p.startswith("Z0,") and p.split(",")[1] == "%x" % (HI + 0x16) for p in g.log), g.log  # the call was run over with a breakpoint after it
     assert dbg.signal is None
@@ -92,8 +101,8 @@ def test_a_signal_other_than_the_trap_stops_the_step_and_is_reported(sc, dbg):
     g = FakeG({}, stops)
     attach(dbg, sc, g, HI)
     dbg.cancel.clear()
-    dbg.worker = True
-    dbg._statement(g, HI, {HI + 0x19}, "statement")
+    dbg.worker = tok = object()
+    dbg._statement(g, HI, {HI + 0x19}, "statement", tok)
     assert dbg.state == "stopped" and dbg.address == HI + 7 and dbg.signal == 11, (dbg.state, dbg.signal)
     assert dbg.snapshot()["signal"] == 11
 
@@ -102,6 +111,82 @@ def test_a_pause_before_the_resume_is_not_lost(sc, dbg):
     g = FakeG({}, [(HI, "T05"), (HI + 7, "T05"), (HI + 0xA, "T05")])
     attach(dbg, sc, g, HI)
     dbg.cancel.set()  # F6 arrived between two instructions: no interrupt can be sent (nothing runs), the next resume must not start
-    dbg.worker = True
-    dbg._statement(g, HI, {HI + 0x19}, "statement")
+    dbg.worker = tok = object()
+    dbg._statement(g, HI, {HI + 0x19}, "statement", tok)
     assert g.log.count("s") == 0 and dbg.state == "stopped" and dbg.address == HI, g.log
+
+
+def test_only_the_owning_worker_clears_the_worker_token(sc, dbg):
+    g = FakeG({}, [(HI, "T05"), (HI + 7, "T05")])
+    attach(dbg, sc, g, HI)
+    old, newer = object(), object()
+    dbg.worker = old
+    dbg.cancel.set()
+    dbg._statement(g, HI, {HI + 0x19}, "statement", old)  # ends at once (paused); a newer step took over before its finally ran
+    assert dbg.worker is None
+    dbg.worker = newer
+    dbg._release(old)
+    assert dbg.worker is newer  # the old worker does not clear the newer one's token
+
+
+def test_deferred_breakpoint_changes_belong_to_their_connection(sc, dbg):
+    g0, g1 = FakeG({}, [(HI, "T05")]), FakeG({}, [(HI, "T05")])
+    attach(dbg, sc, g1, HI)
+    dbg.deferred = [(g0, "Z", 0x8), (g1, "z", 0x10)]
+    dbg._stopped(g1, "T05")
+    assert "Z0,8,4" not in g1.log and not any(p.startswith("Z0,8") for p in g1.log)  # the old connection's change is dropped
+    assert any(p.startswith("z0,10") for p in g1.log) and dbg.deferred == []
+
+
+def test_a_live_breakpoint_toggle_applies_deferred_changes_first(sc, dbg):
+    g = FakeG({}, [(HI, "T05")])
+    attach(dbg, sc, g, HI)
+    dbg.state, dbg.worker, dbg.bps = "running", None, []
+    dbg.deferred = [(g, "Z", 0x8)]
+    dbg.debug_breakpoint(hex(0x10))
+    zs = [p for p in g.log if p[0] in "Zz"]
+    assert zs[0].startswith("Z0,8") and zs[1].startswith("Z0,10"), zs  # the owed change first, then the one asked for
+    assert g.log[-1] == "c" and dbg.bps == [0x10]  # the synthetic interrupt stop: resumed, no stop announced
+
+
+def test_continue_that_times_out_stepping_off_a_breakpoint_publishes_running(sc, dbg):
+    from ghidrette.core.gdb import GdbError
+    g = FakeG({}, [(HI, "T05")])
+
+    def slow(payload, wait=False, timeout=5.0, before=None):
+        g.running = True
+        raise GdbError("The target did not stop")
+    g.resume = slow
+    attach(dbg, sc, g, HI)
+    dbg.bps = [HI]
+    from ghidrette.core.errors import RpcError
+    with pytest.raises(RpcError):
+        dbg.debug_continue()
+    assert dbg.state == "running"  # pausable until its stop arrives
+
+
+def test_frame_ended_only_by_a_return_that_was_taken():
+    from ghidrette.domains.debug import Debug
+
+    class Off:
+        def __init__(self, v): self.v = v
+        def getOffset(self): return self.v
+
+    class Flow:
+        def __init__(self, t): self.t = t
+        def isTerminal(self): return self.t
+
+    class Ins:
+        def __init__(self, t, ft): self.t, self.ft = t, ft
+        def getFlowType(self): return Flow(self.t)
+        def getFallThrough(self): return None if self.ft is None else Off(self.ft)
+    assert Debug._frame_ended(Ins(True, None), 0x1234)  # an unconditional return
+    assert not Debug._frame_ended(Ins(True, 0x104), 0x104)  # a conditional return that fell through (bxeq lr, Z clear)
+    assert Debug._frame_ended(Ins(True, 0x104), 0x2000)  # taken
+    assert not Debug._frame_ended(Ins(False, 0x104), 0x2000) and not Debug._frame_ended(None, 0)
+
+
+def test_unsigned_values_with_the_top_bit_set(sc, dbg):
+    attach(dbg, sc, FakeG({HI + 0x100 + k: 0xFF for k in range(8)}, [(HI, "T05")]), HI)
+    assert dbg.debug_memory(H(0x100), dataType="ulonglong")["items"][0]["value"] == str((1 << 64) - 1)
+    assert dbg.debug_memory(H(0x100), dataType="longlong")["items"][0]["value"] == "-1"
