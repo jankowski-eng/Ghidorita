@@ -50,7 +50,9 @@ let dirty = false; // set by any edit/undo/redo, reset by save
 const undoState = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0, undoName: undoStack.at(-1)?.name, redoName: redoStack.at(-1)?.name, dirty });
 const decompCache = new Set();
 const changed = (notify, ranges, kinds) => { dirty = true; decompCache.clear(); notify("program_changed", { ranges, kinds, undo: undoState() }); };
+const busyAnalysis = () => { if (an.state === "running") throw { code: -32005, message: "Busy: analysis running" }; };
 function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mutates S; undo/redo restore whole-state snapshots
+  busyAnalysis(); // like the sidecar: Ghidra's analysis is one open transaction, an edit would join it (protocol.md, Analysis)
   const before = structuredClone(S);
   let result;
   try { result = fn() ?? {}; } catch (e) { S = before; throw e; } // like a rolled-back Ghidra transaction
@@ -211,9 +213,11 @@ const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptio
   "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "suggestions", "export"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
-  ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, lastOpened: "2026-11-01T10:00:00Z", options: {} }],
-  ["b".repeat(64) + "-0123456789ab", { programId: "b".repeat(64) + "-0123456789ab", name: "firmware.bin", sourcePath: "/mock/firmware.bin", sizeBytes: 65536, analyzed: true, lastOpened: "2026-10-20T08:30:00Z", options: { loader: "Raw Binary", language: "ARM:LE:32:v8", compilerSpec: "default", baseAddress: "0x8000000" } }],
+  ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
+  ["b".repeat(64) + "-0123456789ab", { programId: "b".repeat(64) + "-0123456789ab", name: "firmware.bin", sourcePath: "/mock/firmware.bin", sizeBytes: 65536, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-10-20T08:30:00Z", options: { loader: "Raw Binary", language: "ARM:LE:32:v8", compilerSpec: "default", baseAddress: "0x8000000" } }],
 ]);
+programs.set("c".repeat(64), { programId: "c".repeat(64), name: "big_partial", sourcePath: "/mock/big_partial", sizeBytes: 30 * 1048576, analyzed: false, analysis: "partial", analysisProfile: "full", funcs: 1500, lastOpened: "2026-10-01T10:00:00Z", options: {} });
+programs.set("d".repeat(64) + "-fedcba987654", { programId: "d".repeat(64) + "-fedcba987654", name: "big_fast", sourcePath: "/mock/big_fast", sizeBytes: 30 * 1048576, analyzed: true, analysis: "done", analysisProfile: "fast", lastOpened: "2026-09-01T10:00:00Z", options: { profile: "fast" } });
 const LANGS = [
   { id: "x86:LE:64:default", description: "Intel/AMD 64-bit x86", compilerSpecs: [{ id: "gcc", name: "GNU gcc" }, { id: "clang", name: "clang" }] },
   { id: "ARM:LE:32:v8", description: "ARM 32-bit little endian", compilerSpecs: [{ id: "default", name: "default" }] },
@@ -236,7 +240,34 @@ const idFor = (path, o) => { // not a real hash: the mock only needs distinct ke
 // like the sidecar: edits are written to the program's stored state on save, on close and when another open replaces it
 const stored = new Map(); // programId -> saved S
 const autosave = () => { if (opened && openId) stored.set(openId, structuredClone(S)); };
-const resetProgram = () => { autosave(); S = freshS(); undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+const resetProgram = () => { anCancel(); autosave(); anReset(); S = freshS(); undoStack.length = 0; redoStack.length = 0; decompCache.clear(); dirty = false; };
+// ---- background analysis (mock): functions appear over MOCK_ANALYSIS_MS, the list grows, edits are Busy meanwhile ----
+const ANALYSIS_MS = +(process.env.MOCK_ANALYSIS_MS ?? 4000), TICKS = 20, ANALYZERS = ["Decompiler Parameter ID", "Function Start Search", "Stack", "Subroutine References", "ASCII Strings", "Demangler"];
+let an = { state: "idle", analysis: "none", profile: "full", analyzer: "", done: 0, pct: -1 }; // the AnalysisState of protocol.ts
+let anTimer = null, anFuncs = NFUNC, anTick = 0, anNotify = null;
+const anPublish = () => anNotify?.("analysis_state", { ...an });
+const anRecord = () => { const e = programs.get(openId); if (e) { e.analysis = an.analysis; e.analysisProfile = an.profile; e.analyzed = an.analysis === "done"; e.funcs = anFuncs; } };
+function anEnd(state, analysis) {
+  clearInterval(anTimer); anTimer = null;
+  an = { ...an, state, analysis, analyzer: "", pct: state === "done" ? 100 : -1 };
+  if (analysis === "done") anFuncs = NFUNC;
+  anRecord(); anPublish();
+}
+function anStart(notify, profile) {
+  anNotify = notify; const upgrade = an.analysis === "done"; // fast -> full: the functions are all there already
+  an = { state: "running", analysis: "partial", profile, analyzer: ANALYZERS[0], done: 0, pct: 0 };
+  anTick = upgrade ? 0 : Math.floor(TICKS * anFuncs / NFUNC); anRecord(); anPublish();
+  anTimer = setInterval(() => {
+    anTick++;
+    if (!upgrade) anFuncs = Math.min(NFUNC, Math.floor(NFUNC * anTick / TICKS));
+    if (anTick >= TICKS) return anEnd("done", "done");
+    an = { ...an, analyzer: ANALYZERS[anTick % ANALYZERS.length], done: anTick, pct: (anTick * 100 / TICKS) | 0 };
+    anPublish();
+    if (!upgrade) { decompCache.clear(); notify("program_changed", { ranges: null, kinds: ["symbol", "function", "code", "data", "comment", "type", "other"], undo: undoState() }); }
+  }, ANALYSIS_MS / TICKS);
+}
+const anCancel = () => { if (an.state !== "running") return false; anEnd("cancelled", "partial"); return true; };
+const anReset = () => { clearInterval(anTimer); anTimer = null; an = { state: "idle", analysis: "none", profile: "full", analyzer: "", done: 0, pct: -1 }; anFuncs = NFUNC; };
 const cancels = new Map(); // request id -> cancel fn
 
 const handlers = {
@@ -279,39 +310,56 @@ const handlers = {
     const { path } = p;
     if (typeof path !== "string") bad("path");
     if (opening) throw { code: -32005, message: "Busy" };
-    const opts = optsOf(p);
+    if (p.analysis !== undefined && p.analysis !== "background" && p.analysis !== "blocking") bad("analysis");
+    const blocking = p.analysis === "blocking", opts = optsOf(p), profile = opts.profile === "fast" ? "fast" : "full";
     if (process.env.MOCK_SWITCH_FAILURES === "1" && dirty && !failedAutosave) {
       failedAutosave = true;
       throw { code: -32603, message: "Failed to flush pending changes" };
     }
     opening = true; openingRequest = rid; openCancelled = false;
-    const an = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
-    const steps = [
-      { phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" },
-      an("Decompiler Parameter ID", 0, 0), an("Decompiler Parameter ID", 50, 0), an("Function Start Search", -1, 1), an("Stack", 30, 2, 8),
-      an("Stack", 90, 2, 8), an("Subroutine References", -1, 3, 8), an("ASCII Strings", 100, 4, 8), an("Demangler", -1, 5),
-      { phase: "saving", pct: -1, message: "saving to project" }, { phase: "ready", pct: 100, message: "ready" }];
+    const programId = idFor(path, opts), known = programs.get(programId), persisted = !!known;
+    const stat = (analyzer, pct, done, total) => ({ phase: "analysis", pct, message: analyzer, analyzer, done, ...(total ? { total } : {}) });
+    const steps = [{ phase: "import", pct: 0, message: `importing ${path}` }, { phase: "import", pct: 100, message: "imported" }];
+    if (blocking && !(persisted && known.analysis === "done")) steps.push(stat("Decompiler Parameter ID", 0, 0), stat("Decompiler Parameter ID", 50, 0), stat("Function Start Search", -1, 1), stat("Stack", 30, 2, 8),
+      stat("Stack", 90, 2, 8), stat("Subroutine References", -1, 3, 8), stat("ASCII Strings", 100, 4, 8), stat("Demangler", -1, 5));
+    steps.push({ phase: "saving", pct: -1, message: "saving to project" }, { phase: "ready", pct: 100, message: "ready" });
     try {
-      for (const p of steps) {
-        notify("progress", { ...p, openId: rid }); await sleep(200);
+      for (const st of steps) {
+        notify("progress", { ...st, openId: rid }); await sleep(200);
         if (openCancelled) throw { code: -32002, message: "Cancelled" };
       }
-      const programId = idFor(path, opts);
-      const persisted = programs.has(programId), name = path.split("/").pop();
+      const name = path.split("/").pop();
       for (const cancel of [...cancels.values()]) cancel();
-      resetProgram();
-      programs.set(programId, { programId, name, sourcePath: path, sizeBytes: 4096, analyzed: true, lastOpened: new Date().toISOString(), options: opts });
+      resetProgram(); opened = false; // the swap point: the old program is only dropped now
+      programs.set(programId, { programId, name, sourcePath: path, sizeBytes: 4096, analyzed: !!known?.analyzed || blocking, analysis: known?.analysis ?? (blocking ? "done" : "none"), analysisProfile: known?.analysisProfile ?? profile,
+        funcs: known?.funcs, lastOpened: new Date().toISOString(), options: opts });
       if (stored.has(programId)) S = structuredClone(stored.get(programId));
       opened = true; openId = programId;
+      const e = programs.get(programId);
+      anFuncs = e.analysis === "done" ? NFUNC : e.funcs ?? Math.floor(NFUNC * 0.05); // a fresh import knows only the entry points
+      an = { state: "idle", analysis: e.analysis, profile: e.analysisProfile, analyzer: "", done: 0, pct: e.analysis === "done" ? 100 : -1 };
+      anNotify = notify;
+      if (e.analysis !== "done") { if (blocking) { anFuncs = NFUNC; an.analysis = "done"; anRecord(); } else setTimeout(() => anStart(notify, an.profile), 50); } // background: new or interrupted analysis (re)starts, replied below as running
       activeSession = { programId, name, sessionId: randomUUID() };
-      return { ...activeSession, persisted };
+      return { ...activeSession, persisted, analysis: { ...an, ...(!blocking && e.analysis !== "done" ? { state: "running", analysis: "partial" } : {}) } };
     } finally { opening = false; openingRequest = null; }
   },
+  analysis_status() { return { ...an }; },
+  start_analysis({ profile }, notify) {
+    if (profile !== undefined && profile !== "full" && profile !== "fast") bad("profile");
+    if (an.state === "running") throw { code: -32005, message: "Busy: analysis already running" };
+    const want = profile ?? an.profile;
+    if (an.analysis === "done" && (profile === undefined || profile === "fast" || an.profile === "full")) return { ...an, state: "done" }; // nothing to do
+    anStart(notify, want);
+    return { ...an };
+  },
+  cancel_analysis() { return { cancelled: anCancel() }; },
+
   cancel_open({ id } = {}) { const c = opening && !openCancelled && (id === undefined || id === openingRequest); if (c) openCancelled = true; return { cancelled: c }; },
   list_functions() {
     // fn_4000 is "huge" here (size 40000, > the UI's 30 KB warning) so the size warning and "Decompile anyway" can be exercised;
     // get_function_at keeps the real STEP so address-to-function lookups stay consistent
-    const out = Array.from({ length: NFUNC }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP, source: S.names.has(i) ? "user" : i % 7 === 0 ? "analysis" : "default" }));
+    const out = Array.from({ length: anFuncs }, (_, i) => ({ name: nameOf(i), entry: entryOf(i), size: i === HUGE ? 40000 : STEP, source: S.names.has(i) ? "user" : i % 7 === 0 ? "analysis" : "default" }));
     for (const [a, name] of S.created) out.push({ name, entry: hex(a), size: STRIDE * 4, source: "user" });
     return out.sort((x, y) => parseInt(x.entry, 16) - parseInt(y.entry, 16));
   },
@@ -690,6 +738,7 @@ const handlers = {
     return edit("Clear code", notify, [{ start: hex(n), end: hex(n + len - 1) }], ["code", "data"], () => { for (let a = n; a < n + len; a += STRIDE) S.data.set(a, { mnemonic: "??", length: STRIDE }); });
   },
   save(_, notify) { // like Ghidra: history is dropped, dirty cleared
+    anCancel(); // saving needs no open transaction: a running analysis is cancelled (state partial) first
     if (!dirty) return { saved: false, undoHistoryCleared: false };
     autosave(); dirty = false; undoStack.length = 0; redoStack.length = 0;
     notify("program_changed", { ranges: [], kinds: [], undo: undoState() });
@@ -699,6 +748,7 @@ const handlers = {
   redo(_, notify) { return step(redoStack, undoStack, "after", notify); },
 };
 function step(from, to, side, notify) {
+  busyAnalysis();
   const e = from.pop();
   if (!e) bad("nothing to " + (side === "before" ? "undo" : "redo"));
   S = structuredClone(e[side]); to.push(e); dirty = true;

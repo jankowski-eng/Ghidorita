@@ -31,7 +31,7 @@ export const ErrorCode = {
   Cancelled: -32002,
   Timeout: -32003,
   NotFound: -32004,
-  Busy: -32005,            // open_binary in progress (or a second open_binary)
+  Busy: -32005,            // open_binary in progress (or a second open_binary); "analysis running": an edit, undo or redo while the analysis runs; "analysis already running": start_analysis
   ProjectLocked: -32006,   // another sidecar holds the projects dir
   StaleSession: -32007,
   InvalidArgument: -32602, // bad/missing params, unparsable type or signature, invalid name
@@ -147,8 +147,14 @@ export interface ImportChoices {
 export interface Methods {
   provider_info: { params: {}; result: ProviderInfo };
   active_session: { params: {}; result: ActiveSession | null };
-  open_binary: { params: { path: string } & ImportOptions; result: OpenResult };
+  // analysis (default "background"): the reply comes right after the import is saved and published, analysis keeps running on its own lane (see AnalysisState, protocol.md "Analysis"). "blocking": the reply waits for the analysis (`progress` events, cancel_open cancels it and nothing is saved).
+  open_binary: { params: { path: string; analysis?: "background" | "blocking" } & ImportOptions; result: OpenResult & { analysis: AnalysisState } };
   cancel_open: { params: { id?: number }; result: { cancelled: boolean } };
+  analysis_status: { params: {}; result: AnalysisState };
+  // Starts (or resumes) the analysis of the open program. profile omitted = the program's recorded profile. fast -> full on a finished fast program runs only the three analyzers the fast profile skipped; the programId does not change. No-op (returns the state) if the program is already analyzed with that profile or better. Busy while an analysis runs.
+  start_analysis: { params: { profile?: "full" | "fast" }; result: AnalysisState };
+  // Stops the running analysis at the next monitor check; what it found so far is kept (recorded analysis becomes "partial"). cancelled=false if none runs.
+  cancel_analysis: { params: {}; result: { cancelled: boolean } };
   import_candidates: { params: { path: string }; result: ImportChoices };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
@@ -241,7 +247,9 @@ export interface ProgramEntry {
   name: string;
   sourcePath?: string;          // path at first import; may no longer exist
   sizeBytes: number;            // size of the source file at import
-  analyzed: boolean;
+  analyzed: boolean;            // analysis === "done"
+  analysis: AnalysisRecord;     // what the project has stored; "partial" = interrupted, open_binary resumes it
+  analysisProfile: "full" | "fast"; // the profile that ran (or runs) on it
   lastOpened?: string;          // ISO-8601 UTC
   options: ImportOptions;       // {} = default import
 }
@@ -304,10 +312,25 @@ export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: stri
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */
 export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "other";
 
+/** What is persisted for a program in programs.json. */
+export type AnalysisRecord = "none" | "partial" | "done";
+/** Live state of the analysis of the open program (also the `analysis_state` notification). pct -1 = unknown (Ghidra has no global total, only the current analyzer's progress); done = analyzer starts seen so far (a poll, fast analyzers can be missed). */
+export interface AnalysisState {
+  state: "idle" | "running" | "done" | "cancelled" | "failed"; // idle: none running and none ran since the program was opened
+  analysis: AnalysisRecord;
+  profile: "full" | "fast";
+  analyzer: string;
+  done: number;
+  pct: number;
+  error?: string;               // state "failed"
+}
+
 export interface Notifications {
+  // Sent when an analysis starts, about every 250 ms while the analyzer/done/pct change, and once at the end (done/cancelled/failed).
+  analysis_state: AnalysisState;
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
   progress: { openId: number; phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
-  // ranges null = unknown/broad, refetch everything (also when a change has no address: type edits); start/end inclusive, same space, any space. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); not during open_binary.
+  // ranges null = unknown/broad, refetch everything (also when a change has no address: type edits); start/end inclusive, same space, any space. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); about 1 s while an analysis runs, then always ranges null and all kinds; not during a blocking open_binary.
   program_changed: { sessionId: string; ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }
