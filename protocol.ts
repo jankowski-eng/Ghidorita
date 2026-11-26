@@ -98,6 +98,13 @@ export interface Methods {
   retype_variable: { params: { entry: Address; name: string; dataType: string }; result: {} };
   undo: { params: {}; result: UndoState };
   redo: { params: {}; result: UndoState };
+  // define_data: Ghidra's CreateDataCmd (clears conflicting code/data at the target); dataType is a name or path ("int", "char[4]", "/dword"). InvalidArgument for unknown/dynamic types or no room.
+  define_data: { params: { address: Address; dataType: string }; result: {} };
+  // clear_code: Ghidra's ClearCmd (code, data, references; not symbols/comments); `length` bytes from `address` (default: the code unit at address).
+  clear_code: { params: { address: Address; length?: number }; result: {} };
+  // ---- persistence ----
+  // Writes the program to the project. saved=false when nothing had changed. Also done automatically when a program is closed and on shutdown.
+  save: { params: {}; result: { saved: boolean } };
 }
 
 export type CommentKind = "eol" | "pre" | "post" | "plate" | "repeatable";
@@ -106,7 +113,7 @@ export interface XrefTo { from: Address; type: string; function?: string } // ty
 export interface XrefFrom { to: Address; type: string }
 export interface StringItem { address: Address; value: string; length: number }
 export interface DataTypeHit { name: string; path: string; size: number } // size -1 = dynamic/unsized
-export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string }
+export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty: unsaved changes
 
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */
 export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "other";
