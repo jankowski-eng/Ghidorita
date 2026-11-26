@@ -233,3 +233,8 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .hx-gap { color: #777; font-style: italic; }
 .hx-b.chg { color: #f48771; font-weight: 700; }
 .dlg .pv { font-size: 12px; color: #9cdcfe; min-height: 1.4em; } .dlg .pv.wait { color: #888; } .dlg label.chk { flex-direction: row; align-items: center; gap: 6px; }
+/* p-code pane (replaces the decompiler) */
+.pcode { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pc-scroll { flex: 1; overflow: auto; min-height: 0; font: 13px ui-monospace, Menlo, monospace; outline: none; }
+.pc-line { white-space: pre; line-height: 18px; padding: 0 12px; cursor: pointer; } .pc-line.head { color: #9cdcfe; } .pc-line.cur { background: #094771; }
+.pcode .ph-bar button.on { background: #094771; color: #fff; }

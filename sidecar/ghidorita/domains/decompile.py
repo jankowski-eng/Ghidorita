@@ -17,6 +17,7 @@ RANGE_ONLY_KINDS = {"comment", "code", "bookmark"}
 WARNING_ONE = re.compile(r"/\*\s*(WARNING(?:(?!\*/).)*?)\s*\*/")  # the body never crosses a "*/"
 WARNING_LINE = re.compile(r"(?:/\*\s*WARNING(?:(?!\*/).)*\*/\s*)+")
 WARNINGS_MAX = 50
+PCODE_MAX_INSNS, PCODE_MAX_OPS = 5000, 30000  # shortcut: a larger function is cut and `truncated` says so; upgrade with paging
 GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 
@@ -131,6 +132,56 @@ class Decompile:
     def function_graph(self, entry, timeoutSecs=30, job=None):
         """Basic blocks of the function at `entry` with their decompiled C (or assembly) and the flow edges between them; see protocol.md."""
         return self._run(entry, timeoutSecs, job, ("graph",), self._graph)[0]
+
+    @rpc(lane="decomp")
+    def pcode(self, entry, timeoutSecs=30, job=None):
+        """P-code of the function at `entry`: `raw` = Instruction.getPcode() per instruction (address order, keyed by the instruction's address),
+        `high` = the decompiler's HighFunction ops in block order, each with the address of its instruction. Same lane, pool, cache and
+        cancellation (cancel_decompile) as `decompile`: the high p-code is part of one decompile."""
+        return self._run(entry, timeoutSecs, job, ("pcode",), self._pcode)[0]
+
+    @staticmethod
+    def _vn(vn, lang):
+        """One varnode as text: a register by name, a constant as hex, any other space as space[0xoffset]:size; a high variable's name follows."""
+        if vn is None:
+            return "_"
+        a, size = vn.getAddress(), vn.getSize()
+        if vn.isConstant():
+            t = "0x%x" % (vn.getOffset() & ((1 << 64) - 1))
+        elif vn.isRegister():
+            r = lang.getRegister(a, size)
+            t = str(r.getName()) if r is not None else "reg[0x%x]:%d" % (a.getOffset() & MASK64, size)
+        else:
+            off = a.getOffset()
+            t = "%s[%s0x%x]:%d" % (a.getAddressSpace().getName(), "-" if off < 0 and a.getAddressSpace().isStackSpace() else "", abs(off) if off < 0 and a.getAddressSpace().isStackSpace() else off & MASK64, size)
+        h = vn.getHigh() if hasattr(vn, "getHigh") else None
+        n = h.getName() if h is not None else None
+        return "%s (%s)" % (t, n) if n and str(n) != "UNNAMED" and not vn.isConstant() else t
+
+    def _op(self, op, lang):
+        out, ins = op.getOutput(), [self._vn(op.getInput(i), lang) for i in range(op.getNumInputs())]
+        return ("%s = " % self._vn(out, lang) if out is not None else "") + "%s %s" % (op.getMnemonic(), ", ".join(ins))
+
+    def _pcode(self, prog, func, res):
+        """{raw: [{address, asm, ops[]}], high: [{block, address, text}], truncated}. High ops come from the decompile that is cached anyway."""
+        fa, lang, hf = self.ses.fmtr(prog), prog.getLanguage(), res.getHighFunction()
+        raw, n, cut = [], 0, False
+        for ins in prog.getListing().getInstructions(func.getBody(), True):
+            if len(raw) >= PCODE_MAX_INSNS or n >= PCODE_MAX_OPS:
+                cut = True
+                break
+            ops = [self._op(o, lang) for o in ins.getPcode()]
+            n += len(ops)
+            raw.append({"address": fa(ins.getAddress()), "asm": str(ins), "ops": ops})
+        high, n = [], 0
+        for bi, b in enumerate(hf.getBasicBlocks()):
+            for op in b.getIterator():
+                if n >= PCODE_MAX_OPS:
+                    cut = True
+                    break
+                n += 1
+                high.append({"block": bi, "address": fa(op.getSeqnum().getTarget()), "text": self._op(op, lang)})
+        return {"raw": raw, "high": high, "truncated": cut}
 
     def _graph(self, prog, func, res):
         """Blocks: Ghidra's BasicBlockModel. C lines go to the block holding their first addressed token (lines without an address follow the

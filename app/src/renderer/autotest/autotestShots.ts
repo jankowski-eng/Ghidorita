@@ -20,6 +20,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
   if (name === "shot-warnings") return warningsShot(fl!, c, result);
   if (name === "shot-hex") return hexShot(fl!, c, result);
+  if (name === "shot-pcode") return pcodeShot(fl!, c, result);
   if (name === "shot-patch") return patchShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
@@ -338,6 +339,19 @@ async function patchShot(fl: { entry: string }[], c: AutotestCtx, result: Record
   const preview = () => dlg.querySelector('[aria-label="Preview"]')!.textContent ?? "";
   await waitFor(() => /replaces/.test(preview()), 60000, "the preview");
   result.patch = { preview: preview() };
+  await sleep(300);
+  return true;
+}
+
+async function pcodeShot(fl: { name: string; entry: string; size: number }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  need(c.backend.capabilities.has("pcode"), "provider has no pcode capability");
+  const f = fl.find((x) => x.name === "main") ?? [...fl].sort((a, b) => a.size - b.size).find((x) => x.size > 300)!;
+  await c.select(f.entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+  c.command({ type: "pcode" });
+  const region = await waitFor(() => byLabel<HTMLElement>("region", "P-code"), 10000, "p-code pane");
+  await waitFor(() => /ops/.test(region.querySelector('[aria-label="P-code state"]')!.textContent ?? ""), 30000, "high p-code");
+  result.pcode = { function: f.name, state: region.querySelector('[aria-label="P-code state"]')!.textContent, rows: region.querySelectorAll(".pc-line").length };
   await sleep(300);
   return true;
 }

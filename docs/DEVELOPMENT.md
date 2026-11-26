@@ -88,6 +88,8 @@ Bytes (hex view): View > Bytes (Hex View) or "Bytes (Hex View)" in the command b
 
 Patching (capability `patch`): Edit > Patch Instruction… (also the listing's context menu and "Patch Instruction" in the command bar) on a listing row. The dialog assembles what you type with Ghidra's assembler for the program's language and previews the bytes (and what they replace) before Patch is enabled; bytes longer than the instruction need the "also overwrite the following instructions" box. One undo step "Patch instruction at <address>"; the Bytes tab marks changed bytes (tooltip: the original). Ghidra's own key for it, Ctrl+Shift+G, is already the call graph here, so no key is bound. Originals live in the program (user property map `ghidorita.patch.original`), so they survive save and reopen. Tests: `sidecar/test_patch.py` (in-process), and the quick autotest flow (`AUTOTEST_FLOW=shot-patch` for the screenshot); the two-phase edit autotest checks the patch after relaunch.
 
+P-code (capability `pcode`, needs `decompile`): View > P-code or "Toggle P-code" in the command bar replaces the decompiler pane (like the graphs; at most one of C, control-flow graph, call graph, p-code). High (the decompiler's ops, grouped by basic block) or Raw (`Instruction.getPcode()` per instruction). It marks the lines of the shared cursor's instruction and a click on a line moves the cursor (listing and Bytes follow). Ghidra has no default key for it, so none is bound. `pcode` is one decompile on the decompiler lane with its own cache entry (as `function_graph`), so toggling it costs a decompile when the C of that function is not already in the same state. `sidecar/test_pcode.py`, `AUTOTEST_FLOW=shot-pcode`.
+
 ## Packaging (macOS, Apple Silicon)
 
 ```bash

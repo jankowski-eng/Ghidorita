@@ -101,6 +101,7 @@ export const results = {
   assemble_instruction: shape({ address, bytes: nonempty, length: positive, oldBytes: nonempty, oldLength: positive, overwrites: count }),
   patch_instruction: shape({ address, length: positive, replaced: positive, overwritten: count }),
   list_patches: array(shape({ address, length: positive, original: nonempty, current: nonempty })),
+  pcode: shape({ raw: array(shape({ address, asm: str, ops: array(str) })), high: array(shape({ block: count, address, text: str })), truncated: bool }),
   get_comments: shape(comments),
   rename_symbol: object,
   create_label: object,

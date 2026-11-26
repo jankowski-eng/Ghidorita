@@ -119,6 +119,33 @@ async function patchStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   result.quickPersist = { ...(result.quickPersist ?? {}), patch: { address: addr, original: first, current: bytes } };
 }
 
+async function pcodeStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("pcode"), "provider has no pcode capability");
+  const f = fl.find((x) => x.size > 40) ?? fl[0];
+  await c.select(f.entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+  const want = await c.program().decompiler.pcode({ entry: f.entry }).result;
+  need(want.raw.length > 2 && want.high.length > 0, "p-code for the function");
+  c.command({ type: "pcode" });
+  const region = await waitFor(() => byLabel<HTMLElement>("region", "P-code"), 10000, "p-code pane");
+  const rows = () => [...region.querySelectorAll<HTMLElement>(".pc-line")];
+  await waitFor(() => /ops/.test(region.querySelector('[aria-label="P-code state"]')!.textContent ?? ""), 20000, "high p-code loaded");
+  need(region.querySelector('[aria-label="P-code state"]')!.textContent!.startsWith(`${want.high.length} ops`), "high count");
+  need(document.querySelector<HTMLElement>(".editor")!.style.display === "none", "the decompiler is replaced while p-code shows");
+  region.querySelector<HTMLButtonElement>('button[aria-label="Raw p-code"]')!.click();
+  await waitFor(() => region.querySelector('[aria-label="P-code state"]')!.textContent!.startsWith(`${want.raw.length} instructions`), 10000, "raw view");
+  // follows the cursor: the listing moving to an instruction marks its lines; a click on a line moves the cursor back
+  const second = want.raw[2].address;
+  await c.goAddr(second);
+  await waitFor(() => rows().some((r) => r.classList.contains("cur") && r.textContent!.startsWith(second)), 10000, "the cursor's instruction marked");
+  const other = want.raw[1].address;
+  rows().find((r) => r.classList.contains("head") && r.textContent!.startsWith(other))?.click();
+  await waitFor(() => c.topAddr() === other, 10000, "a click in the p-code moves the shared cursor to the listing");
+  c.command({ type: "pcode" });
+  await waitFor(() => document.querySelector<HTMLElement>(".editor")!.style.display !== "none" && !byLabel("region", "P-code"), 10000, "the decompiler is back");
+  R.pcode = { entry: f.entry, raw: want.raw.length, high: want.high.length };
+}
+
 async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
   need(c.backend.capabilities.has("calls"), "provider has no calls capability");
   let pick: { f: FunctionInfo; r: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["references"]["calls"]>["result"]> } | null = null;
@@ -245,6 +272,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   await stackStep(fl, c, R);
   await undefinedStep(c, R);
   await hexStep(fl, c, R);
+  await pcodeStep(fl, c, R);
   await patchStep(fl, c, R, result);
   await bookmarkStep(fl, c, R, result);
   return true;

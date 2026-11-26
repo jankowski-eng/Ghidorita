@@ -582,6 +582,16 @@ const handlers = {
     return { blocks: [blk(0, 3, [`${at(0)}  push rbp`, `${at(1)}  mov rbp, rsp`, `${at(2)}  jz ${at(6)}`]), blk(3, 3, ["  puts(\"then\");", "  iVar1 = 1;"], "c"), blk(6, 2, [`${at(6)}  xor eax, eax`, `${at(7)}  jmp ${at(8)}`]), blk(8, 2, [`${at(8)}  pop rbp`, `${at(9)}  ret`])],
       edges: [{ from: at(0), to: at(3), kind: "false" }, { from: at(0), to: at(6), kind: "true" }, { from: at(3), to: at(8), kind: "uncond" }, { from: at(6), to: at(8), kind: "uncond" }] };
   },
+  pcode({ entry }) { // ten fake instructions per function; the high p-code has fewer ops, in two blocks
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (i < 0) nf();
+    const at = (k) => hex(n + k * STRIDE);
+    return {
+      raw: Array.from({ length: 10 }, (_, k) => ({ address: at(k), asm: `${MNEMS[k % MNEMS.length]} rax, 0x${k}`, ops: [`unique[0x${(k * 8).toString(16)}]:8 = INT_ADD RAX, 0x${k}`, `RAX = COPY unique[0x${(k * 8).toString(16)}]:8`] })),
+      high: Array.from({ length: 6 }, (_, k) => ({ block: k < 3 ? 0 : 1, address: at(k * 2), text: `RAX (iVar${k}) = INT_ADD RAX (iVar${k}), 0x${k}` })),
+      truncated: false,
+    };
+  },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);
     if (!(i >= 0 && i < NFUNC)) return [];

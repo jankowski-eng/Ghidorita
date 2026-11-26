@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  AssembledInstruction, PatchedRange, BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
+  AssembledInstruction, PatchedRange, PcodeResult, BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -49,6 +49,8 @@ export interface Decompilation {
   decompile(params: { entry: Address; timeoutSecs?: number }): Job<DecompileResult>;
   /** Basic-block graph of one function; only with the controlFlowGraph capability. */
   graph(params: { entry: Address; timeoutSecs?: number }): Job<FunctionGraph>;
+  /** Raw and high p-code of one function; only with the pcode capability. A decompile on the decompiler lane (cancel with the job). */
+  pcode(params: { entry: Address; timeoutSecs?: number }): Job<PcodeResult>;
 }
 
 export interface References {

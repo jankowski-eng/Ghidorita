@@ -72,6 +72,7 @@ export function createMenu({ getWin, pick }: Deps) {
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
         { label: "Control-Flow Graph", accelerator: acc("graph"), enabled: state.hasProgram && allowsCommand(caps, { type: "graph" }), click: () => send({ type: "graph" }) },
+        { label: "P-code", enabled: state.hasProgram && allowsCommand(caps, { type: "pcode" }), click: () => send({ type: "pcode" }) },
         { label: "Call Graph", enabled: state.hasProgram && allowsCommand(caps, { type: "callgraph" }), accelerator: acc("callgraph"), click: () => send({ type: "callgraph" }) },
         { type: "separator" },
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: acc("dock:symbols"), click: () => send({ type: "dock", panel: "symbols" }) },

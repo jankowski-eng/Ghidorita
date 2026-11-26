@@ -12,7 +12,7 @@ GOLDEN = {
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
     "search_symbols": "scan", "export_symbols": "scan", "export_header": "scan", "export_gzf": "R", "function_calls": "scan", "top_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "list_undefined_refs": "scan", "search_memory": "scan", "list_data_types": "scan", "list_bookmarks": "scan", "call_graph": "scan", "debug_values": "scan", "assemble_instruction": "scan",
-    "decompile": "decomp", "variable_uses": "decomp", "function_graph": "decomp",
+    "decompile": "decomp", "variable_uses": "decomp", "function_graph": "decomp", "pcode": "decomp",
     "rename_variable": "edit", "retype_variable": "edit", "auto_create_structure": "edit", "split_variable": "edit", "force_union_field": "edit", "load_coverage": "file",
     **{m: "R" for m in (
         "list_functions", "stack_frame", "listing_info", "listing_rows", "get_function_at", "get_bytes", "set_bookmark", "remove_bookmark", "xrefs_to", "xrefs_to_variable", "xrefs_from",

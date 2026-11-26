@@ -28,6 +28,7 @@ export function allowsCommand(caps: ReadonlySet<Capability>, cmd: MenuCommand): 
     case "datatypes": return caps.has("dataTypes");
     case "coverage-path": case "coverage-load": case "coverage-clear": return caps.has("coverage");
     case "graph": return caps.has("controlFlowGraph") && caps.has("decompile");
+    case "pcode": return caps.has("pcode") && caps.has("decompile");
     case "callgraph": return caps.has("callGraph");
     case "debug": return caps.has("debugger");
     case "export": return caps.has(cmd.kind === "gzf" ? "exportGzf" : "export");

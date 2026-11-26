@@ -80,6 +80,11 @@ export interface FunctionGraph { blocks: GraphBlock[]; edges: GraphEdge[] } // b
 export interface CallGraphNode { entry: Address; name: string; kind: "function" | "import" } // import: an external function or a thunk to one (a leaf)
 export interface CallGraph { nodes: CallGraphNode[]; edges: { from: Address; to: Address; sites: number }[]; truncated: boolean } // sites: call instructions from `from` to `to`
 
+/** Op text is `[out = ]OPCODE in, ...`: a register by name, a constant as 0x.., other varnodes as space[0xoffset]:size; the high p-code appends the high variable's name in parentheses. */
+export interface RawPcode { address: Address; asm: string; ops: string[] } // one instruction (address order); ops as Instruction.getPcode()
+export interface HighPcodeOp { block: number; address: Address; text: string } // block = basic block index, in block order; address = the instruction the op belongs to
+export interface PcodeResult { raw: RawPcode[]; high: HighPcodeOp[]; truncated: boolean } // truncated: a large function was cut (5000 instructions, 30000 ops)
+
 export interface ListingRow {
   address: Address;
   length: number;    // code unit length in bytes; next row (if contiguous) starts at address + length
@@ -146,7 +151,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -199,6 +204,8 @@ export interface Methods {
   // The variables of the function at `entry` with their values in the stopped target (decompiler parameters, locals, the globals it uses). Scan lane, cancellable with cancel_search.
   debug_values: { params: { entry: Address }; result: { pc: Address | null; items: DebugValue[] } };
   debug_pause: { params: {}; result: {} };
+  // P-code of one function (capability "pcode", needs "decompile"): raw per instruction and the decompiler's high p-code per op. Decompiler lane, cancellable with cancel_decompile, same cache and invalidation as decompile.
+  pcode: { params: { entry: Address; timeoutSecs?: number }; result: PcodeResult };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };

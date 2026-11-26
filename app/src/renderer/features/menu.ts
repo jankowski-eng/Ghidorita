@@ -45,8 +45,9 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
     else if (c.action === "step" || c.action === "stepinto" || c.action === "stepout") void t.debug.stepStatement(c.action === "step" ? "statement" : c.action === "stepinto" ? "into" : "out");
     else void s.debugAction(c.action === "stepi" ? "step" : c.action);
   }
-  else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn, callGraphOn: false }); }
-  else if (c.type === "callgraph") { if (opened()) set({ callGraphOn: !views.getState().callGraphOn, graphOn: false }); }
+  else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn, callGraphOn: false, pcodeOn: false }); }
+  else if (c.type === "callgraph") { if (opened()) set({ callGraphOn: !views.getState().callGraphOn, graphOn: false, pcodeOn: false }); }
+  else if (c.type === "pcode") { if (opened()) set({ pcodeOn: !views.getState().pcodeOn, graphOn: false, callGraphOn: false }); }
   else if (c.type === "datatypes") { if (opened()) set({ typesOpen: !views.getState().typesOpen }); }
   else if (c.type === "toggle-pane") set({ visible: { ...views.getState().visible, [c.pane]: c.visible } });
 }
