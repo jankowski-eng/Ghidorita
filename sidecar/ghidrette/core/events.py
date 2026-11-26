@@ -24,6 +24,7 @@ class Events:
         self.listener = None
         self.subscribers = []
         self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
+        self.bulk = False  # an analysis runs: do not parse the records (millions of JPype calls), announce "everything" about once a second
         self.plock = threading.Lock()
         self.generation = 0
 
@@ -62,6 +63,9 @@ class Events:
 
     def _on_events(self, ev, generation):
         from ghidra.program.util import ProgramChangeRecord
+        if self.bulk:  # shortcut: no ranges during analysis, the client refetches what it shows; upgrade: count/merge ranges in Java if a range-wise refresh matters
+            self.record(set(ALL_KINDS), None, generation)
+            return
         kinds, ranges, broad = set(), [], False
         for r in ev:
             name = str(r.getEventType())
@@ -102,7 +106,8 @@ class Events:
                 return
             p["armed"] = True
         loop = self.ctx.loop
-        loop.call_soon_threadsafe(lambda: loop.call_later(0.05, self._emit, generation))
+        delay = 1.0 if self.bulk else 0.05  # coalescing window; bulk = during an analysis
+        loop.call_soon_threadsafe(lambda: loop.call_later(delay, self._emit, generation))
 
     def reset(self):
         """The program is being swapped or closed (thread R): everything derived from it is stale, nothing is announced."""

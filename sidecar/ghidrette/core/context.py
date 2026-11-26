@@ -17,6 +17,7 @@ class Ctx:
         self.lanes = Lanes(self)
         self.events = Events(self)
         self.project = None
+        self.analysis = None  # domains/analysis.py, set by app.py
         self.shutdown_hooks = []
 
     def notify(self, method, params, generation=None):  # thread-safe

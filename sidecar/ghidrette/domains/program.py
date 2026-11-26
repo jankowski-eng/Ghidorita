@@ -8,6 +8,7 @@ from ..core.lanes import Opening
 from ..core.recovery import take_recovery_snapshot
 from ..core.rpc import rpc
 from ..core.session import undo_state
+from . import analysis as analysis_mod
 from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 
 
@@ -40,7 +41,7 @@ class Program:
     def _snapshot(self):
         prog = self.ses.program
         revision = (self.ses.epoch, self.ses.revision)
-        if prog is None or not prog.isChanged() or self.snapshot_revision == revision:
+        if prog is None or self.ses.analyzing or not prog.isChanged() or self.snapshot_revision == revision:  # an analysis owns the transaction (and saves itself when done)
             return
         with self.ses.save_lock:
             completed = take_recovery_snapshot(prog)
@@ -79,6 +80,8 @@ class Program:
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
         prog, res, consumer = self.ses.program, self.ses.results, self.ses.consumer
+        if prog is not None and not self.ctx.analysis.stop():  # cancel + wait: the analysis saves what it found, then edits are possible again
+            raise RuntimeError("analysis did not stop in time, not closing the current program")
         if prog is not None:  # autosave: closing must never lose edits (see protocol.md, Persistence and crash safety)
             try:
                 self._save_program(prog, "close")
@@ -112,6 +115,7 @@ class Program:
                 prog.release(consumer)
         self.ses.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
         self.ses.program_id = None
+        self.ctx.analysis.reset("none", "full")
 
     def _save_program(self, prog, why):
         """Write prog to its project file if it has unsaved changes (thread R; no transaction may be open).
@@ -131,6 +135,8 @@ class Program:
     @rpc(lane="R")
     def save(self):
         prog = self.ses.need()
+        if not self.ctx.analysis.stop():  # a running analysis holds the transaction: it is cancelled (state partial) and saves itself
+            raise RpcError(BUSY, "analysis running")
         saved = self._save_program(prog, "save")
         self.ses.refresh_undo(prog)
         if saved:  # Ghidra's save drops the undo/redo stacks and clears dirty: tell the client (empty ranges/kinds = nothing to refetch)
@@ -192,10 +198,10 @@ class Program:
         return opts
 
     @rpc(lane="open")
-    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None, *, _request_id=None):
+    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None, analysis=None, *, _request_id=None):
         if self.ctx.lanes.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
-        args = (loader, language, compilerSpec, baseAddress, profile)
+        args = (loader, language, compilerSpec, baseAddress, profile, analysis)
         op = self.ctx.lanes.opening = Opening(_request_id)
         fut = self.ctx.loop.create_future()
         self.ctx.progress("import", 0, "starting import")
@@ -225,13 +231,16 @@ class Program:
             if fut.done() and self.ctx.lanes.opening is op:
                 self.ctx.lanes.opening = None
 
-    def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile):
+    def _do_open(self, path, op, loader, language, compilerSpec, baseAddress, profile, analysis=None):
         """Thread O. Stage the replacement before touching the active program on R."""
         res = prog = consumer = None
         self.ctx.project.lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
             op.check()
             text_arg(path, "path")
+            if analysis not in (None, "background", "blocking"):
+                raise RpcError(INVALID, "bad analysis %r" % (analysis,))
+            blocking = analysis == "blocking"
             if not os.path.isfile(path):
                 raise RpcError(NOT_FOUND, "no such file: %s" % path)
             opts = self._check_options(loader, language, compilerSpec, baseAddress)
@@ -259,19 +268,32 @@ class Program:
                 op.check()
                 self.ctx.project.meta_touch(key)
                 log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
+                m = self.ctx.project.meta_get(key)  # a program from before round 7 has no record: it was analyzed
+                rec, prof = m.get("analysis", "done"), m.get("analysisProfile") or opts.get("profile", "full")
+                disabled = FAST_PROFILE if prof == "fast" else []
+                if blocking and rec != "done":  # finish an interrupted analysis before replying
+                    self._analyze(prog, op, disabled)
+                    self._save_done(prog, op)
+                    self.ctx.project.meta_update(key, analysis="done", analysisProfile=prof, analyzed=True)
+                    rec = "done"
             else:
-                res = self._import_and_analyze(path, key, proj, op, opts, disabled)
+                prof = "fast" if sorted(disabled) == FAST_PROFILE else "full"
+                res = self._import_and_analyze(path, key, proj, op, opts, disabled, blocking)
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
+                rec = "done" if blocking else "none"
                 self.ctx.project.meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=size,
-                                 analyzed=True, options=opts)
+                                            analyzed=blocking, analysis=rec, analysisProfile=prof, options=opts)
             # Claim the commit before queueing it, so shutdown waits for the whole swap.
             op.begin_commit()
             session = self.ctx.lanes.on_r(lambda: self._publish(prog, res, consumer, key, os.path.basename(path)))
-            res = prog = consumer = None  # the session now owns the staged program
+            published, res, prog, consumer = prog, None, None, None  # the session now owns the staged program
+            self.ctx.analysis.reset(rec, prof)
+            if rec != "done":  # background open of a new import, or of an interrupted analysis: resume
+                self.ctx.analysis.start(published, key, disabled, prof)
             self.ctx.progress("ready", 100, "ready")
             self.open_secs = time.monotonic() - t0
-            return {**session, "persisted": persisted}
+            return {**session, "persisted": persisted, "analysis": self.ctx.analysis.state()}
         except BaseException as e:  # noqa
             if res is not None:
                 try:
@@ -324,7 +346,7 @@ class Program:
             raise TypeError("%s is not a Program" % path)
         return dobj, consumer
 
-    def _import_and_analyze(self, path, key, proj, op, opts, disabled):
+    def _import_and_analyze(self, path, key, proj, op, opts, disabled, blocking):
         from ghidra.app.util.importer import ProgramLoader
         self.ctx.progress("import", 10, "importing")
         last = [0.0]
@@ -346,71 +368,39 @@ class Program:
         res = b.load()
         try:
             op.check()
-            self._analyze(res.getPrimaryDomainObject(), op, disabled)
+            if blocking:
+                self._analyze(res.getPrimaryDomainObject(), op, disabled)
         except BaseException:
             res.close()
             raise
         return res
 
-    def _analyze(self, prog, op, disabled):
-        """Real signal available from Ghidra (AutoAnalysisManager): the monitor message is the analyzer name at each
-        analyzer start (AnalysisScheduler.runAnalyzer: setMessage(name); setProgress(0)), analyzers then overwrite it
-        and set their own max. The manager exposes no queue size or global total, so there is no honest overall pct:
-        pct = the current analyzer's progress/max when it reports one (> 0), else -1. `done` counts analyzer runs finished.
-        Analyzers re-run when new addresses show up, so `total` is unknowable and omitted."""
-        from ghidra.app.plugin.core.analysis import AutoAnalysisManager
-        from ghidra.app.script import GhidraScriptUtil
-        from ghidra.app.services import Analyzer
-        from ghidra.program.util import GhidraProgramUtilities
-        from ghidra.util.classfinder import ClassSearcher
-        names = {str(a.getName()) for a in ClassSearcher.getInstances(Analyzer)}
-        st = {"cur": "", "runs": 0, "last": 0.0}
+    def _save_done(self, prog, op):
+        """A blocking analysis of a stored program finished: write it (the point of no return for cancel_open, like _save)."""
+        from ghidra.util.task import TaskMonitor
+        op.begin_commit()
+        prog.clearUndo()
+        self.ctx.progress("saving", -1, "saving to project")
+        with self.ses.save_lock:
+            prog.getDomainFile().save(TaskMonitor.DUMMY)
 
-        def cb(msg, p, mx):
-            try:
-                msg = str(msg or "")
-                if msg in names:
-                    st["cur"], st["runs"] = msg, st["runs"] + 1
-                now = time.monotonic()
-                if now - st["last"] < 0.2:
-                    return
-                st["last"] = now
-                pct = min(100, int(p * 100 / mx)) if (mx and mx > 0 and p > 0) else -1
-                self.ctx.progress("analysis", pct, msg, analyzer=st["cur"], done=max(0, st["runs"] - 1))
-            except Exception:
-                pass
-        mon = op.monitor(cb)
+    def _analyze(self, prog, op, disabled):
+        """Blocking analysis on thread O (analysis="blocking"): same engine as the background one (analysis.execute), progress as `progress`
+        events. The monitor is polled, never a Python callback: see domains/analysis.py. Ghidra has no global total, so pct is the current
+        analyzer's progress/max when it reports one, else -1; `done` counts analyzer starts seen."""
+        from ghidra.app.script import GhidraScriptUtil
+        mon = op.adopt(analysis_mod.new_monitor())
+        poller = analysis_mod.Poller(mon, lambda an, done, pct, msg: self.ctx.progress("analysis", pct, msg or an, analyzer=an, done=done))
         self.ctx.progress("analysis", -1, "analyzing")
         GhidraScriptUtil.acquireBundleHostReference()
         tx = prog.startTransaction("Analysis")
         try:
-            mgr = AutoAnalysisManager.getAnalysisManager(prog)
-            self._disable_analyzers(prog, disabled)
-            mgr.initializeOptions()
-            mgr.reAnalyzeAll(None)
-            mgr.startAnalysis(mon)  # blocks this thread; cancel_open cancels mon from the loop thread
-            log("analysis task times (cancelled=%s):\n%s" % (op.cancelled, mgr.getTaskTimesString()))
+            analysis_mod.execute(prog, mon, disabled)
             op.check()
-            GhidraProgramUtilities.markProgramAnalyzed(prog)
         finally:
             prog.endTransaction(tx, True)
             GhidraScriptUtil.releaseBundleHostReference()
-
-    @staticmethod
-    def _disable_analyzers(prog, names):
-        """Switches the named analyzers off for the first-open analysis (exact analyzer names, see bench/ for the
-        measured trade-off). Unknown names are logged and ignored. The list is part of the programId (_program_key),
-        so a reduced analysis is stored apart from a full one."""
-        from ghidra.program.model.listing import Program
-        if not names:
-            return
-        opts = prog.getOptions(Program.ANALYSIS_PROPERTIES)
-        for n in names:
-            if opts.contains(n):
-                opts.setBoolean(n, False)
-            else:
-                log("unknown analyzer to disable: %r" % n)
-        log("analyzers disabled: %s" % names)
+            poller.stop()
 
     def _save(self, res, op):
         from ghidra.util.task import TaskMonitor
@@ -424,6 +414,8 @@ class Program:
 
     def _undo_redo(self, undo):
         prog = self.ses.need()
+        if self.ses.analyzing:
+            raise RpcError(BUSY, "analysis running")
         if not (prog.canUndo() if undo else prog.canRedo()):
             raise RpcError(INVALID, "nothing to %s" % ("undo" if undo else "redo"))
         try:

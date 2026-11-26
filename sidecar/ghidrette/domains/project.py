@@ -47,6 +47,7 @@ class Project:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
         self.proj = self.gp = None
+        self.meta_lock = threading.Lock()  # programs.json is read-modified-written by O, R and the analysis thread
         self.lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
 
     @staticmethod
@@ -109,10 +110,17 @@ class Project:
         os.replace(p + ".tmp", p)
 
     def meta_touch(self, key, **fields):
-        meta = self._meta_load()
-        e = meta.setdefault(key, {})
-        e.update(fields, lastOpened=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        self._meta_save(meta)
+        self.meta_update(key, lastOpened=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **fields)
+
+    def meta_update(self, key, **fields):
+        with self.meta_lock:
+            meta = self._meta_load()
+            meta.setdefault(key, {}).update(fields)
+            self._meta_save(meta)
+
+    def meta_get(self, key):
+        with self.meta_lock:
+            return dict(self._meta_load().get(key, {}))
 
     class _ProjGuard:
         """Non-blocking proj_lock for R-side project users: Busy while an open runs."""
@@ -184,12 +192,16 @@ class Project:
     @rpc(lane="project")
     def list_programs(self):
         with self._ProjGuard(self):
-            meta, out = self._meta_load(), []
+            with self.meta_lock:
+                meta = self._meta_load()
+            out = []
             for f in self.ghidra_project().getProjectData().getRootFolder().getFiles():
                 key = str(f.getName())
                 m = meta.get(key, {})
-                e = {"programId": key, "name": m.get("name", key), "sizeBytes": m.get("sizeBytes", 0),
-                     "analyzed": m.get("analyzed", True), "options": m.get("options", {})}
+                an = m.get("analysis") or ("done" if m.get("analyzed", True) else "none")  # a program from before round 7 has only `analyzed`
+                e = {"programId": key, "name": m.get("name", key), "sizeBytes": m.get("sizeBytes", 0), "analyzed": an == "done",
+                     "analysis": an, "analysisProfile": m.get("analysisProfile") or m.get("options", {}).get("profile", "full"),
+                     "options": m.get("options", {})}
                 for k in ("sourcePath", "lastOpened"):
                     if k in m:
                         e[k] = m[k]
@@ -207,7 +219,8 @@ class Project:
             if f is None:
                 raise RpcError(NOT_FOUND, "no such program: %s" % programId)
             f.delete()
-            meta = self._meta_load()
-            if meta.pop(programId, None) is not None:
-                self._meta_save(meta)
+            with self.meta_lock:
+                meta = self._meta_load()
+                if meta.pop(programId, None) is not None:
+                    self._meta_save(meta)
         return {}

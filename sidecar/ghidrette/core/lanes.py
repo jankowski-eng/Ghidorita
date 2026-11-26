@@ -77,6 +77,14 @@ class Opening:
                 self.mon.cancel()
             return True
 
+    def adopt(self, m):
+        """Register a monitor made elsewhere (the analysis one) as the one cancel() cancels."""
+        with self.lock:
+            self.mon = m
+            if self.cancelled:
+                m.cancel()
+        return m
+
     def monitor(self, cb=None):
         from ghidra.pyghidra import PyGhidraTaskMonitor
         m = PyGhidraTaskMonitor(None, cb)

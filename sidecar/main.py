@@ -39,6 +39,8 @@ def main():
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
     launcher.add_vmargs("-Xmx%s" % max_heap())
     jscans.build()  # compile the Java helper before the JVM exists
+    if os.environ.get("SIDECAR_ANALYSIS_CORES"):  # Ghidra sizes its analyzer thread pools (and so the native decompiler processes) from this
+        launcher.add_vmargs("-Dcpu.core.limit=%s" % os.environ["SIDECAR_ANALYSIS_CORES"])
     launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
     launcher.start()
     from java.lang import Runtime

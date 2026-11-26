@@ -2,7 +2,7 @@
 import re, threading, uuid
 
 from .args import MASK64
-from .errors import INVALID, NO_PROGRAM, NOT_FOUND, RpcError, java_error
+from .errors import BUSY, INVALID, NO_PROGRAM, NOT_FOUND, RpcError, java_error
 
 
 def undo_state(prog):
@@ -27,6 +27,7 @@ class Session:
         self.lock = threading.Lock()      # the program swap: program + epoch (+ lanes.running/active)
         self.undo_snap = clean_undo()
         self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
+        self.analyzing = False            # an analysis owns the program's one open transaction: edits, undo and redo are Busy (domains/analysis.py)
 
     def publish(self, program, key, name):
         with self.lock:
@@ -99,6 +100,8 @@ class Session:
         happened before the reply is sent: a decompile requested after the reply can never see a stale entry."""
         import jpype
         prog = self.need()
+        if self.analyzing:  # a second transaction would join the analysis one: not undoable alone, and a rollback would abort the analysis
+            raise RpcError(BUSY, "analysis running")
         tx, ok = prog.startTransaction(name), False
         try:
             r = fn(prog)

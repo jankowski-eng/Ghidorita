@@ -7,7 +7,7 @@ from ghidrette.app import App
 # project+busy_ok (same, but answered during an open), loop (asyncio loop), open (own thread O)
 GOLDEN = {
     "provider_info": "loop", "active_session": "loop",
-    "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop",
+    "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop", "cancel_analysis": "loop", "analysis_status": "loop",
     "open_binary": "open",
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
@@ -17,7 +17,7 @@ GOLDEN = {
     **{m: "R" for m in (
         "list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",
         "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment", "create_function",
-        "set_function_signature", "undo", "redo", "define_data", "clear_code", "save", "dt_sources", "dt_children",
+        "set_function_signature", "undo", "redo", "define_data", "clear_code", "save", "start_analysis", "dt_sources", "dt_children",
         "get_data_type", "create_data_type", "delete_data_type", "rename_data_type", "edit_struct", "edit_enum",
         "create_struct_from_data")},
 }

@@ -3,6 +3,7 @@ existing domain needs nothing here."""
 from .core.context import Ctx
 from .core.rpc import Dispatcher, Registry
 from .core.server import Server
+from .domains.analysis import Analysis
 from .domains.datatypes import DataTypes
 from .domains.decompile import Decompile
 from .domains.edits import Edits
@@ -22,9 +23,10 @@ class App:
         """start=False: no threads (test_methods.py builds the registry without a JVM)."""
         self.ctx = ctx = Ctx()
         ctx.project = Project(ctx)  # part of the context: Program opens programs through it
+        ctx.analysis = analysis = Analysis(ctx)
         program = Program(ctx)
         self.registry = Registry()
-        self.domains = (ctx.project, program, *(d(ctx) for d in DOMAINS))  # kept for tests that call the methods in-process
+        self.domains = (ctx.project, program, analysis, *(d(ctx) for d in DOMAINS))  # kept for tests that call the methods in-process
         for dom in self.domains:
             self.registry.register(dom)
         ctx.shutdown_hooks += [program.close, ctx.project.close]  # autosave the program on R, then release the project lock files
