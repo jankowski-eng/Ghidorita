@@ -20,7 +20,7 @@ File > Open Binary… (`Cmd+O`), or pick a program from the start screen's proje
 ![Import card with entropy strip and section list](screenshots/import.png)
 
 ### Command bar (`Cmd+K`)
-One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, …). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
+One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high; source-file paths (`__FILE__` in asserts) and very short words are left out of the string leads. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, …). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
 
 ![Command bar with ranked leads](screenshots/command-bar.png)
 
@@ -28,7 +28,7 @@ One bar for jumping, searching and actions. Empty, it lists ranked leads (entry 
 The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and toggle its layers with **R** (renamed functions) and **C** (coverage). The listing shows function headers, comments, `XREF[n]` annotations (click to follow) and folded structures; the decompiler follows the cursor and opens one tab per function. `X` on a listing row or decompiler token opens its references in the panel under the function list (screenshot at the top of this page).
 
 ### Control-flow graph (`Space`)
-`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are blue (true), orange (false) and grey (jump). Wheel zooms, drag pans, a click on a block moves the cursor there.
+`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are blue (true), orange (false) and grey (jump). A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
 
 ![Control-flow graph at C level](screenshots/graph.png)
 
