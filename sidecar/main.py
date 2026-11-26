@@ -15,6 +15,7 @@ from ghidrette.core.rpc import Dispatcher, Registry, rpc
 from ghidrette.core.server import Server
 from ghidrette.core.session import undo_state
 from ghidrette.domains.search import Search
+from ghidrette.domains.edits import Edits
 from ghidrette.domains.datatypes import DataTypes
 from ghidrette.domains.listing import Listing
 from ghidrette.domains.xrefs import Xrefs
@@ -49,7 +50,7 @@ class Sidecar:
         ctx.shutdown_hooks += [lambda: self._close(), self._close_project]
         self.registry = Registry()
         self.registry.register(self)
-        for dom in (DataTypes, Listing, Search, Xrefs):
+        for dom in (Edits, DataTypes, Listing, Search, Xrefs):
             self.registry.register(dom(ctx))
         self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)
         ctx.lanes.start()
@@ -596,141 +597,6 @@ class Sidecar:
         return undo_state(prog or self.need())
 
     _name_arg = staticmethod(name_arg)
-
-    @rpc(lane="R")
-    def rename_symbol(self, address, newName):
-        from ghidra.app.cmd.label import RenameLabelCmd
-        from ghidra.program.model.symbol import SourceType
-        prog = self.need()
-        self._name_arg(newName, "newName")
-        sym = prog.getSymbolTable().getPrimarySymbol(self.addr(address))
-        if sym is None:
-            raise RpcError(NOT_FOUND, "no symbol at %s" % address)
-        old = str(sym.getName())
-        self.edit("Rename %s to %s" % (old, newName), self._cmd(RenameLabelCmd(sym, newName, SourceType.USER_DEFINED)))
-        return {}
-
-    @rpc(lane="R")
-    def set_comment(self, address, kind, text):
-        from ghidra.app.cmd.comments import SetCommentCmd
-        from ghidra.program.model.listing import CommentType
-        prog = self.need()
-        kinds = {"eol": CommentType.EOL, "pre": CommentType.PRE, "post": CommentType.POST,
-                 "plate": CommentType.PLATE, "repeatable": CommentType.REPEATABLE}
-        if kind not in kinds:
-            raise RpcError(INVALID, "bad comment kind %r" % (kind,))
-        text_arg(text, "text")
-        cu = prog.getListing().getCodeUnitContaining(self.addr(address))
-        if cu is None:
-            raise RpcError(NOT_FOUND, "no code unit at %s" % address)
-        cmd = SetCommentCmd(cu.getMinAddress(), kinds[kind], text or None)
-        self.edit(("Clear %s comment" if not text else "Set %s comment") % kind, self._cmd(cmd))
-        return {}
-
-    @rpc(lane="R")
-    def create_label(self, address, name):
-        from ghidra.app.cmd.label import AddLabelCmd
-        from ghidra.program.model.symbol import SourceType
-        prog = self.need()
-        self._name_arg(name)
-        a = self.addr(address)
-        if not prog.getMemory().contains(a):
-            raise RpcError(INVALID, "address %s is not in memory" % address)
-        if prog.getSymbolTable().getPrimarySymbol(a) is not None:
-            raise RpcError(INVALID, "a label already exists at %s (use rename_symbol)" % address)
-        self.edit("Create label %s" % name, self._cmd(AddLabelCmd(a, name, SourceType.USER_DEFINED)))
-        return {}
-
-    @rpc(lane="R")
-    def create_function(self, address, name=None):
-        from ghidra.app.cmd.function import CreateFunctionCmd
-        from ghidra.program.model.symbol import SourceType
-        prog = self.need()
-        a, fm = self.addr(address), prog.getFunctionManager()
-        if name is not None:
-            self._name_arg(name)
-        if fm.getFunctionContaining(a) is not None:
-            raise RpcError(INVALID, "address is already inside a function")
-        cmd = (CreateFunctionCmd(name, a, None, SourceType.USER_DEFINED) if name else CreateFunctionCmd(a))
-        self.edit("Create function at %s" % address, self._cmd(cmd))
-        f = fm.getFunctionAt(a)
-        if f is None:
-            raise RpcError(INTERNAL, "function was not created")
-        return {"entry": self.fmt(a), "name": str(f.getName())}
-
-    @rpc(lane="R")
-    def define_data(self, address, dataType):
-        from ghidra.app.cmd.data import CreateDataCmd
-        from ghidra.program.model.data import DataTypeConflictHandler
-        from ghidra.util.data import DataTypeParser
-        from ghidra.util.data.DataTypeParser import AllowedDataTypes
-        prog = self.need()
-        text_arg(dataType, "dataType")
-        a = self.addr(address)
-        if not prog.getMemory().contains(a):
-            raise RpcError(INVALID, "address %s is not in memory" % address)
-
-        def go(p):
-            dtm = p.getDataTypeManager()
-            dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
-            if dt is None:
-                try:
-                    dt = DataTypeParser(dtm, dtm, None, AllowedDataTypes.ALL).parse(dataType)
-                except Exception as e:  # noqa  (ParseException, or anything the parser throws on junk)
-                    raise RpcError(INVALID, "unknown data type %r: %s" % (dataType, e))
-            if dt is None or dt.getLength() <= 0:
-                raise RpcError(INVALID, "type %r is unknown or has no fixed size" % dataType)
-            dt = dtm.resolve(dt, DataTypeConflictHandler.DEFAULT_HANDLER)
-            self._cmd(CreateDataCmd(a, True, False, dt))(p)
-            self._data_ranges = (a.getOffset(), a.getOffset() + dt.getLength() - 1)
-        self.edit("Define data", go)
-        self.ctx.events.record({"data"}, [self._data_ranges])
-        return {}
-
-    @rpc(lane="R")
-    def clear_code(self, address, length=None):
-        from ghidra.app.plugin.core.clear import ClearCmd
-        from ghidra.program.model.address import AddressSet
-        prog = self.need()
-        a, mem, listing = self.addr(address), prog.getMemory(), prog.getListing()
-        if not mem.contains(a):
-            raise RpcError(INVALID, "address %s is not in memory" % address)
-        if length is None:
-            cu = listing.getCodeUnitContaining(a)
-            lo, hi = cu.getMinAddress(), cu.getMaxAddress()
-        else:
-            n = int(length)
-            if n < 1:
-                raise RpcError(INVALID, "length must be >= 1")
-            lo = a
-            mask = (1 << 64) - 1  # getOffset is a signed long: the max address of a 64-bit space reads as -1
-            top = a.getAddressSpace().getMaxAddress()
-            hi = top if (a.getOffset() & mask) + n - 1 > (top.getOffset() & mask) else a.add(n - 1)
-        view = AddressSet(lo, hi).intersect(mem)
-        # ClearCmd.applyTo returns true even when it did nothing; an empty transaction would not be undoable
-        if not any(not hasattr(cu, "isDefined") or cu.isDefined() for cu in listing.getCodeUnits(view, True)):
-            raise RpcError(INVALID, "no instructions or defined data in range")
-        self.edit("Clear code", lambda p: self._cmd(ClearCmd(view))(p))
-        self.ctx.events.record({"code", "data"}, [(lo.getOffset(), hi.getOffset())])
-        return {}
-
-    @rpc(lane="R")
-    def set_function_signature(self, entry, signature):
-        from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
-        from ghidra.app.util.parser import FunctionSignatureParser
-        from ghidra.program.model.data import DataTypeConflictHandler
-        from ghidra.program.model.symbol import SourceType
-        from ghidra.app.cmd.function import FunctionRenameOption
-        text_arg(signature, "signature")
-        prog, f = self._function(entry)
-
-        def go(p):
-            fdef = FunctionSignatureParser(p.getDataTypeManager(), None).parse(f.getSignature(), signature)
-            cmd = ApplyFunctionSignatureCmd(f.getEntryPoint(), fdef, SourceType.USER_DEFINED, True, False,
-                                            DataTypeConflictHandler.DEFAULT_HANDLER, FunctionRenameOption.RENAME)
-            self._cmd(cmd)(p)
-        self.edit("Edit signature of %s" % f.getName(), go)
-        return {}
 
     def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job):
         """rename_variable / retype_variable. Decided: the whole thing runs on thread R with a short-lived DecompInterface
