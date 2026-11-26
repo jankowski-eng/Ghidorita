@@ -8,7 +8,7 @@ The wire contract is `../protocol.md` / `../protocol.ts` (read "Process contract
 ```
 sidecar/
   main.py              entry point only: token check, JVM (max_heap, headless), build App, serve, stdin/SIGTERM -> shutdown
-  ghidrette/
+  ghidorita/
     app.py             wiring: builds Ctx, Project, Program and DOMAINS, registers their RPCs, sets the shutdown hooks
     core/              runtime, no Ghidra API except Opening.monitor / Events listener / Session.edit
       errors.py        RpcError, error codes, INVALID_JAVA, java_error(), log()
@@ -29,13 +29,13 @@ sidecar/
       decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
       highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference)
-      search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidretteScans)
+      search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidoritaScans)
       exports.py       export_symbols (JSON symbol map), export_header (C header), export_gzf (Ghidra archive, lane R)
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
       xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from (R); function_calls, call_graph (scan lane; call_graph is bounded by visited functions and seconds as well as output nodes, checks cancel in its loops, `truncated` says a bound hit)
       bookmarks.py     list_bookmarks (scan lane, snapshot of plain dicts dropped on program_changed), set_bookmark, remove_bookmark {address, type, category?} (BookmarkManager; set/remove are edits on R that announce their address)
       datatypes.py     list_data_types and the data-type-manager RPCs
-  jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
+  jscans/              GhidoritaScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
   test_*.py, testlib.py, conftest.py    tests: mostly one file per domain, black box over WebSocket against real Ghidra on /bin/ls
   inproc.py            in-process harness (methods called directly on hand-built programs: test_listing.py, test_addresses.py)
   test_provider_contract.py, test_provider_ui.py   the same browsing contract against the fixture and PyGhidra providers; the built Electron app per provider
@@ -108,10 +108,10 @@ Shared helpers that are not edges live in `core`: `session.edit()` (one transact
 
 Example: `get_bytes {address, length}` on the listing domain.
 
-1. `ghidrette/domains/listing.py`: add a method with `@rpc(lane="R")` (or `scan` / `decomp` / `project` / `loop` / `R, job=True`). The function name is the RPC name; parameters are the JSON params (`TypeError` from a wrong shape becomes InvalidArgument). Validate with `core/args.py`, raise `RpcError(code, msg)`, use `self.ses.need()` / `self.ses.addr()`; an edit goes through `self.ses.edit(name, fn)`.
+1. `ghidorita/domains/listing.py`: add a method with `@rpc(lane="R")` (or `scan` / `decomp` / `project` / `loop` / `R, job=True`). The function name is the RPC name; parameters are the JSON params (`TypeError` from a wrong shape becomes InvalidArgument). Validate with `core/args.py`, raise `RpcError(code, msg)`, use `self.ses.need()` / `self.ses.addr()`; an edit goes through `self.ses.edit(name, fn)`.
 2. `../protocol.md`: the method, params, result, errors, lane. `../protocol.ts`: the line in `Methods`.
 3. The mock (`../app/mock/`): the method, so `MOCK=1` and the renderer tests keep working.
 4. `test_methods.py`: one line in `GOLDEN` (the test fails until you add it, that is the point).
 5. `test_listing.py`: a test over WebSocket (`testlib.Client`); fixture `env` is one analyzed `/bin/ls`.
 
-A new domain module is the same, plus one import and one entry in `DOMAINS` in `ghidrette/app.py`.
+A new domain module is the same, plus one import and one entry in `DOMAINS` in `ghidorita/app.py`.

@@ -19,8 +19,8 @@ function address(value) {
 function readFixture(contents) {
   let document;
   try { document = JSON.parse(contents); } catch { fail("invalid", "Expected a JSON listing fixture"); }
-  if (document?.format !== "ghidrette-listing-v1" || !Array.isArray(document.ranges) || !Array.isArray(document.functions)) {
-    fail("invalid", "Expected a ghidrette-listing-v1 fixture with ranges and functions");
+  if (document?.format !== "ghidorita-listing-v1" || !Array.isArray(document.ranges) || !Array.isArray(document.functions)) {
+    fail("invalid", "Expected a ghidorita-listing-v1 fixture with ranges and functions");
   }
 
   const spaces = new Map();

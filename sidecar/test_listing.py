@@ -6,7 +6,7 @@ from inproc import CODE, INVALID, build
 
 
 def test_addr_roundtrip_and_errors(sc):
-    from ghidrette.core.errors import RpcError
+    from ghidorita.core.errors import RpcError
     prog = build(sc, "t_addr", [("ram", 0x401000, CODE, False), ("hi", 0xFFFFFFFFFFFFF000, CODE, False), ("ovl", 0x1000, CODE, True)])
     f = sc.fmtr(prog)
     for s in ("0x401000", "0xfffffffffffff000", "OVL1::1000", "0xffffffffffffffff"):
@@ -80,7 +80,7 @@ def test_row_content(sc):
     # more parts than the cap: cut with the real count
     sc.define_data("0x401100" if False else "0x401010", "char[20]")
     # xref cap: five shown, the real count reported
-    from ghidrette.domains.listing import Listing
+    from ghidorita.domains.listing import Listing
     assert Listing.ROW_XREFS_SHOWN == 5
 
 

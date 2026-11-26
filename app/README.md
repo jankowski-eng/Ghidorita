@@ -1,8 +1,8 @@
-# Ghidrette (Ghidra desktop spike): Electron frontend
+# Ghidorita (Ghidra desktop spike): Electron frontend
 
     npm install
     npm start                                  # builds (electron-vite) and launches the default provider, PyGhidra: sidecar/.venv/bin/python sidecar/main.py
-    GHIDRETTE_PROVIDER=fixture npm start       # read-only provider, no Ghidra/JVM/Python (see ../PROVIDERS.md)
+    GHIDORITA_PROVIDER=fixture npm start       # read-only provider, no Ghidra/JVM/Python (see ../PROVIDERS.md)
     MOCK=1 npm start                           # fake sidecar (mock/server.mjs): 5000 functions, 2M listing rows
     SIDECAR_CMD="python3 /path/main.py" npm start   # external provider (whitespace-split, no quoting; see ../PROVIDERS.md)
     MOCK=1 AUTOTEST=/bin/ls npm start          # scripted self-test; prints AUTOTEST_RESULT {json}, exit 0/1, writes out/screenshot.png

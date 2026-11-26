@@ -41,7 +41,7 @@ sed -i '' "s#$PWD/$B/uvpy/[^\"']*#/python-build-standalone#g" $B/python/lib/pyth
 find $B/python -name __pycache__ -prune -exec rm -rf {} +
 
 # --- sidecar
-mkdir -p $B/sidecar/jscans/out; cp sidecar/main.py $B/sidecar/; cp -R sidecar/ghidrette $B/sidecar/
+mkdir -p $B/sidecar/jscans/out; cp sidecar/main.py $B/sidecar/; cp -R sidecar/ghidorita $B/sidecar/
 find $B/sidecar -name __pycache__ -prune -exec rm -rf {} +
 # the scan helper ships precompiled (the jlink runtime has no javac launcher to rely on); core/jscans.py recompiles only if the class is missing
 CP=$(find "$GHIDRA_INSTALL_DIR/Ghidra/Framework" "$GHIDRA_INSTALL_DIR/Ghidra/Features/Base" "$GHIDRA_INSTALL_DIR/Ghidra/Features/Decompiler" -name '*.jar' | tr '\n' ':')

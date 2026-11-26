@@ -1,7 +1,7 @@
 """Entry point and sections from file headers (no Ghidra needed)."""
 import os, struct
 
-from ghidrette.domains.layout import file_layout
+from ghidorita.domains.layout import file_layout
 
 BIN = "/bin/ls"
 

@@ -1,4 +1,4 @@
-import { press, setSelect, sleep, waitFor, type AutotestCtx } from "./autotest";
+import { press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Screenshot flows (AUTOTEST=/bin/ls AUTOTEST_FLOW=shot-<name> npm start): arrange one UI state through the real DOM, check it, and end there;
 // the autotest's last act is app/out/screenshot.png.
@@ -6,6 +6,9 @@ const need = (ok: unknown, what: string) => { if (!ok) throw new Error("shot: " 
 
 export async function runShotFlow(name: string, file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const [flow, ...args] = name.split(":"); name = flow;
+  if (name === "shot-start") return startShot(c);
+  if (name === "shot-import") return importShot(file, c);
+  if (name === "shot-analysis") return analysisShot(file, c, result);
   const fl = await c.open(file);
   need(fl?.length, "no functions");
   if (name === "shot-graph") return graphShot(fl!, c, result);
@@ -15,6 +18,12 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-calls") return callsShot(fl!, c, result);
   if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
+  if (name === "shot-overview") return overviewShot(fl!, c);
+  if (name === "shot-actions") return actionsShot(fl!, c);
+  if (name === "shot-strings") return stringsShot(fl!, c);
+  if (name === "shot-datatypes") return dataTypesShot(c);
+  if (name === "shot-coverage") return coverageShot(fl!, args, c);
+  if (name === "shot-callgraph") return callGraphShot(fl!, args, c, result);
   throw new Error("unknown shot flow " + name);
 }
 
@@ -139,3 +148,110 @@ async function copyShot(fl: Fn[], c: AutotestCtx, result: Record<string, any>): 
   await sleep(300);
   return true;
 }
+
+// the function the README screenshots sit on (bash x86-64: FUN_100001a40), else the second in the list; the decompiler showing it
+async function at(fl: Fn[], c: AutotestCtx, name: string) {
+  const f = fl.find((x) => x.name === name) ?? fl[1];
+  await c.select(f.entry);
+  await waitFor(() => c.editorText().length > 0, 30000, "decompiled " + f.name);
+  return f;
+}
+
+// the start screen with the programs already in the projects dir
+async function startShot(c: AutotestCtx): Promise<boolean> {
+  await waitFor(() => /Programs in this project/.test(document.body.textContent ?? ""), 15000, "program list");
+  await sleep(1500);
+  return true;
+}
+
+// the import card of a file not yet in the project (sections and entropy loaded)
+async function importShot(file: string, c: AutotestCtx): Promise<boolean> {
+  await waitFor(() => /Programs in this project/.test(document.body.textContent ?? ""), 15000, "start screen");
+  c.command({ type: "open-path", path: file });
+  await waitFor(() => document.querySelector('[role="dialog"][aria-label="Import binary"] table[aria-label="Sections"]'), 60000, "import card with sections");
+  await sleep(800);
+  return true;
+}
+
+// a fresh import: the workspace and a decompiled function while the analysis still runs
+async function analysisShot(file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  await c.openBg(file);
+  await waitFor(() => c.funcCount() > 1500, 180000, "most functions found");
+  const fl = (await c.program().functions.list()).filter((f) => /^FUN_/.test(f.name) && f.size > 300);
+  await at(fl, c, "");
+  need(c.analysis()?.state === "running", "analysis still running");
+  await sleep(1500);
+  result.analysis = c.analysis();
+  return true;
+}
+
+async function overviewShot(fl: Fn[], c: AutotestCtx): Promise<boolean> {
+  await at(fl, c, "_mysql_real_escape_string_quote");
+  await sleep(1500);
+  return true;
+}
+
+// the command bar in action mode (">")
+async function actionsShot(fl: Fn[], c: AutotestCtx): Promise<boolean> {
+  await at(fl, c, "FUN_100001a40");
+  c.command({ type: "search" });
+  const input = await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Symbol or action"]'), 5000, "command bar");
+  typeInto(input, ">");
+  await waitFor(() => document.querySelectorAll('[role="listbox"] [role="option"]').length > 5, 5000, "actions listed");
+  await sleep(500);
+  return true;
+}
+
+async function stringsShot(fl: Fn[], c: AutotestCtx): Promise<boolean> {
+  await at(fl, c, "FUN_100001a40");
+  c.command({ type: "dock", panel: "strings" });
+  await waitFor(() => /^\d+ strings$/.test(document.querySelector('[aria-label="String count"]')?.textContent ?? ""), 60000, "strings counted");
+  await sleep(1000);
+  return true;
+}
+
+// the Data Type Manager on Mach-O's segment_command
+async function dataTypesShot(c: AutotestCtx): Promise<boolean> {
+  c.command({ type: "datatypes" });
+  const filter = await waitFor(() => document.querySelector<HTMLInputElement>('input[aria-label="Filter data types"]'), 10000, "data type manager");
+  typeInto(filter, "segment");
+  const row = await waitFor(() => [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((r) => /segment_command\b/.test(r.textContent ?? "") && !/64/.test(r.textContent ?? "")), 15000, "segment_command listed");
+  row.click();
+  await waitFor(() => /struct segment_command/.test(document.querySelector('[aria-label="Data Type Manager"]')?.textContent ?? ""), 10000, "struct shown");
+  await sleep(800);
+  return true;
+}
+
+// shot-callgraph:<coverage file>: one coverage run loaded (ran / never ran), the call graph of a function with several callers
+async function callGraphShot(fl: Fn[], files: string[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  for (const f of files) { c.command({ type: "coverage-path", path: f }); await sleep(800); }
+  await quiet();
+  const f = await at(fl, c, "FUN_10000254b");
+  c.command({ type: "callgraph" });
+  await waitFor(() => /callers above/.test(document.body.textContent ?? ""), 15000, "call graph");
+  await sleep(2000);
+  result.callgraph = f.name;
+  return true;
+}
+
+// shot-coverage:<run A>:<run B>: two runs compared in the listing and decompiler, the Coverage tab open
+async function coverageShot(fl: Fn[], files: string[], c: AutotestCtx): Promise<boolean> {
+  need(files.length === 2, "two coverage files");
+  for (const f of files) { c.command({ type: "coverage-path", path: f }); await sleep(800); }
+  await quiet();
+  await at(fl, c, "FUN_100001a40");
+  c.command({ type: "dock", panel: "coverage" });
+  const pick = async (label: string, file: string) => {
+    const sel = await waitFor(() => document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`), 5000, label);
+    const o = await waitFor(() => [...sel.options].find((x) => x.text === file.split("/").pop()), 5000, `${label} option`);
+    setSelect(sel, o.value);
+  };
+  await pick("Run A", files[0]);
+  await pick("Run B", files[1]);
+  await waitFor(() => /only A .* only B/.test(document.querySelector('[role="region"][aria-label="Coverage"], .panel')?.parentElement?.textContent ?? document.body.textContent ?? ""), 10000, "A and B compared");
+  await sleep(1000);
+  return true;
+}
+
+// the "Coverage … loaded" notice in the status bar has gone
+const quiet = () => waitFor(() => !/loaded/.test(document.querySelector(".status")?.textContent ?? ""), 30000, "status bar notice gone");

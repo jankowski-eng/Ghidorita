@@ -27,8 +27,8 @@ import java.util.Locale;
  * into Python: a Java call releases the GIL, and the loop makes no JPype call per element. Cancellation: the loops poll the TaskMonitor
  * (CancelledException). Called from sidecar/main.py on a scan worker; nothing here touches the program except by reading.
  */
-public final class GhidretteScans {
-    private GhidretteScans() {}
+public final class GhidoritaScans {
+    private GhidoritaScans() {}
 
     public static final int STRING_VALUE_CAP = 1000;
     public static final int K_FUNCTION = 1, K_LABEL = 2, K_DATA = 4, K_EXTERNAL = 8, K_VARIABLE = 16, K_OTHER = 32;

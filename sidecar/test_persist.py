@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ghidrette.core.errors import INTERNAL
+from ghidorita.core.errors import INTERNAL
 from testlib import BASE, BIN, INVALID, NOT_FOUND, NO_PROGRAM, X86, Client, Proc, blob, run
 
 

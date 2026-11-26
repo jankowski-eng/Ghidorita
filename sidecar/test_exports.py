@@ -81,8 +81,8 @@ EXPORTS = [("export_symbols", "syms.json", True), ("export_header", "prog.h", Tr
 
 @pytest.mark.parametrize("method,name,scanned", EXPORTS)
 def test_export_failure_leaves_existing_file(small, tmp_path, monkeypatch, method, name, scanned):
-    from ghidrette.core.errors import RpcError
-    from ghidrette.core.lanes import Scan
+    from ghidorita.core.errors import RpcError
+    from ghidorita.core.lanes import Scan
     call = lambda p: getattr(small, method)(p, **({"scan": Scan(small.ses.epoch)} if scanned else {}))
     dest = tmp_path / name
     dest.write_bytes(b"keep me")

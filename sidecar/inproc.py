@@ -11,14 +11,14 @@ def start():
     gd = os.environ.get("GHIDRA_INSTALL_DIR") or sorted(glob.glob(os.path.join(HERE, "..", "ghidra-install", "ghidra_*/")))[-1]
     os.environ.setdefault("GHIDRA_INSTALL_DIR", str(gd))
     os.environ.setdefault("JAVA_HOME", JAVA)
-    from ghidrette.core import jscans
+    from ghidorita.core import jscans
     jscans.build()  # the Java scan helper is compiled before the JVM starts
     from pyghidra.launcher import HeadlessPyGhidraLauncher
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(gd))
     launcher.java_home = pathlib.Path(JAVA)
     launcher.add_vmargs("-Djava.awt.headless=true")
     launcher.start()
-    from ghidrette.app import App
+    from ghidorita.app import App
     return Shim(App(start=False))
 
 
@@ -26,7 +26,7 @@ class Shim:
     """The methods under test, called in-process: the session's helpers and every domain's RPCs behind one object."""
     def __init__(self, app):
         self.app, self.ses = app, app.ctx.session
-        from ghidrette.core.lanes import Worker
+        from ghidorita.core.lanes import Worker
         app.ctx.lanes.tl.w = Worker()  # this thread plays a decompiler worker
         app.ctx.loop = asyncio.new_event_loop()  # events.record schedules the change notification on it; never run here
 

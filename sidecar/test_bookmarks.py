@@ -3,8 +3,8 @@ import asyncio, threading, time
 
 import pytest
 
-from ghidrette.core.errors import RpcError
-from ghidrette.domains import bookmarks as bookmarks_mod
+from ghidorita.core.errors import RpcError
+from ghidorita.domains import bookmarks as bookmarks_mod
 from testlib import BASE, CANCELLED, NOT_FOUND, X86, Client, inproc, run
 
 

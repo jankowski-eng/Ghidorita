@@ -70,7 +70,7 @@ class Project:
                       else GhidraProject.createProject(d, "spike", False))
             except jpype.JException as e:
                 if str(e.getClass().getSimpleName()) == "LockException":
-                    raise RpcError(PROJECT_LOCKED, "projects dir in use by another Ghidrette (%s)" % d)
+                    raise RpcError(PROJECT_LOCKED, "projects dir in use by another Ghidorita (%s)" % d)
                 raise
             self.gp, self.proj = gp, gp.getProject()
         return self.proj

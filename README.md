@@ -1,12 +1,12 @@
-<p align="center"><img src="assets/logo.svg" alt="Ghidrette" width="480"></p>
+<p align="center"><img src="assets/logo.svg" alt="Ghidorita" width="480"></p>
 
-# Ghidrette
+# Ghidorita
 
-Ghidrette is a fast desktop reverse-engineering workspace on top of [Ghidra](https://github.com/NationalSecurityAgency/ghidra)'s analysis engine: Electron (TypeScript, React, Monaco) talking over a WebSocket JSON-RPC protocol to a headless Python sidecar (PyGhidra on the Ghidra JVM).
+Ghidorita is a fast desktop reverse-engineering workspace on top of [Ghidra](https://github.com/NationalSecurityAgency/ghidra)'s analysis engine: Electron (TypeScript, React, Monaco) talking over a WebSocket JSON-RPC protocol to a headless Python sidecar (PyGhidra on the Ghidra JVM).
 
-> **Status: early spike.** It works end to end on real binaries, but expect rough edges and breaking changes. Ghidrette is an independent project and is not affiliated with or endorsed by the Ghidra project or the NSA.
+> **Status: early spike.** It works end to end on real binaries, but expect rough edges and breaking changes. Ghidorita is an independent project and is not affiliated with or endorsed by the Ghidra project or the NSA.
 
-![Ghidrette showing function list, listing with xrefs and the decompiler side by side](screenshots/overview.png)
+![Ghidorita showing function list, listing with xrefs and the decompiler side by side](screenshots/overview.png)
 
 <sub>Function list with the binary map, listing with cross-references, references panel and decompiler on `mysqldump` (arm64, 1,891 functions).</sub>
 

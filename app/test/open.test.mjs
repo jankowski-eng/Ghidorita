@@ -54,9 +54,9 @@ test("optionsSummary / reopenParams", () => {
   assert.deepEqual(reopenParams({ programId: "x", name: "n", sourcePath: "/a/n", sizeBytes: 1, analyzed: true, options: { loader: "L" } }), { path: "/a/n", loader: "L" });
 });
 test("windowTitle", () => {
-  assert.equal(windowTitle(null, false), "Ghidrette");
-  assert.equal(windowTitle("ls", false), "ls — Ghidrette");
-  assert.equal(windowTitle("ls", true), "• ls — Ghidrette");
+  assert.equal(windowTitle(null, false), "Ghidorita");
+  assert.equal(windowTitle("ls", false), "ls — Ghidorita");
+  assert.equal(windowTitle("ls", true), "• ls — Ghidorita");
 });
 
 test("buildOptions: provider-supplied profiles are explicit", () => {
