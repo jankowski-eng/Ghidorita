@@ -324,3 +324,32 @@ sidecar/
 **Rebased onto `main` 57dd24b** (two audit commits touched `sidecar/main.py`): their changes were re-applied in the modules, not merged textually: recovery snapshots (`program.py`), `_consume`/`_not_corruption` (`program.py`), `list_data_types` on the scan lane (`datatypes.py`, golden table updated), uncached string filter (`search.py`), local range in `define_data` (`edits.py`), the dirty flag after recovery (`program.py`). The intermediate step commits between `main` and the port commit do not contain these; only the tip does. pytest at the tip: 48 passed, 1 failed (`test_snapshot_survives_sigkill`), which also fails on plain `main` in this environment (no recovery snapshot is found after SIGKILL; not investigated). `npm test`/autotests were not rerun after the rebase.
 
 **Rebased again onto `main` f3e9ad9** (round 8 listing completeness changed `sidecar/main.py`): re-applied in the modules too: `hx`/`akey`/`ref_kind` in `core/args.py`, `Session.addr/fmtr/fmt/rng` (space-qualified, unsigned addresses), `events.py` ranges are `(space, start, end)`, the decompile cache clears on non-default-space ranges, `listing.py` has the rich rows. Round 8's `test_listing.py` runs the methods in-process through a small shim over `App(start=False).domains`; the old `test_listing.py` (function reads) is now `test_function_reads.py`. Full pytest: 52 passed, 1 failed (`test_snapshot_survives_sigkill`, also failing on `main` here).
+
+## Round 9: hardening (unfinished: see "Not done")
+Branch `claude/ghidrette-spike-stabilization-eb0907`, rebased on main after the module split (round 6) and rounds 7/8.
+
+**Fixed (each with a test that fails on the old code, `sidecar/test_hardening.py`)**
+- `open_binary`: one end state for every failure, no program open (protocol.md). Also the file/option checks now run after the old program is closed. `close()`: the coalescer's armed flag is reset, no `program_changed` after `close_program`.
+- `clear_code` on a range inside one defined unit was refused ("no instructions or defined data"); units overlapping the range are now widened to whole units. **Not reproduced:** the reported loss of instructions of the function at 0x100000812 after clearing the Mach-O header. The fix above is the adjacent bug I found; the autotest clears the string at 0x100000028 and the program stays intact, but I cannot say the reported loss is gone.
+- Stale page read (`list_symbols` meeting a symbol an edit deleted): retried once on a fresh snapshot, then `Cancelled` ("program changed while reading, retry"). **Not reproduced** from outside; covered by a unit test of `retry_stale` only.
+- `test_pool_concurrent_and_cancel` asserts behaviour (a tiny decompile queued behind the biggest one is answered first), no wall-clock.
+
+**Java helper** (`sidecar/jscans/GhidretteScans.java`, `core/jscans.py`): the defined-string scan and the symbol kind filter/sort run in Java; only results cross into Python, the GIL is released. Gotchas: a directory named `java` next to `main.py` shadows JPype's `java` package; `Symbol[]` return types fail (use `List`); Ghidra classes are not on the app class path (load through a `URLClassLoader` whose parent is Ghidra's loader). `packaging/prepare.sh` compiles it into the bundle: **not run**.
+
+**Tests added:** cancel of a running `search_memory` (5.7M matches), `Timeout` of decompile / `rename_variable` / `retype_variable` on a >30 KB function, size warning + "Decompile anyway" + `Timeout` in the UI (`sidecar/test_big.py`, `test_ui.py`, `AUTOTEST_FLOW=big|locked`; the big ones skip unless the stored fast analysis of llvm-exegesis exists), strings panel refresh after a real edit, ProjectLocked message, default-Fast for a >20 MB file.
+
+**Numbers: llvm-exegesis 66.7 MB, quiet machine (`bench/common.py: wait_quiet`), 3 repeats, measured BEFORE the rebase on main** (`bench/results_round9/prerebase/`, not committed)
+| | before (round 5) | now, 3 runs |
+|---|---|---|
+| first strings scan | 14-20 s | 7.3 / 7.5 / 7.6 s |
+| listing p95 while it runs | 183 ms | 17.9 / 18.6 / 18.7 ms (target < 30) |
+| kind filter / sort, cold | ~4 s | 0.13-0.30 s |
+| listing p95 during 50 decompiles | - | 15.6 / 16.9 / 16.0 ms |
+| first open, fast profile | - | 557 / 560 s (2 runs) |
+| JVM peak, fast profile | 4.1 GB (round 4) | 3.71 / 4.04 GB (2 runs) + 3.59 GB (a third, separate run) |
+Navfind run 1 started with two leftover electron-vite processes on the machine; runs 2 and 3 started with none. The 4.1 vs 3.5 GB question is **not answered**: the full-profile peak was not re-measured, and fast varies by ~0.4 GB between identical runs.
+
+**Not done**
+- Benchmarks after the rebase, the full-profile first open, and the `BENCH=1` app run x3: the chain was stopped (another session kept the load at 7, the quiet gate waited 16 min). `bench/run_round9*.sh` run them.
+- The final full run (pytest, npm test, typecheck, autotest mock + real, `AUTOTEST_PHASE=2`) on the final commit was not done. Only the typecheck and `test_big/hardening/search/program/server` (22 tests) were run after the rebase.
+- **Needs a person:** `MANUAL_TEST.md` (nothing in it has been run).
