@@ -66,6 +66,19 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .bar2 > div { height: 100%; background: #0e639c; transition: width .2s; }
 .bar2.indet > div { width: 30%; position: absolute; animation: slide 1.2s linear infinite; }
 @keyframes slide { from { left: -30%; } to { left: 100%; } }
-.notice { padding: 16px; color: #ccc; }
+.notice { padding: 16px; color: #ccc; overflow: auto; flex: 1; }
 .funcs-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .funcs-col > .funcs { flex: 1; min-height: 0; }
+.card.wide { width: 560px; max-width: 90%; }
+.card label { display: flex; flex-direction: column; gap: 2px; }
+.card select, .card input { background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 3px 6px; font: inherit; }
+.row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.card .row button { align-self: auto; }
+button.primary { background: #0e639c; color: #fff; border: 1px solid #0e639c; }
+.welcome { padding: 16px; overflow: auto; flex: 1; }
+.welcome .title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.welcome ul { list-style: none; margin: 0; padding: 0; }
+.prog { display: flex; gap: 8px; align-items: stretch; margin-bottom: 4px; }
+.prog .open { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: #252526; color: #ddd; border: 1px solid #444; padding: 6px 10px; cursor: pointer; font: inherit; }
+.prog .open:hover { background: #2a2d2e; }
+.prog .meta { color: #999; font-size: 12px; }

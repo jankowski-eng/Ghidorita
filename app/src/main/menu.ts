@@ -5,7 +5,7 @@ import { addRecent, clearRecent, getRecent } from "./recent";
 type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null> };
 
 export function createMenu({ getWin, pick }: Deps) {
-  let state: MenuState = { canBack: false, canForward: false, canOpen: true };
+  let state: MenuState = { canBack: false, canForward: false, canOpen: true, canSave: false, canClose: false };
 
   const send = (cmd: MenuCommand) => {
     const w = getWin();
@@ -30,6 +30,9 @@ export function createMenu({ getWin, pick }: Deps) {
           if (p) send({ type: "open-path", path: p });
         } },
         { label: "Open Recent", enabled: state.canOpen, submenu: recentItems },
+        { type: "separator" },
+        { label: "Save", accelerator: "CmdOrCtrl+S", enabled: state.canSave, click: () => send({ type: "save" }) },
+        { label: "Close Program", enabled: state.canClose, click: () => send({ type: "close-program" }) },
         { type: "separator" },
         { label: "Close Tab", accelerator: "CmdOrCtrl+W", click: () => send({ type: "close-tab" }) },
         ...(mac ? [] : [{ type: "separator" } as MenuItemConstructorOptions, { role: "quit" } as MenuItemConstructorOptions]),
