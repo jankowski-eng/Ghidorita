@@ -60,7 +60,7 @@ class Job:
 class Opening:
     """The open_binary in progress. cancel() is called from the loop thread, mon is swapped by thread O."""
     def __init__(self):
-        self.cancelled, self.mon, self.saving = False, None, False
+        self.cancelled, self.mon, self.saving, self.finished = False, None, False, False
         self.lock = threading.Lock()
 
     def cancel(self):
@@ -246,23 +246,34 @@ class Sidecar:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and any(w.busy or w.decomp is not None for w in self.workers):
             time.sleep(0.02)
+        stuck = any(w.busy or w.decomp is not None for w in self.workers)
+        if stuck:
+            log("decompiler worker still busy after 10 s: leaking the old program instead of releasing it under a live decompiler")
         self.cache_clear()
         self.strings = None
         with self.plock:
             self.pending.update(ranges=[], kinds=set(), broad=False)
         self.results = self.consumer = None
-        if res is not None:
-            res.close()
-        elif prog is not None:
-            prog.release(consumer)
+        if not stuck:
+            if res is not None:
+                res.close()
+            elif prog is not None:
+                prog.release(consumer)
         self.undo_snap = {"canUndo": False, "canRedo": False}
 
-    def _publish(self, prog, res, consumer):
+    def _publish(self, prog, res, consumer, op):
+        from ghidra.app.plugin.core.analysis import AutoAnalysisManager
+        with op.lock:  # commit point: after this cancel_open answers false, before it the open still fails with Cancelled
+            if op.cancelled:
+                raise RpcError(CANCELLED, "open cancelled")
+            op.saving = True
         prog.clearUndo()  # the analysis transaction must not be undoable
-        self.listener = self._make_listener()
-        prog.addListener(self.listener)  # only now: progress covers the initial analysis
-        self.results, self.consumer = res, consumer
-        self.undo_snap = self.undo_state(prog)
+        # follow-on analysis would write from the manager's own thread, outside R and outside our transactions
+        AutoAnalysisManager.getAnalysisManager(prog).setIgnoreChanges(True)
+        lst = self._make_listener(prog)
+        prog.addListener(lst)  # only now: progress covers the initial analysis
+        self.listener, self.results, self.consumer = lst, res, consumer
+        self.undo_snap = {"canUndo": False, "canRedo": False}  # just cleared; no Program read on thread O
         with self.pool_lock:
             self.epoch += 1
             self.program = prog
@@ -315,11 +326,19 @@ class Sidecar:
                 res, prog, consumer = self._import_and_analyze(path, key, proj, op), None, None
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
-            self._publish(prog, res, consumer)
+            try:
+                self._publish(prog, res, consumer, op)
+            except BaseException:
+                if self.listener is not None:
+                    prog.removeListener(self.listener)
+                self.listener = self.results = self.consumer = None
+                raise
             self.progress("ready", 100, "ready")
             self.open_secs = time.monotonic() - t0
+            op.finished = True
             return {"programId": key, "name": os.path.basename(path), "persisted": persisted}
         except BaseException as e:  # noqa
+            op.finished = True
             if res is not None:
                 try:
                     res.close()
@@ -409,23 +428,23 @@ class Sidecar:
         res.save(TaskMonitor.DUMMY)
 
     # ---- change events (listener runs on Ghidra's event thread; it only copies data and never touches the DB) ----
-    def _make_listener(self):
+    def _make_listener(self, prog):
         from jpype import JClass, JImplements, JObject, JOverride
-        sc = self
+        sc, space = self, prog.getAddressFactory().getDefaultAddressSpace()
 
         @JImplements("ghidra.framework.model.DomainObjectListener")
         class L:
             @JOverride
             def domainObjectChanged(self, ev):
                 try:
-                    sc._on_events(ev)
+                    sc._on_events(ev, space)
                 except Exception as e:  # noqa
                     log("listener error", repr(e))
                     sc._record(set(ALL_KINDS), None)
         # Ghidra keeps listeners in a weak set: hold a strong reference to the *Java* proxy, or a GC silently drops it
         return JObject(L(), JClass("ghidra.framework.model.DomainObjectListener"))
 
-    def _on_events(self, ev):
+    def _on_events(self, ev, space):
         from ghidra.program.util import ProgramChangeRecord
         kinds, ranges, broad = set(), [], False
         for r in ev:
@@ -437,7 +456,7 @@ class Sidecar:
                 continue
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
-            if s is None or s.isExternalAddress() or s.getAddressSpace() != self.program.getAddressFactory().getDefaultAddressSpace():
+            if s is None or s.isExternalAddress() or s.getAddressSpace() != space:
                 broad = True  # type events, other spaces, ...: no usable range
             else:
                 ranges.append((s.getOffset(), (e or s).getOffset()))
@@ -700,7 +719,7 @@ class Sidecar:
             raise RpcError(INVALID if kind in INVALID_JAVA else INTERNAL, str(e.getMessage() or kind))
         finally:
             prog.endTransaction(tx, ok)  # not ok => rolled back, nothing on the undo stack
-        prog.flushEvents()
+            prog.flushEvents()  # also on rollback: a decompile that saw the half-applied state must not be cached
         self.undo_snap = self.undo_state(prog)
         return r
 
@@ -1009,6 +1028,8 @@ class Sidecar:
                 if self.opening is not None:  # fail fast: never queue behind an open
                     raise RpcError(NO_PROGRAM, "open_binary in progress")
                 if method == "decompile":
+                    if rid is None or rid in self.dj:
+                        raise RpcError(INVALID, "decompile needs a unique request id")
                     job = self.dj[rid] = Job(self.epoch)
                     try:
                         result = await self.run(lambda: self.decompile(job=job, **params), self.djobs)
@@ -1059,14 +1080,16 @@ class Sidecar:
         for j in list(self.dj.values()):
             j.cancelled = True
 
-        def d():
-            try:
-                self._close()
-            except Exception:
-                pass
-        t = threading.Thread(target=d, daemon=True)
-        t.start()
-        t.join(2.5)  # a stuck decompile must not block exit (Electron SIGKILLs at 3 s)
+        op = self.opening
+        end = time.monotonic() + 2.0
+        while op is not None and op.saving and not op.finished and time.monotonic() < end:
+            time.sleep(0.02)  # never exit mid-save: a half-written project file would load as "persisted"
+        f = concurrent.futures.Future()
+        self.jobs.put((self._close, f))  # close on thread R, like every other program change
+        try:
+            f.result(timeout=max(0.1, end + 0.5 - time.monotonic()))  # a stuck R must not block exit (Electron SIGKILLs at 3 s)
+        except Exception:
+            pass
         os._exit(0)
 
 
