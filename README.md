@@ -95,3 +95,7 @@ For Developer ID + notarization later (not attempted):
 
 ## Navigate and find
 View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Memory… (Cmd+Shift+F) open a dock under the panes; each window is server-paged (a click or Enter navigates the listing and the decompiler). Search Memory takes hex bytes with `??` wildcards or ASCII / UTF-16 text and streams pages until done; Cancel keeps what was found, Continue resumes. `X` on a listing row or a decompiler token (also Go > Show References To, and the decompiler context menu) pins the References panel to it ("follow cursor" unpins); its "from…" button lists what the current instruction references.
+
+Backend gaps: listing shows EOL comments only (no pre/plate/post, function headers, xref columns); no way to read non-EOL comments (comment dialog prefills EOL only); `rename_symbol` cannot create a label where none exists.
+
+Data types: Types button / View > Data Type Manager (Cmd+Shift+T); Edit > Create Structure from Data… on the listing cursor row. Struct/enum edits are undoable like any edit. The autotest also covers this flow (`AUTOTEST_PHASE=2` checks the struct survived).

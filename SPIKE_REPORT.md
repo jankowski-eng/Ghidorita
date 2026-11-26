@@ -188,3 +188,33 @@ Also: `import_candidates` returns `sizeBytes` (the renderer has no fs).
 - The strings panel refresh on `program_changed` is unit-tested but not driven by an edit in the autotest. The ProjectLocked message in the UI was not looked at (the mock has `MOCK_LOCKED=1` for that); only the sidecar side is tested. External-reference rows were rendered on the mock only. The default-Fast rule above 20 MB was checked on the mock and in `npm test`, not with a real 20 MB file.
 - CSP: not minimised; `blob:` for workers is kept as Monaco's fallback and was not shown to be needed. No packaged build exists, so nothing was checked outside `electron-vite build` + `electron .`.
 - No change to the benchmarks or `timings.json`.
+
+## Round 5: row 7, data type manager
+Branch `claude/ghidrette-data-type-manager-c9a23c`, cut from `main` (the row-6 branch `app-shell-restructure` is already merged there). Not merged.
+
+**What works** (protocol.md "Data types", protocol.ts, mock, pytest, autotest all updated):
+- 9 new RPCs: `dt_sources`, `dt_children` (one category level, lazy), `get_data_type`, `create_data_type` (struct/union/enum/typedef/pointer/category), `delete_data_type`, `rename_data_type`, `edit_struct` (add/insert/set/delete/clear/move/resize/pack), `edit_enum` (set/rename/remove/resize), `create_struct_from_data` (struct from the data items at a listing range, applied in the same transaction). `list_data_types` gained `kind` and `source`. Applying a type to an address reuses `define_data`.
+- Every edit is one Ghidra transaction (one undo step, label `Edit <name>: <op>`); failures roll back and leave nothing on the undo stack. Verified by undoing step by step in pytest and in the autotest.
+- UI: Types button / View > Data Type Manager (Cmd+Shift+T) opens a panel over the panes: program + built-in tree with filter (flat `list_data_types` search), struct/union editor (inline type/name/comment cells, add/insert dialogs with type autocomplete, delete, clear to undefined, move up/down for packed/union, resize, pack + packing value, hide-undefined), enum editor, create/rename/delete dialogs, "Apply at address…". Edit > Create Structure from Data… uses the listing cursor row + a length.
+- Listing and decompiler refresh through `program_changed` (`type`, ranges null). The decompile cache is still cleared **whole** on `type`; a pytest (`test_apply_listing_decompiler_cache_undo_redo_persist`) and a mock test pin it (cached=false after any struct edit, true again on the next decompile). Not improved: decompiler output embeds layouts of types it never names, so per-function tracking would need the referenced-type set per entry.
+- Tests: `npm test` 24 pass (new: `dt.test.mjs` tree logic, `mockdt.test.mjs` the mock speaking the protocol), `npm run typecheck` clean, pytest 31 pass (`test_datatypes.py`: 5 tests, 24 s each analysis copy), autotest passes on mock and on the real sidecar (`/bin/ls`, fresh projects dir) including `AUTOTEST_PHASE=2` (struct, applied data, struct-from-data and the decompiler's use of the type survive save + reopen). The autotest drives the UI: create struct, add fields (dialog), rename inline, resize, fill undefined bytes via the inline type cell, apply from the editor, see it in the listing, set a parameter to `AutotestStruct *` via Edit Function Signature and see it in the decompiler, undo all 8 steps, redo all 8 through the Edit menu, create a struct from data (undo/redo), save.
+
+**Skipped**
+- "Auto create structure" from a decompiler variable (FillOutStructureHelper): not started.
+- Opening `.gdt` archives and attached-archive browsing (optional): only the source archive name of a type is shown (`archive`), built-ins are read-only.
+- Not editable: typedef targets, function definitions, categories (no rename/move), bit-field components (shown, refused). Unpacked-struct reorder is refused on purpose (see below). No multi-select in the struct table or tree. Struct editing has no per-field alignment/padding UI.
+- The mock models structs more simply than Ghidra (no alignment: packing only drops filler and enables `move`).
+- Not looked at by a person beyond one mock screenshot; no keyboard-only pass over the panel.
+
+**Ghidra API gotchas (12.3)**
+- `getComponents()` of an unpacked struct includes one 1-byte `undefined` filler component per free byte; `getDefinedComponents()` does not. A 4 KB empty struct is 4096 rows.
+- Unpacked: `delete(ordinal)` removes the component and **shifts later fields up** (struct shrinks); `clearComponent` is the one that keeps size and leaves filler. `replace` with a bigger type eats following filler (IllegalArgumentException if short), a smaller one leaves filler behind. Reorder has no meaning there: offsets are fixed, so `move` works only on packed structs/unions.
+- `EnumDB` has no `setLength`; resizing means `dtm.replaceDataType(old, copy)`.
+- `DataTypeManager.remove(dt)` takes one argument here (older docs show a monitor). `Category.removeEmptyCategory(name, monitor)` still takes one.
+- `dtm.resolve(..., DEFAULT_HANDLER)` of a same-named different type silently makes `Name.conflict`: create checks first and uses KEEP_HANDLER.
+- An empty struct reports `getLength()` 1; use `isNotYetDefined()` to show 0. `getSourceArchive()` is never null: the program's own archive has type PROGRAM, only FILE/PROJECT are foreign.
+- Pointers and arrays are real types in the program's root category (`/S *`, `/char[8]`); pointer creation is idempotent.
+- Type events are `ProgramChangeRecord`s with no address: ranges are always null, so every type edit refreshes the whole listing.
+- `InvalidNameException` is not covered by the old `INVALID_JAVA` list (added). A struct containing itself by value fails with an IllegalArgumentException ("has ... within it").
+- Observed, not investigated (existing `clear_code`): `clear_code` at the Mach-O header (0x100000028, 8 bytes) also removed instructions of a function at 0x100000812 on `/bin/ls`. The new tests avoid `clear_code`.
+- Test timing: after an edit `program_changed` makes the listing re-jump to its old top row about 100 ms later; a navigation fired in that window is lost (the autotest settles and retries).
