@@ -25,7 +25,7 @@ One bar for jumping, searching and actions. Empty, it lists ranked leads (entry 
 ![Command bar with ranked leads](screenshots/command-bar.png)
 
 ### Read: function list, binary map, listing, decompiler
-The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and toggle its layers with **R** (renamed functions) and **C** (coverage). The listing shows function headers, comments, `XREF[n]` annotations (click to follow) and folded structures; the decompiler follows the cursor and opens one tab per function. `X` on a listing row or decompiler token opens its references in the panel under the function list (screenshot at the top of this page).
+The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, and toggle its layers with **R** (renamed functions) and **C** (coverage); hovering a toggle says what its colours mean. The listing shows function headers, comments, `XREF[n]` annotations (click to follow) and folded structures; the decompiler follows the cursor and opens one tab per function. `X` on a listing row or decompiler token opens its references in the panel under the function list (screenshot at the top of this page).
 
 ### Control-flow graph (`Space`)
 `Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are blue (true), orange (false) and grey (jump). A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
@@ -41,7 +41,7 @@ View > Defined Strings (`Cmd+Shift+E`) lists strings with **Used by** (grouped p
 In the listing: `L` rename, `;` comment, `F` create function, `T` define data, `C` clear code. In the decompiler: `L` rename variable/function, `Cmd+L` retype, `;` comment; Edit > Edit Function Signature… and Auto Create Structure work on the cursor. `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Cmd+S` saves. View > Changes (`Cmd+Shift+H`) lists every edit; View > Data Type Manager (`Cmd+Shift+T`) creates and edits structs, unions, enums and typedefs.
 
 ### Coverage runs
-File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` or `0xADDR` per line (`#` comments allowed). Load several runs, then in View > Coverage pick run **A** and run **B**: the listing, decompiler and binary map tint code reached by both runs, only A (orange, `A` in the gutter) or only B (blue, `B`), and the tab lists the functions reached by only one run.
+File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` or `0xADDR` per line (`#` comments allowed). Load several runs: the first becomes run **A**, the second run **B**, so loading two shows their difference at once (View > Coverage picks other runs): the listing, decompiler and binary map tint code reached by both runs, only A (orange, `A` in the gutter) or only B (blue, `B`), and the tab lists the functions reached by only one run.
 
 ![Two coverage runs compared in listing and decompiler](screenshots/coverage.png)
 

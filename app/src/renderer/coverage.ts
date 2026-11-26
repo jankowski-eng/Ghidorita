@@ -74,7 +74,8 @@ export class CoverageRuns {
   private next = 1;
   add(name: string, cov: Coverage): Run {
     const r = { id: this.next++, name, cov };
-    this.runs.push(r); this.a = r.id; // the run just loaded is the one shown
+    this.runs.push(r);
+    if (this.a === null) this.a = r.id; else if (this.b === null) this.b = r.id; else this.a = r.id; // first run A, second B (the comparison shows at once), later ones replace A
     return r;
   }
   get(id: number | null): Run | undefined { return id === null ? undefined : this.runs.find((r) => r.id === id); }

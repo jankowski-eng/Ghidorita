@@ -15,7 +15,7 @@ export function coverageActions(s: Session) {
       const { ranges } = await current.api.coverage.load({ path });
       if (s.program() !== current) return;
       const run = coverage.add(path.split(/[\\/]/).pop() || path, new Coverage(ranges));
-      s.flash(`Coverage "${run.name}" loaded: ${run.cov.size} range${run.cov.size === 1 ? "" : "s"} (green bar in the listing; Coverage window to name and compare runs)`);
+      s.flash(`Coverage "${run.name}" loaded: ${run.cov.size} range${run.cov.size === 1 ? "" : "s"}${coverage.b === run.id ? ` as run B, compared with A (orange only A, blue only B, green both)` : " (green bar in the listing)"}; Coverage window to name and compare runs`);
       changed();
     } catch (e) { s.fail(e); }
   };

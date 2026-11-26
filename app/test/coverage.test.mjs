@@ -28,7 +28,10 @@ test("runs: one run tints green, two runs show only-A, only-B and both", () => {
   assert.equal(r.a, a.id);
   assert.equal(r.mark("0x10", 1), " cov");
   const b = r.add("run b", cov(["0x18", "0x27"]));
-  r.select("b", b.id); r.select("a", a.id);
+  assert.deepEqual([r.a, r.b], [a.id, b.id]); // the second run becomes B, so the comparison shows at once
+  const c = r.add("run c", cov(["0x0", "0x1"]));
+  assert.deepEqual([r.a, r.b], [c.id, b.id]); // later runs replace A
+  r.remove(c.id); r.select("a", a.id);
   assert.equal(r.mark("0x10", 1), " cov-a");
   assert.equal(r.mark("0x1c", 1), " cov");
   assert.equal(r.mark("0x24", 1), " cov-b");

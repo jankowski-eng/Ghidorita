@@ -31,8 +31,8 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
   }, [fills, all, h, pos, map]);
   const at = (e: React.PointerEvent) => Math.max(0, Math.min(1, (e.clientY - box.current!.getBoundingClientRect().top) / box.current!.clientHeight)) * map.total;
   const go = (e: React.PointerEvent) => onGo(map.addr(at(e)));
-  const toggle = (k: "renamed" | "coverage", label: string, off?: boolean) => (
-    <button aria-label={`${label} layer`} title={`${label} layer`} aria-pressed={on[k] && !off} disabled={off} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>{label[0]}</button>
+  const toggle = (k: "renamed" | "coverage", label: string, tip: string, off?: boolean) => (
+    <button aria-label={`${label} layer`} title={`${label} layer (${on[k] && !off ? "shown" : off ? "load coverage to use it" : "hidden"}): ${tip}. Click to ${on[k] ? "hide" : "show"}.`} aria-pressed={on[k] && !off} disabled={off} onClick={() => setOn((o) => ({ ...o, [k]: !o[k] }))}>{label[0]}</button>
   );
   return (
     <div className="bmapcol">
@@ -44,7 +44,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
       <canvas ref={cv} />
       {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
     </div>
-    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed")}{toggle("coverage", "Coverage", !coverage.shown)}</div>
+    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed", "pink marks functions you named; blue is every function")}{toggle("coverage", "Coverage", "green = executed (in both runs when two are compared), orange = only run A, blue = only run B", !coverage.shown)}</div>
     </div>
   );
 }

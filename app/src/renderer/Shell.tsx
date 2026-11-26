@@ -17,8 +17,8 @@ import { useProgram, useSession, useViews } from "./store/session";
 /** The chrome around the panes: toolbar, search and go-to bars, bottom dock, status bar, data type manager. Each renders the stores and calls the features. */
 export function AppToolbar() {
   const s = useSession();
-  const hasMap = useProgram((p) => !!p.map), busy = useBusy();
-  return <Toolbar canCommand={hasMap} busy={busy} onCommand={() => s.views.dispatch({ type: "set", patch: { searchOpen: true } })}
+  const hasMap = useProgram((p) => !!p.map), busy = useBusy(), open = useViews((v) => v.searchOpen);
+  return <Toolbar canCommand={hasMap} busy={busy} open={open} onCommand={() => s.views.dispatch({ type: "set", patch: { searchOpen: true } })}
     onPick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(s, p); }} />;
 }
 
