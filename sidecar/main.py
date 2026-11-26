@@ -1677,6 +1677,7 @@ class Sidecar:
         }
 
     def _row_parts(self, cu):
+        # shortcut: one level (nested structs/arrays show as one component with their display value), at most ROW_PARTS_MAX; upgrade with a get_components RPC by path
         from ghidra.program.model.data import Array
         n = int(cu.getNumComponents())
         is_arr = isinstance(cu.getDataType(), Array)

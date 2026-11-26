@@ -11,7 +11,7 @@ const ROW_H = 16;
 const SCROLL_H = 10_000_000;
 // rows per fetch, prefetch margin in lines, max buffered rows. Round 8: 100/60 left 17% of frames of a 12k lines/s fling waiting for data
 // (SPIKE_REPORT round 2); a fling eats ~100 lines per frame, so the margin is now several frames of lookahead and a fetch refills several frames.
-const MAXBUF = 3000;
+const MAXBUF = 3000, FIRST = 100; // FIRST: rows of the fetch a jump waits for
 // BENCH=1 compares settings in one run through window.__tune = {batch, margin}
 const tune = () => ({ batch: 250, margin: 400, ...(window as any).__tune }) as { batch: number; margin: number };
 
@@ -59,7 +59,7 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
   const cache = useRef(new RunCache(4)).current;
   const b = useRef({
     rows: [] as ListingRow[], built: { lines: [], first: [], main: [] } as Built, unfolded: new Set<string>(), top: 0, atStart: false, atEnd: false,
-    busy: false, failed: false, gen: 0, view: 30, lastSet: -1, acc: 0, cur: "" as Address, dragging: false, pend: undefined as { r: Range[] | null } | undefined,
+    busy: false, failed: false, gen: 0, view: 30, lastSet: -1, acc: 0, cur: "" as Address, dragging: false, pend: undefined as { r: Range[] | null } | undefined, prefetch: undefined as ReturnType<typeof setTimeout> | undefined,
   });
   const st = b.current;
   const render = () => tick((n) => n + 1);
@@ -149,21 +149,27 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
     const { r } = st.pend;
     st.pend = undefined;
     const gen = st.gen;
+    const rows0 = st.rows;
+    let stale = false; // the buffer was replaced by a jump while we fetched: this result must not be applied
     st.busy = true;
     try {
       cache.invalidate(r);
-      const a = anchor(), rows0 = st.rows;
+      const a = anchor();
       if (r === null) { // no addresses (type edits): refetch from the top row; shortcut: rows above it are refetched when scrolled to, not now
         const rows = a ? await fetchRows(a.address, "forward") : [];
-        if (gen === st.gen && rows.length) { st.atStart = false; st.atEnd = rows.length < tune().batch; setRows(rows); st.top = Math.min(a!.off, lines().length - 1); setTopAddr(); render(); }
+        stale = gen !== st.gen || st.rows !== rows0;
+        if (!stale && rows.length) { st.atStart = false; st.atEnd = rows.length < tune().batch; setRows(rows); st.top = Math.min(a!.off, lines().length - 1); setTopAddr(); render(); }
       } else {
         const res = await spliceRows(rows0, r, (ad, c) => fetchRows(ad, "forward", c), st.atEnd);
-        if (gen === st.gen && st.rows === rows0 && res) { st.atEnd = res.atEnd; setRows(res.rows); restore(a); setTopAddr(); render(); }
+        stale = gen !== st.gen || st.rows !== rows0;
+        if (!stale && res) { st.atEnd = res.atEnd; setRows(res.rows); restore(a); setTopAddr(); render(); }
       }
     } catch (e) { st.failed = true; onError(e); }
     finally {
       if (gen === st.gen) st.busy = false;
-      else queue(r); // a jump replaced the buffer meanwhile (it may hold rows fetched before the edit): apply the change to the new rows too
+      // a jump replaced the buffer meanwhile (the new rows may have been fetched before the edit; and a refetch started from the old top must not
+      // undo the navigation): drop this result, apply the change to the new rows too
+      if (gen !== st.gen || stale) queue(r);
       ensure(); void drain();
     }
   };
@@ -188,21 +194,22 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
   const jump = async (address: Address, thumb: boolean) => {
     const gen = ++st.gen;
     st.busy = false; st.failed = false;
-    const settle = () => { st.top = Math.min(st.top, maxTop()); setTopAddr(); if (thumb) syncThumb(); render(); ensure(); void drain(); };
+    clearTimeout(st.prefetch);
+    // after a fetch the top-up prefetch waits a moment: a burst of jumps (scrollbar drag, typing a go-to) must not queue prefetches ahead of the next jump's fetch
+    const settle = (fetched = false) => { st.top = Math.min(st.top, maxTop()); setTopAddr(); if (thumb) syncThumb(); render(); if (fetched) st.prefetch = setTimeout(ensure, 40); else ensure(); void drain(); };
     const p = parseAddr(address);
     let k = p ? indexAt(st.rows, p) : -1;
     if (k >= 0) { st.top = st.built.first[k]; settle(); return; } // already buffered: no fetch
     const run = p && cache.take(p);
     if (run) { cache.put(active()); load(run); k = indexAt(st.rows, p!); st.top = st.built.first[k]; settle(); return; } // a run shown earlier
     try {
-      const rows = await fetchRows(address, "forward");
+      const rows = await fetchRows(address, "forward", FIRST); // small first fetch: the view shows after one cheap round trip, the prefetch tops up
       if (gen !== st.gen) return;
       cache.put(active());
-      st.atStart = false; st.atEnd = rows.length < tune().batch;
+      st.atStart = false; st.atEnd = rows.length < FIRST;
       setRows(rows);
       st.top = 0;
-      settle();
-      void drain();
+      settle(true);
     } catch (e) { onError(e); }
   };
 
