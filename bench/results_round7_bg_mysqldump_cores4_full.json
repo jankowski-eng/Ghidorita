@@ -1,0 +1,118 @@
+{
+ "binary": "/opt/homebrew/opt/mysql-client/bin/mysqldump",
+ "size_mb": 6.95,
+ "profile": "full",
+ "env": {
+  "SIDECAR_ANALYSIS_CORES": "4"
+ },
+ "open_reply_s": 2.9,
+ "open_result": {
+  "programId": "388cee4d8760c50fc0d719f3870cde56cc678a69e9415ad02185dd4fd04821b7",
+  "name": "mysqldump",
+  "persisted": false,
+  "analysis": {
+   "state": "running",
+   "analysis": "partial",
+   "profile": "full",
+   "analyzer": "",
+   "done": 0,
+   "pct": -1
+  }
+ },
+ "ranges": 2,
+ "total_bytes": 6954352,
+ "first_listing_rows_s": 3.08,
+ "first_rows_ok": true,
+ "functions_at_open": 325,
+ "first_decompile_s": 6.4,
+ "first_decompile_ok": true,
+ "analysis_done_s": 37.74,
+ "analysis_final": {
+  "state": "done",
+  "analysis": "done",
+  "profile": "full",
+  "analyzer": "",
+  "done": 13,
+  "pct": 100
+ },
+ "listing_during_analysis": {
+  "n": 263,
+  "median_ms": 9.54,
+  "p95_ms": 50.64,
+  "max_ms": 369.73
+ },
+ "decompile_during_analysis": {
+  "n": 3775,
+  "median_ms": 2.12,
+  "p95_ms": 4.83,
+  "max_ms": 2954.92,
+  "failed": 0
+ },
+ "functions_timeline": [
+  [
+   3.1,
+   325
+  ],
+  [
+   6.46,
+   1245
+  ],
+  [
+   11.6,
+   1366
+  ],
+  [
+   16.71,
+   1891
+  ],
+  [
+   22.28,
+   1891
+  ],
+  [
+   27.46,
+   1891
+  ],
+  [
+   32.52,
+   1891
+  ],
+  [
+   37.63,
+   1891
+  ]
+ ],
+ "program_changed_events": 23,
+ "analysis_state_events": 91,
+ "functions_at_end": 1891,
+ "listing_after_analysis": {
+  "n": 100,
+  "median_ms": 3.45,
+  "p95_ms": 13.34,
+  "max_ms": 13.9
+ },
+ "rss_peak_jvm_mb": 1026,
+ "rss_peak_native_mb": 524,
+ "rss_samples_every_2s": [
+  [
+   0.0,
+   229,
+   0
+  ],
+  [
+   10.3,
+   884,
+   243
+  ],
+  [
+   20.8,
+   848,
+   245
+  ],
+  [
+   31.2,
+   990,
+   448
+  ]
+ ]
+}

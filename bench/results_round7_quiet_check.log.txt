@@ -1,0 +1,10 @@
+== headless mysqldump full1 09:32:50 load: 8.34 9.05 8.27 foreign java/sidecar/decompile procs: 6 total decompile: 
+== ghidrette-bg mysqldump full 09:33:38 load: 9.54 9.28 8.40 foreign java/sidecar/decompile procs: 2 total decompile: 
+== headless mysqldump full2 09:34:25 load: 9.53 9.29 8.45 foreign java/sidecar/decompile procs: 12 total decompile: 
+== ghidrette-bg mysqldump full 09:35:11 load: 9.54 9.34 8.51 foreign java/sidecar/decompile procs: 5 total decompile: 
+== headless mysqldump fast 09:36:12 load: 11.86 10.27 8.92 foreign java/sidecar/decompile procs: 2 total decompile: 
+== ghidrette-bg mysqldump fast 09:36:43 load: 11.01 10.22 8.95 foreign java/sidecar/decompile procs: 3 total decompile: 
+== ghidrette-bg mysqldump_cores4 full 09:37:14 load: 9.72 9.99 8.91 foreign java/sidecar/decompile procs: 0 total decompile: 
+== headless llvm fast 09:37:56 load: 9.88 10.04 8.99 foreign java/sidecar/decompile procs: 0 total decompile: 
+== ghidrette-bg llvm fast 09:45:20 load: 8.73 8.84 8.64 foreign java/sidecar/decompile procs: 6 total decompile: 
+== headless llvm full 10:26:46 load: 10.33 31.88 27.25 foreign java/sidecar/decompile procs: 2 total decompile: 

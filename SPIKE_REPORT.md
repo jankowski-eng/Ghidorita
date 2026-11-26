@@ -405,6 +405,68 @@ Within noise. I did **not** measure decompile latency: `_tokens` now calls `getH
 
 **Rebased onto `main` 6804792** (round 9 hardening, coverage, command bar, Java scan helper). Conflicts: `list_functions` (kept main's `source` field and `load_coverage`, all-spaces body), `protocol.md`, mock and autotest imports, the report. Fixes the merge needed: the in-process harness now builds `GhidretteScans` before the JVM starts; `coverage.ts` threw on qualified (overlay) listing rows (`BigInt("OVL1::1000")`), now such rows are never covered (`shortcut:` comment, test); the autotest still looked for the aria-label `Symbol name`, which main's command bar commit renamed to `Symbol or action` (the autotest failed at "search panel" on untouched `main` too). After the rebase: pytest 64 passed, 3 skipped, 2 failed (before the harness fix: `test_xrefs_symbols_strings_search`, fixed; `test_snapshot_survives_sigkill` fails on `main` too), `npm test` 52 pass, autotest mock and real `/bin/ls` pass, `AUTOTEST_PHASE=2` passes. Coverage files stay default-space only (`load_coverage` formats with `hx`).
 
+## Round 7: first open as fast as Ghidra itself, analysis in the background
+
+Branch `round7/background-analysis`, rebased onto `main` 3b2a908 (rounds 6, 8, 9). Not merged, not pushed. **Not finished:** the llvm-exegesis full-profile runs were not measured, and the one llvm-exegesis comparison that was measured misses the "within ~10%" goal (65% slower, cause not isolated). Details under "Not done".
+
+### Step 0: the baseline found a 2x bug
+`analyzeHeadless` (same Ghidra build, `GHIDRA_HEADLESS_MAXMEM=16384m` = the sidecar's default `-Xmx`; the script's own default is 2 GB and `-XX:ParallelGCThreads=2`) against Ghidrette's `open_binary` as it was on `main`, `mysqldump` (6.95 MB), taken while the machine was quiet (`bench/results_round7_before_*`):
+
+| mysqldump | analyzeHeadless | Ghidrette before | 
+|---|---|---|
+| full | 36.9 s (JVM 1.0 GB, native 475 MB) | 76.9 s (JVM 1.9 GB, native 432 MB) |
+| fast (3 analyzers off) | 28.7 s | 66.8 s |
+
+Ghidra's per-analyzer times (stderr logs) show the whole gap in two lines: `Create Address Tables` 18.8 s (+19.8 s "One Time") against 0.29 s (+0.39 s); `Variadic Function Signature Override` and `Stack` were 10-80% slower, everything else equal. Cause: `PyGhidraTaskMonitor` calls into Python on **every** `setProgress`/`setMessage`, and that analyzer reports progress per candidate; `analyzeHeadless` passes `TaskMonitor.DUMMY`. The other suspects were not the cause or not needed: the one big "Analysis" transaction is what `analyzeHeadless` does too (`HeadlessAnalyzer.analyzeProgram`), same call sequence (`initializeOptions`, `reAnalyzeAll(null)`, `startAnalysis`), same heap in the comparison. **Fix:** the monitor is Ghidra's own `BasicTaskMonitor` (package-private, built by reflection; it stores message/progress/max and cancels, no callbacks) and a Python thread reads it every 50 ms (`domains/analysis.py Poller`). Side effect: the analyzer name is only seen when a poll lands between an analyzer's `setMessage(name)` and its own next message, so `done` undercounts fast analyzers (documented in `protocol.ts`).
+
+### Step 1: what Ghidra does (read in the checkout, not changed)
+- **How the GUI runs analysis:** `AutoAnalysisManager.startBackgroundAnalysis` schedules an `AnalysisBackgroundCommand` through the tool; `BackgroundCommandTask.run` opens ONE transaction `"Auto Analysis"` on the program for the whole run, `startAnalysis` loops over the priority queue on that thread, `flushPrivateEventQueue` after each task. `scheduleOneTimeAnalysis(analyzer, set)` is the "one shot" command; I use it for fast to full (only the 3 skipped analyzers over the loaded memory).
+- **Are reads on R safe while analysis writes?** Yes. Database access is guarded per operation by the program lock (`ghidra.util.Lock` is a `ReentrantReadWriteLock`), not by the transaction; the analysis holds the transaction open, not the lock. Measured: listing reads median 9.5-10.9 ms, decompiles median 2-3 ms with 0 failures on `mysqldump` while it analyzed (table below).
+- **Undo and edits:** `DomainObjectTransactionManager.startTransaction` does not wait when a transaction is open, it **joins** it (`transaction.addEntry`). So an edit during analysis would be part of the analysis transaction: not undoable alone, and an edit that rolls back (`endTransaction(commit=false)`) marks the whole transaction terminated and aborts the analysis. `canUndo()` is false while a transaction is open, and the GUI disables edits while a task runs. **Decision: the same.** Edits, `undo` and `redo` fail `Busy` ("analysis running"); the analysis never lands on the undo stack (`clearUndo` after it). Checked in `Session.edit()` after argument validation, so a malformed edit still reports InvalidArgument first (`test_analysis.py` uses a valid request).
+- **Events:** `DomainObjectChangeSupport` queues change records and delivers them in batches on a timer that restarts when new records arrive. I did **not** count Ghidra's `DomainObjectChangedEvent`s per analysis. What the sidecar sees: with the listener attached during analysis, parsing every record from Python would be millions of JPype calls, so `Events.bulk` skips parsing, announces "everything changed" and emits `program_changed` at most about once per second (17-34 per 28-56 s `mysqldump` run, 490 in the 12 min llvm-exegesis fast run).
+
+### Design (protocol.md "Analysis", protocol.ts, mock first)
+`open_binary` gets `analysis: "background" | "blocking"` (default background) and returns `analysis: AnalysisState` right after the import is saved and published; new `analysis_status`, `start_analysis {profile?}`, `cancel_analysis`, notification `analysis_state`. `programs.json` records `analysis: none|partial|done` and `analysisProfile`; list_programs shows both. Persistence key and `test_keys.py` are unchanged; fast to full keeps the `programId`. `save`, `close_program` and shutdown cancel the analysis first (the analysis thread saves what it found, never waits for R), leaving `partial`; opening a `partial`/`none` program resumes it. Resume = Ghidra's re-analyze command over everything (finished regions are cheap, not free; the analyzer queue is not persisted). Blocking mode keeps the old semantics (progress events, `cancel_open` discards everything) on the same engine.
+
+### After (`bench/bench_background.py`, `bench/bench_headless.py`; results `bench/results_round7_*`)
+Every Ghidrette run includes the benchmark's own load: a random `listing_rows` every 100 ms and decompiles back to back (so the totals below are conservative against `analyzeHeadless`, which has no such traffic). Pairs ran back to back; the load snapshot before each run is in `results_round7_quiet_check.log.txt`. **The machine was not quiet** (other sessions' sidecars, Electron apps and benchmarks, load average 8-12, up to 32 after a gap; an orphaned native `decompile` of mine used one core until it was killed during the second pair). Treat absolute times as noisy.
+
+| | analyzeHeadless | Ghidrette background | first rows / first decompile | listing during analysis (median / p95 / max) | peak JVM / native |
+|---|---|---|---|---|---|
+| mysqldump full, run 1 | 47.4 s | 43.8 s | 3.5 s / 7.7 s | 10.9 / 62.7 / 365 ms | 1.4 GB / 719 MB |
+| mysqldump full, run 2 | 45.3 s | 55.8 s | 4.3 s / 8.5 s | 10.7 / 62.7 / 288 ms | 1.2 GB / 714 MB |
+| mysqldump fast | 31.0 s | 27.8 s | 3.4 s / 7.3 s | 10.1 / 81.8 / 193 ms | 1.3 GB / 509 MB |
+| mysqldump full, 4 cores | | 37.7 s | 3.1 s / 6.4 s | 9.5 / 50.6 / 370 ms | 1.0 GB / 524 MB |
+| llvm-exegesis fast (66.7 MB) | 444.8 s (JVM 6.5 GB, native 26 MB) | **735.4 s** | 13.7 s / 15.1 s | 22.7 / **143.7** / **16,752** ms | 1.8 GB / 145 MB |
+
+Decompile during analysis (same runs): `mysqldump` median 2-3 ms, p95 5-10 ms, max 3-6 s, 0 failed of 2.5-3.8k; llvm-exegesis fast median 2.7 ms, p95 12.8 ms, max 9.4 s, 53 of 108,574 failed (the benchmark's 10 s timeout). Listing after the analysis (same box): median 4.5-6 ms, p95 14-17 ms. Function list while it runs: llvm-exegesis 440 at open, 48,833 at the end.
+
+Against the goals:
+- *Usable within ~10 s of import:* `mysqldump` yes (first rows 3.5 s after the request). llvm-exegesis: no, 13.7 s, but 13.5 s of that is the import itself (`open_binary` replies after import and save); the first decompile follows 1.4 s later.
+- *Total analysis within ~10% of analyzeHeadless:* `mysqldump` yes on the averages (full 49.8 s against 46.4 s, +7%; fast 27.8 against 31.0), single noisy runs, with benchmark traffic running. **llvm-exegesis fast: no, +65% (735 s against 445 s).** Not isolated: the benchmark's decompile traffic competes for the cores and the program lock (108k decompiles), Ghidra's own total task time was 2457 s inside 713 s wall (parallel analyzers), and the bulk event path and the 490 refreshes were not separated out. A `--no-load` run (added to the script) was not done.
+- *Listing p95 under 100 ms while analysis runs:* `mysqldump` yes (51-82 ms). llvm-exegesis no (143.7 ms p95; one 16.8 s stall, cause not found).
+- *Decompiler memory cap:* `SIDECAR_ANALYSIS_CORES` sets `-Dcpu.core.limit` (Ghidra's thread pools, hence the native decompiler processes). One `mysqldump` run with 4 cores: 37.7 s, native peak 524 MB, against 43.8/55.8 s and 719/714 MB uncapped: suggestive, a single run, not a result. Not measured on llvm-exegesis; no default is set.
+
+### Tested
+- `sidecar/test_analysis.py` (5 tests, /bin/ls and a raw blob): background open replies while the analysis runs and reads work meanwhile; edit, undo, redo and a second `start_analysis` are Busy meanwhile; `analysis_state` events, function count grows, record becomes `done`; edits work again afterwards and undo touches only the edit; cancel leaves `partial`, an edit after cancel is undoable alone; a new sidecar resumes a `partial` program and a third finds it idle/done; `save` cancels the analysis; `close_program` during analysis leaves `partial`; shutdown during analysis exits within 15 s, leaves `partial` in `programs.json` and releases the project lock; fast then full keeps the `programId` and the project has one program; raw blob in background mode.
+- Existing suite after the rebase: 69 passed, 1 failed once (`test_edits.py::test_get_comments_and_create_label`), passes alone and in its file (re-run twice); `test_big.py`, `test_ui.py` not run. The older tests ask for `analysis: "blocking"` (`testlib.Client` default; `test_smoke.py` explicitly).
+- `npm test` 57/57 (new `analysis.test.mjs`: label, action, refresh policy while running). The autotest passes on the mock and on the real sidecar (`/bin/ls`): background open (163 ms), listing rows and status bar indicator while running, Cancel, Resume, function list 85 to 136, "Run full analysis" offered on the fast program. Run before and after the rebase.
+- Not tested: llvm-exegesis through the UI; the program browser's Resume / Run full analysis buttons (code only, no autotest click); a visual check of the status bar (no screenshot taken).
+
+### Found, not fixed
+- The llvm-exegesis gap and the 16.8 s listing stall above.
+- Ctrl/Cmd+S during analysis cancels the analysis (the brief asks for save to cancel; a plain "save later" would be friendlier).
+- A crash during analysis loses that run's work (the transaction is in memory); the record says `partial` and the next open starts again. No periodic checkpoint.
+- Resume redoes every analyzer; fast to full only runs three analyzers, but that path was only tested on /bin/ls.
+- The client refetches the whole function list about once a second while analysis runs (48,833 entries on llvm-exegesis); upgrade: a delta.
+- `BasicTaskMonitor` is built by reflection and its fields are not volatile (Ghidra's own `TaskRunner` uses it the same way).
+- `done` in `analysis_state` undercounts (poll), `pct` is the current analyzer's only.
+- Validation errors win over Busy for edits.
+- `bench_background.py` and `bench_headless.py` do not use main's "wait for a quiet machine" check, the machine never became quiet for it.
+
+### Not done
+llvm-exegesis full: neither `analyzeHeadless` (killed after ~26 min on request) nor Ghidrette background; the llvm-exegesis `--no-load` run; any llvm-exegesis memory-cap measurement; repeats beyond two for `mysqldump`; the "Found" items above.
+
 ## Round 10: renderer architecture (no behavior change)
 
 Branch `claude/ghidrette-renderer-architecture-v2`, on `main` 36ea9da. Goal: mirror `sidecar/ARCHITECTURE.md` in `app/src/renderer/`; no feature, protocol or visual change. Layout and rules: [app/ARCHITECTURE.md](app/ARCHITECTURE.md).

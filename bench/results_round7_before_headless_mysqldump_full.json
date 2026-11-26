@@ -1,0 +1,33 @@
+{
+ "tool": "analyzeHeadless",
+ "binary": "/opt/homebrew/opt/mysql-client/bin/mysqldump",
+ "size_mb": 6.95,
+ "fast": false,
+ "exit": 0,
+ "wall_s": 36.9,
+ "peak_jvm_mb": 1020,
+ "peak_native_decompile_mb": 475,
+ "peak_total_mb": 1399,
+ "samples": [
+  [
+   0.0,
+   0,
+   0
+  ],
+  [
+   10.3,
+   780,
+   81
+  ],
+  [
+   20.5,
+   922,
+   138
+  ],
+  [
+   30.8,
+   1019,
+   96
+  ]
+ ]
+}
