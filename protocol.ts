@@ -88,10 +88,15 @@ export interface Methods {
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
   // ---- reads ----
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
+  // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
+  list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
+  xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
   xrefs_from: { params: { address: Address }; result: XrefFrom[] };
-  list_strings: { params: { offset?: number; limit?: number; minLength?: number }; result: { total: number; items: StringItem[] } };
+  list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string }; result: { total: number; items: StringItem[] } };
+  search_memory: { params: SearchMemoryParams; result: { items: MemoryHit[]; next: Address | null } };
+  cancel_search: { params: { id: number }; result: { cancelled: boolean } };
   list_data_types: { params: { query: string; limit?: number }; result: DataTypeHit[] };
   undo_state: { params: {}; result: UndoState };
   // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
@@ -138,10 +143,21 @@ export interface ProgramEntry {
 }
 
 export type CommentKind = "eol" | "pre" | "post" | "plate" | "repeatable";
-export interface SymbolHit { name: string; address: Address; kind: "function" | "label" | "data" | "external" | "other" }
-export interface XrefTo { from: Address; type: string; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; function: name of function containing `from`
-export interface XrefFrom { to: Address; type: string }
-export interface StringItem { address: Address; value: string; length: number }
+export type SymbolKind = "function" | "label" | "data" | "external" | "variable" | "other";
+export type SymbolSource = "user" | "analysis" | "imported" | "default" | "other";
+export type SymbolSort = "name" | "address" | "kind" | "namespace" | "source";
+export interface SymbolHit { name: string; address: Address; kind: SymbolKind }
+export interface SymbolRow { name: string; address: Address | null; kind: SymbolKind; namespace: string; source: SymbolSource } // address null: external or not in the default memory space (not navigable)
+/** Page of the symbol table in `sort` order (default address ascending), after the name substring `query` (case-insensitive, `*`/`?` wildcards) and `kinds` (any of; empty = all). limit <= 1000. */
+export interface ListSymbolsParams { offset?: number; limit?: number; query?: string; kinds?: SymbolKind[]; sort?: SymbolSort; desc?: boolean }
+export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other";
+export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
+/** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */
+export interface XrefFrom { to: Address | null; type: string; kind: XrefKind; target: "memory" | "stack" | "register" | "external"; label?: string }
+export interface StringItem { address: Address; value: string; length: number } // value cut at 1000 UTF-16 units; length = bytes of the defined string
+/** kind "bytes": hex with wildcards ("48 8b ?? 24"); "text": a string (encoding ascii | utf16le | utf16be, caseSensitive default true). start = where to continue (a previous `next`); limit default 1000, max 10000. */
+export interface SearchMemoryParams { pattern: string; kind?: "bytes" | "text"; encoding?: "ascii" | "utf16le" | "utf16be"; caseSensitive?: boolean; start?: Address; limit?: number }
+export interface MemoryHit { address: Address; length: number; bytes: string; function?: string } // bytes: hex of the match, at most 16 bytes
 export interface DataTypeHit { name: string; path: string; size: number } // size -1 = dynamic/unsized
 export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty = unsaved changes since open or last save
 

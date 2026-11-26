@@ -2,9 +2,10 @@
 """Ghidra sidecar: JSON-RPC 2.0 over WebSocket (see ../protocol.md for the contract and the threading rules).
 
 Threads: the asyncio loop (dispatch, cancel_*), R (all program reads and ALL writes), O (one open_binary at a time:
-import + analysis + save), and N decompiler workers sharing one queue, each owning a DecompInterface.
+import + analysis + save), N decompiler workers sharing one queue, each owning a DecompInterface, and M scan workers
+(S) sharing one queue for the slow reads that must never delay listing fetches: symbol table, strings, memory search.
 """
-import asyncio, concurrent.futures, datetime, hashlib, json, os, queue, re, signal, sys, threading, time
+import asyncio, concurrent.futures, contextlib, datetime, hashlib, json, os, queue, re, signal, sys, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -60,6 +61,21 @@ class Job:
         self.cancelled, self.mon, self.epoch = False, None, epoch
 
 
+class Scan:
+    """A slow read (list_symbols, list_strings, search_*, search_memory): created by the loop thread, run by a scan worker, cancellable by request id."""
+    def __init__(self, epoch):
+        self.cancelled, self.mon, self.epoch = False, None, epoch
+
+    def cancel(self):
+        self.cancelled = True
+        if self.mon is not None:
+            self.mon.cancel()
+
+    def check(self):
+        if self.cancelled:
+            raise RpcError(CANCELLED, "cancelled")
+
+
 class Opening:
     """The open_binary in progress. cancel() is called from the loop thread, mon is swapped by thread O."""
     def __init__(self):
@@ -87,6 +103,15 @@ class Opening:
     def check(self):
         if self.cancelled:
             raise RpcError(CANCELLED, "open cancelled")
+
+
+STRING_VALUE_CAP = 1000
+
+
+class _SymSnap:
+    """list_symbols default view: the live by-address iterator and the rows pulled from it so far."""
+    def __init__(self, it, total):
+        self.it, self.total, self.syms, self.lock = it, total, [], threading.Lock()
 
 
 class Worker:
@@ -117,11 +142,18 @@ class Sidecar:
         self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
         self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
         self.sd_lock, self.sd_started = threading.Lock(), False
-        self.strings = None          # list_strings scan cache, reset on any program change
+        self.sjobs = queue.Queue()   # scan workers (thread S): symbol table, strings, memory search; one shared queue
+        self.sj = {}                 # request id -> Scan, loop thread only
+        self.active = set()          # Scans currently running; pool_lock
+        self.snaps = OrderedDict()   # (kind, ...) -> snapshot of a slow read, LRU; snap_lock. Dropped on any program change.
+        self.snap_ver = 0
+        self.snap_lock = threading.Lock()
         self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
         self.plock = threading.Lock()
         self.tl = threading.local()
         threading.Thread(target=self._worker, args=(self.jobs,), daemon=True).start()
+        for _ in range(max(1, int(os.environ.get("SIDECAR_SCAN_WORKERS", "2")))):
+            threading.Thread(target=self._worker, args=(self.sjobs,), daemon=True).start()
         for _ in range(max(1, int(os.environ.get("SIDECAR_DECOMP_WORKERS", "2")))):
             w = Worker()
             self.workers.append(w)
@@ -378,6 +410,8 @@ class Sidecar:
                     j.cancelled = True
                     if j.mon is not None:
                         j.mon.cancel()
+            for sc in list(self.active):
+                sc.cancel()
         if prog is not None and lst is not None:
             try:
                 prog.removeListener(lst)
@@ -385,13 +419,13 @@ class Sidecar:
                 pass
         self.listener = None
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and any(w.busy or w.decomp is not None for w in self.workers):
+        while time.monotonic() < deadline and (self.active or any(w.busy or w.decomp is not None for w in self.workers)):
             time.sleep(0.02)
-        stuck = any(w.busy or w.decomp is not None for w in self.workers)
+        stuck = bool(self.active) or any(w.busy or w.decomp is not None for w in self.workers)
         if stuck:
-            log("decompiler worker still busy after 10 s: leaking the old program instead of releasing it under a live decompiler")
+            log("decompiler or scan worker still busy after 10 s: leaking the old program instead of releasing it under a live reader")
         self.cache_clear()
-        self.strings = None
+        self.snap_clear()
         with self.plock:
             self.pending.update(ranges=[], kinds=set(), broad=False)
         self.results = self.consumer = None
@@ -729,7 +763,7 @@ class Sidecar:
         self._record(kinds, None if broad else ranges)
 
     def _record(self, kinds, ranges):
-        self.strings = None
+        self.snap_clear()
         # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
         # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
         if ranges is None or not kinds <= RANGE_ONLY_KINDS:
@@ -795,12 +829,52 @@ class Sidecar:
         return {"name": str(f.getName()), "entry": hx(f.getEntryPoint().getOffset()),
                 "size": int(f.getBody().getNumAddresses()), "signature": str(f.getSignature().getPrototypeString())}
 
+    # ---- slow reads: scan workers (thread S). They never run on R, so a long scan cannot delay listing fetches. ----
+    @contextlib.contextmanager
+    def scanning(self, scan):
+        with self.pool_lock:
+            prog = self.program
+            if scan.cancelled or scan.epoch != self.epoch:  # cancelled while queued, or the program was closed/swapped meanwhile
+                raise RpcError(CANCELLED, "cancelled")
+            if prog is None:
+                raise RpcError(NO_PROGRAM, "no program open")
+            self.active.add(scan)
+        try:
+            yield prog
+        finally:
+            with self.pool_lock:
+                self.active.discard(scan)
+
+    def snap_clear(self):
+        with self.snap_lock:
+            self.snaps.clear()
+            self.snap_ver += 1
+
+    def snap(self, key, build):
+        """Cached result of a slow read (LRU of 8). build() runs without locks, since it may take seconds; its result is stored only if
+        the program did not change meanwhile. shortcut: two identical concurrent first requests both build; upgrade with a per-key future."""
+        with self.snap_lock:
+            hit = self.snaps.get(key)
+            if hit is not None:
+                self.snaps.move_to_end(key)
+                return hit
+            ver = self.snap_ver
+        val = build()
+        with self.snap_lock:
+            if self.snap_ver == ver:
+                self.snaps[key] = val
+                while len(self.snaps) > 8:
+                    self.snaps.popitem(last=False)
+        return val
+
     @staticmethod
     def _sym_kind(prog, s):
         from ghidra.program.model.symbol import SymbolType
         t = s.getSymbolType()
         if t == SymbolType.FUNCTION:
             return "function"
+        if t == SymbolType.LOCAL_VAR or t == SymbolType.PARAMETER:
+            return "variable"
         if s.isExternal():
             return "external"
         if t == SymbolType.LABEL:
@@ -808,52 +882,182 @@ class Sidecar:
             return "data" if d is not None else "label"
         return "other"
 
-    def search_symbols(self, query, limit=100):
-        """shortcut: linear scan of all symbols in Python, upgrade to an in-sidecar name index when binaries have > ~1M symbols."""
-        prog = self.need()
-        text_arg(query, "query")
-        limit = lim(limit, 100, 5000)
-        st, out, seen = prog.getSymbolTable(), [], set()
-        q = query.strip().lower()
-        if not q:
-            return []
-        try:  # a hex address: symbols there, else a bare address hit if it is mapped memory
-            a = self.addr(q if q.startswith("0x") else "0x" + q)
-            if prog.getMemory().contains(a):
-                syms = list(st.getSymbols(a))
-                for s in syms:
-                    out.append({"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)})
-                if not syms:
-                    out.append({"name": hx(a.getOffset()), "address": hx(a.getOffset()), "kind": "other"})
-                seen.update(o["name"] + o["address"] for o in out)
-        except RpcError:
-            pass
-        for s in st.getAllSymbols(False):
-            if len(out) >= limit:
-                break
-            n = str(s.getName())
-            if q in n.lower():
+    def search_symbols(self, query, limit=100, scan=None):
+        """Name substring match (also a hex address: symbols there, else a bare hit if mapped). The match runs inside Ghidra
+        (SymbolTable.getSymbolIterator with a glob, so `*`/`?` in the query are wildcards): only hits cross into Python.
+        shortcut: Ghidra has no name index for substrings, so this is still a linear scan, in Java; upgrade with an in-sidecar index on > ~1M symbols."""
+        with self.scanning(scan) as prog:
+            text_arg(query, "query")
+            limit = lim(limit, 100, 5000)
+            st, out, seen, space = prog.getSymbolTable(), [], set(), prog.getAddressFactory().getDefaultAddressSpace()
+            q = query.strip()
+            if not q:
+                return []
+            try:
+                a = self.addr(q if q.lower().startswith("0x") else "0x" + q, prog)
+                if prog.getMemory().contains(a):
+                    syms = list(st.getSymbols(a))
+                    for s in syms:
+                        out.append({"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)})
+                    if not syms:
+                        out.append({"name": hx(a.getOffset()), "address": hx(a.getOffset()), "kind": "other"})
+                    seen.update(o["name"] + o["address"] for o in out)
+            except RpcError:
+                pass
+            n = 0
+            for s in st.getSymbolIterator("*" + q + "*", False):
+                if len(out) >= limit:
+                    break
+                n += 1
+                if n & 255 == 0:
+                    scan.check()
                 a = s.getAddress()
-                if a.isExternalAddress() or a.getAddressSpace() != prog.getAddressFactory().getDefaultAddressSpace():
+                if a.isExternalAddress() or a.getAddressSpace() != space:
                     continue
-                o = {"name": n, "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)}
+                o = {"name": str(s.getName()), "address": hx(a.getOffset()), "kind": self._sym_kind(prog, s)}
                 if o["name"] + o["address"] not in seen:
                     out.append(o)
-        return out[:limit]
+            return out[:limit]
+
+    SYM_SORTS = ("name", "address", "kind", "namespace", "source")
+    SYM_KINDS = ("function", "label", "data", "external", "variable", "other")
+    SOURCES = {"USER_DEFINED": "user", "ANALYSIS": "analysis", "IMPORTED": "imported", "DEFAULT": "default"}
+
+    def _sym_item(self, prog, s):
+        a, ns = s.getAddress(), s.getParentNamespace()
+        mem = a.isMemoryAddress() and a.getAddressSpace() == prog.getAddressFactory().getDefaultAddressSpace()  # shortcut: default space only
+        return {"name": str(s.getName()), "address": hx(a.getOffset()) if mem else None, "kind": self._sym_kind(prog, s),
+                "namespace": "" if ns.isGlobal() else str(ns.getName(True)), "source": self.SOURCES.get(str(s.getSource()), "other")}
+
+    def _sym_key(self, prog, s, sort):
+        name = str(s.getName()).lower()
+        if sort == "name":
+            return name
+        if sort == "address":
+            a = s.getAddress()
+            return a.getOffset() if a.isMemoryAddress() else -1
+        if sort == "kind":
+            return (self._sym_kind(prog, s), name)
+        if sort == "namespace":
+            ns = s.getParentNamespace()
+            return ("" if ns.isGlobal() else str(ns.getName(True)).lower(), name)
+        return (self.SOURCES.get(str(s.getSource()), "other"), name)
+
+    def list_symbols(self, offset=0, limit=100, query="", kinds=None, sort="address", desc=False, scan=None):
+        """One page of the symbol table, in `sort` order. `total` counts all rows after the filters.
+        Default view (address order, no filter): the Ghidra by-address iterator is advanced lazily and kept, so page 1 costs `limit` rows
+        and total is counted once inside Java. Any filter or other order builds a snapshot of the Java Symbol objects once (cached until the program
+        changes): the name filter runs inside Ghidra (glob iterator), kinds and sort keys cost a few calls per symbol.
+        shortcut: a deep offset in the default view walks the iterator from where it stopped; upgrade with getSymbolIterator(address) from a sampled index."""
+        with self.scanning(scan) as prog:
+            offset, limit = lim(offset, 0), lim(limit, 100, 1000)
+            text_arg(query, "query")
+            if sort not in self.SYM_SORTS:
+                raise RpcError(INVALID, "sort must be one of %s" % ", ".join(self.SYM_SORTS))
+            if kinds is None:
+                kinds = []
+            if not isinstance(kinds, list) or any(k not in self.SYM_KINDS for k in kinds):
+                raise RpcError(INVALID, "kinds must be a list of %s" % ", ".join(self.SYM_KINDS))
+            q, desc, kinds = query.strip(), bool(desc), tuple(sorted(set(kinds)))
+            st = prog.getSymbolTable()
+            if sort == "address" and not desc and not q and not kinds:
+                def lazy():  # getNumSymbols() also counts variable symbols the by-address iterator skips, so count inside Java (Guava)
+                    from com.google.common.collect import Iterators
+                    return _SymSnap(st.getSymbolIterator(True), int(Iterators.size(st.getSymbolIterator(True))))
+                sn = self.snap(("sym-lazy",), lazy)
+                with sn.lock:
+                    n = 0
+                    while len(sn.syms) < offset + limit and sn.it is not None:
+                        if sn.it.hasNext():
+                            sn.syms.append(sn.it.next())
+                        else:
+                            sn.it, sn.total = None, len(sn.syms)
+                        n += 1
+                        if n & 255 == 0:
+                            scan.check()
+                    syms, total = sn.syms[offset:offset + limit], sn.total
+            else:
+                def build():
+                    it = st.getSymbolIterator("*" + q + "*", False) if q else st.getSymbolIterator(True)
+                    out, n = [], 0
+                    for s in it:
+                        n += 1
+                        if n & 255 == 0:
+                            scan.check()
+                        if kinds and self._sym_kind(prog, s) not in kinds:
+                            continue
+                        out.append(s)
+                    if sort == "address" and not q:  # the iterator already is in address order
+                        return out
+                    keys = []
+                    for i, s in enumerate(out):
+                        if i & 255 == 0:
+                            scan.check()
+                        keys.append(self._sym_key(prog, s, sort))
+                    return [out[i] for i in sorted(range(len(out)), key=keys.__getitem__)]
+                full = self.snap(("sym", q.lower(), kinds, sort), build)
+                total = len(full)
+                syms = (full[::-1] if desc else full)[offset:offset + limit]
+            try:
+                items = [self._sym_item(prog, s) for s in syms]
+            except Exception as e:  # noqa  a symbol of a stale snapshot was deleted by an edit meanwhile
+                raise RpcError(CANCELLED, "program changed while reading symbols: %s" % e)
+            return {"total": total, "items": items}
+
+    @staticmethod
+    def _ref_kind(rt):
+        if rt.isCall():
+            return "call"
+        if rt.isJump():
+            return "jump"
+        if rt.isRead() and rt.isWrite():
+            return "readwrite"
+        if rt.isRead():
+            return "read"
+        if rt.isWrite():
+            return "write"
+        if rt.isData():
+            return "data"
+        return "flow" if rt.isFlow() else "other"
+
+    def _xref_to_item(self, fm, r):
+        fa = r.getFromAddress()
+        rt = r.getReferenceType()
+        o = {"from": hx(fa.getOffset()), "type": str(rt.getName()), "kind": self._ref_kind(rt)}
+        f = fm.getFunctionContaining(fa)
+        if f is not None:
+            o["function"] = str(f.getName())
+        return o
 
     def xrefs_to(self, address, limit=500):
+        """Memory references to `address` (calls, jumps, data reads/writes, pointers). Stack/register references target variables: see xrefs_to_variable."""
         prog = self.need()
         limit, a, out = lim(limit, 500, 10000), self.addr(address), []
         fm = prog.getFunctionManager()
         for r in prog.getReferenceManager().getReferencesTo(a):
             if len(out) >= limit:
                 break
-            fa = r.getFromAddress()
-            o = {"from": hx(fa.getOffset()), "type": str(r.getReferenceType().getName())}
-            f = fm.getFunctionContaining(fa)
-            if f is not None:
-                o["function"] = str(f.getName())
-            out.append(o)
+            out.append(self._xref_to_item(fm, r))
+        out.sort(key=lambda o: int(o["from"], 16))
+        return out
+
+    def xrefs_to_variable(self, entry, name, limit=500):
+        """References to a stack or register variable of the function at `entry` that the program has (a parameter or a stack local such as
+        `param_1`, `local_10`, or one the user renamed), found by name. A variable the decompiler invents (`iVar1`, a register temporary)
+        has no program variable: the result is empty."""
+        prog = self.need()
+        text_arg(name, "name")
+        limit, out = lim(limit, 500, 10000), []
+        fm = prog.getFunctionManager()
+        f = fm.getFunctionAt(self.addr(entry))
+        if f is None:
+            raise RpcError(NOT_FOUND, "no function at %s" % entry)
+        for v in f.getAllVariables():
+            if str(v.getName()) == name:
+                for r in prog.getReferenceManager().getReferencesTo(v):
+                    if len(out) < limit:
+                        out.append(self._xref_to_item(fm, r))
+                break
         out.sort(key=lambda o: int(o["from"], 16))
         return out
 
@@ -864,25 +1068,98 @@ class Sidecar:
         a = cu.getMinAddress() if cu is not None else a
         out = []
         for r in prog.getReferenceManager().getReferencesFrom(a):
-            if r.isMemoryReference():  # shortcut: stack/register/external references are not listed
-                out.append({"to": hx(r.getToAddress().getOffset()), "type": str(r.getReferenceType().getName())})
+            rt = r.getReferenceType()
+            o = {"type": str(rt.getName()), "kind": self._ref_kind(rt)}
+            if r.isStackReference():
+                off = int(r.getStackOffset())
+                o.update(to=None, target="stack", label="Stack[%s0x%x]" % ("-" if off < 0 else "", abs(off)))
+            elif r.isExternalReference():
+                o.update(to=None, target="external", label=str(r.getLabel()))
+            elif r.isRegisterReference():
+                o.update(to=None, target="register", label=str(prog.getRegister(r.getToAddress()) or r.getToAddress()))
+            else:
+                o.update(to=hx(r.getToAddress().getOffset()), target="memory")
+            out.append(o)
         return out
 
-    def list_strings(self, offset=0, limit=500, minLength=4):
-        """shortcut: full scan of defined strings per cache miss (cached until the next program change), upgrade to an index on huge binaries."""
-        prog = self.need()
-        offset, limit, minLength = lim(offset, 0), lim(limit, 500, 5000), lim(minLength, 4)
-        if self.strings is None or self.strings[0] != minLength:
-            from ghidra.program.util import DefinedStringIterator
-            from ghidra.program.model.data import StringDataInstance
-            items = []
-            for d in DefinedStringIterator.forProgram(prog):
-                v = StringDataInstance.getStringDataInstance(d).getStringValue()
-                if v is not None and len(str(v)) >= minLength:
-                    items.append({"address": hx(d.getMinAddress().getOffset()), "value": str(v), "length": int(d.getLength())})
-            self.strings = (minLength, items)
-        items = self.strings[1]
-        return {"total": len(items), "items": items[offset:offset + limit]}
+    def _scan_strings(self, prog, minLength, scan):
+        from ghidra.program.util import DefinedStringIterator
+        from ghidra.program.model.data import StringDataInstance
+        items = []
+        for d in DefinedStringIterator.forProgram(prog):
+            if len(items) & 255 == 0:
+                scan.check()
+            v = StringDataInstance.getStringDataInstance(d).getStringValue()
+            if v is not None and len(str(v)) >= minLength:
+                items.append({"address": hx(d.getMinAddress().getOffset()), "value": str(v)[:STRING_VALUE_CAP], "length": int(d.getLength())})
+        return items
+
+    def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
+        """Defined strings in address order. The full scan is cached per `minLength` until the next program change (first call on a
+        big binary takes seconds, on a scan worker); `query` is a case-insensitive substring filter over the cached values; `total` is the
+        count after both filters. Values are cut at 1000 UTF-16 units, `length` stays the byte length of the defined string.
+        shortcut: one full scan per minLength, upgrade to an index or lazy paging on huge binaries."""
+        with self.scanning(scan) as prog:
+            offset, limit, minLength = lim(offset, 0), lim(limit, 500, 5000), lim(minLength, 4)
+            text_arg(query, "query")
+            items = self.snap(("str", minLength), lambda: self._scan_strings(prog, minLength, scan))
+            q = query.strip().lower()
+            if q:
+                items = self.snap(("str", minLength, q), lambda: [i for i in items if q in i["value"].lower()])
+            return {"total": len(items), "items": items[offset:offset + limit]}
+
+    MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
+
+    def search_memory(self, pattern, kind="bytes", encoding="ascii", caseSensitive=True, start=None, limit=1000, scan=None):
+        """Ghidra's memory search (ghidra.features.base.memsearch: UserInputByteMatcher + MemorySearcher, what the GUI's Search Memory uses) over
+        the loaded, initialized address set, ascending, from `start` (default: the first address). kind "bytes": hex with wildcards ("48 8b ?? 24",
+        `?`/`.` = any nibble pair); kind "text": a string in `encoding`. One page = up to `limit` matches; `next` is where to continue
+        (null = the whole set is done). Cancellable with cancel_search; a cancelled page fails with Cancelled and returns nothing."""
+        with self.scanning(scan) as prog:
+            from java.nio.charset import StandardCharsets
+            from ghidra.features.base.memsearch.bytesource import ProgramByteSource
+            from ghidra.features.base.memsearch.format import SearchFormat
+            from ghidra.features.base.memsearch.gui import SearchSettings
+            from ghidra.features.base.memsearch.searcher import MemorySearcher
+            from ghidra.program.model.address import AddressSet
+            from ghidra.pyghidra import PyGhidraTaskMonitor
+            from ghidra.util.datastruct import ListAccumulator
+            text_arg(pattern, "pattern")
+            if kind not in ("bytes", "text"):
+                raise RpcError(INVALID, "kind must be bytes or text")
+            if encoding not in self.MEM_ENCODINGS:
+                raise RpcError(INVALID, "encoding must be one of %s" % ", ".join(self.MEM_ENCODINGS))
+            limit = lim(limit, 1000, 10000)
+            if limit < 1 or not pattern.strip():
+                raise RpcError(INVALID, "empty pattern or limit < 1")
+            st = SearchSettings().withSearchFormat(SearchFormat.HEX if kind == "bytes" else SearchFormat.STRING)
+            if kind == "text":
+                st = st.withStringCharset(getattr(StandardCharsets, self.MEM_ENCODINGS[encoding])).withCaseSensitive(bool(caseSensitive))
+            matcher = st.getSearchFormat().parse(pattern.strip(), st)
+            if not matcher.isValidSearch():
+                raise RpcError(INVALID, "invalid pattern: %s" % matcher.getDescription())
+            mem = prog.getMemory()
+            sset = AddressSet(mem.getLoadedAndInitializedAddressSet())
+            if start is not None:
+                a = self.addr(start, prog)
+                sset = sset.intersect(AddressSet(a, a.getAddressSpace().getMaxAddress()))
+            mon = PyGhidraTaskMonitor(None, None)
+            scan.mon = mon
+            if scan.cancelled:
+                mon.cancel()
+            acc = ListAccumulator()
+            done = MemorySearcher(ProgramByteSource(prog), matcher, sset, limit).findAll(acc, mon)
+            scan.check()
+            fm, items, last = prog.getFunctionManager(), [], None
+            for m in acc.get():
+                ad, b = m.getAddress(), m.getBytes()
+                o = {"address": hx(ad.getOffset()), "length": int(m.getLength()), "bytes": " ".join("%02x" % (x & 255) for x in b[:16])}
+                f = fm.getFunctionContaining(ad)
+                if f is not None:
+                    o["function"] = str(f.getName())
+                items.append(o)
+                last = ad
+            return {"items": items, "next": None if done or last is None else hx(last.getOffset() + 1)}
 
     def list_data_types(self, query, limit=100):
         from ghidra.program.model.data import BuiltInDataTypeManager
@@ -1320,11 +1597,21 @@ class Sidecar:
                 job.mon.cancel()
         return {"cancelled": True}
 
+    def cancel_search(self, id):
+        """Cancel the scan request (list_symbols, list_strings, search_symbols, search_memory) with this JSON-RPC id, queued or running. False if unknown/finished."""
+        sc = self.sj.get(id)
+        if sc is None:
+            return {"cancelled": False}
+        with self.mon_lock:
+            sc.cancel()
+        return {"cancelled": True}
+
     def cancel_open(self):
         return {"cancelled": bool(self.opening is not None and self.opening.cancel())}
 
-    R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "search_symbols", "xrefs_to",
-                 "xrefs_from", "list_strings", "list_data_types", "undo_state", "rename_symbol", "set_comment",
+    S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory")  # scan workers, see the module docstring
+    R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable",
+                 "xrefs_from", "list_data_types", "undo_state", "rename_symbol", "set_comment",
                  "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
                  "define_data", "clear_code", "save")
     # run on R, but never behind/alongside an open: Busy instead of NoProgram
@@ -1341,6 +1628,8 @@ class Sidecar:
         try:
             if method == "cancel_decompile":
                 result = self.cancel_decompile(**params)
+            elif method == "cancel_search":
+                result = self.cancel_search(**params)
             elif method == "cancel_open":
                 result = self.cancel_open(**params)
             elif method == "open_binary":
@@ -1350,10 +1639,19 @@ class Sidecar:
                     raise RpcError(BUSY, "open_binary in progress")
                 fn = getattr(self, method)
                 result = await self.run(lambda: fn(**params))
-            elif method == "decompile" or method in self.R_METHODS:
+            elif method == "decompile" or method in self.R_METHODS or method in self.S_METHODS:
                 if self.opening is not None:  # fail fast: never queue behind an open
                     raise RpcError(NO_PROGRAM, "open_binary in progress")
-                if method == "decompile":
+                if method in self.S_METHODS:
+                    if rid is None or rid in self.sj:
+                        raise RpcError(INVALID, "%s needs a unique request id" % method)
+                    scan = self.sj[rid] = Scan(self.epoch)
+                    fn = getattr(self, method)
+                    try:
+                        result = await self.run(lambda: fn(scan=scan, **params), self.sjobs)
+                    finally:
+                        self.sj.pop(rid, None)
+                elif method == "decompile":
                     if rid is None or rid in self.dj:
                         raise RpcError(INVALID, "decompile needs a unique request id")
                     job = self.dj[rid] = Job(self.epoch)
@@ -1410,6 +1708,8 @@ class Sidecar:
                     j.mon.cancel()
         for j in list(self.dj.values()):
             j.cancelled = True
+        for sc in list(self.sj.values()):
+            sc.cancel()
 
         op = self.opening
         while op is not None and op.saving and not op.finished:
