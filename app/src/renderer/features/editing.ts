@@ -193,6 +193,24 @@ export function useEditing(tabs: TabsApi) {
       if (a) { const at = refs.listingRow.current?.()?.address ?? a; views.dispatch({ type: "set", patch: { xrefTarget: { type: "address", address: at, label: at } } }); }
     }
   };
+  // J: the value trail of the decompiler variable under the cursor (a scan-like job: a newer one or Esc cancels the older)
+  const trailJob = { cancel: (() => {}) as () => void };
+  const trail = () => {
+    const current = session.program();
+    if (!current || session.blocked() || !caps.has("valueTrail")) return;
+    const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined, pos = refs.editor.current?.getPosition();
+    const tok = d && pos ? tokenAt(d.tokens, pos.lineNumber, pos.column) : undefined;
+    if (!tab || !tok || !tok.varName || (tok.kind !== "variable" && tok.kind !== "param")) return session.flash("Put the cursor on a variable to trace its value.");
+    trailJob.cancel();
+    const job = current.api.decompiler.valueTrail({ entry: tab.entry, name: tok.varName, line: tok.line, colStart: tok.colStart });
+    trailJob.cancel = job.cancel;
+    const name = tok.varName;
+    void session.send(async () => {
+      const r = await job.result;
+      if (session.program() !== current) return;
+      views.dispatch({ type: "set", patch: { trail: { entry: tab.entry, name, trail: r } } });
+    });
+  };
   const canAt = (line1: number, col1: number) => {
     const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined;
     const tok = d ? tokenAt(d.tokens, line1, col1) : undefined;
@@ -201,8 +219,8 @@ export function useEditing(tabs: TabsApi) {
     const reference = xrefTargetOf(tok, text, fn);
     const textOf = (x: typeof tok & {}) => (d?.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd);
     return { equate: !!equateTarget(tok), noReturn: !!noReturnTarget(tok, text, fn), split: !!splitTarget(tok), field: !!(d && fieldTarget(d.tokens, tok, textOf)),
-      rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
+      rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), trail: !!retypeTarget(tok) && caps.has("valueTrail"), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
   };
-  return { edit, showXrefs, canAt };
+  return { edit, showXrefs, trail, canAt };
 }
 export type Editing = ReturnType<typeof useEditing>;

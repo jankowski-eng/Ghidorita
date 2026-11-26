@@ -177,7 +177,7 @@ export class WebSocketBackend implements ApplicationBackend {
     return {
       listing: { info: () => read("listing_info", {}), rows: (p) => read("listing_rows", p), bytes: (p) => read("get_bytes", p, "bytes") },
       functions: { list: () => read("list_functions", {}), containing: (p) => read("get_function_at", p), stackFrame: (p) => read("stack_frame", p, "stackFrame") },
-      decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile"), graph: (p) => job("controlFlowGraph", "function_graph", p, "cancel_decompile"), pcode: (p) => job("pcode", "pcode", p, "cancel_decompile") },
+      decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile"), graph: (p) => job("controlFlowGraph", "function_graph", p, "cancel_decompile"), pcode: (p) => job("pcode", "pcode", p, "cancel_decompile"), valueTrail: (p) => job("valueTrail", "value_trail", p, "cancel_decompile") },
       references: {
         xrefsTo: (p) => read("xrefs_to", p, "references"),
         xrefsFrom: (p) => read("xrefs_from", p, "references"),

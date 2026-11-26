@@ -22,6 +22,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-hex") return hexShot(fl!, c, result);
   if (name === "shot-pcode") return pcodeShot(fl!, c, result);
   if (name === "shot-layout") return layoutShot(fl!, c, result);
+  if (name === "shot-trail") return trailShot(fl!, c, result);
   if (name === "shot-patch") return patchShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
@@ -369,4 +370,25 @@ async function layoutShot(fl: { entry: string }[], c: AutotestCtx, result: Recor
   result.layout = { actions: [...document.querySelectorAll('[role="listbox"] .hit .n')].map((e) => e.textContent) };
   await sleep(300);
   return true;
+}
+
+async function trailShot(fl: { name: string; entry: string; size: number }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  need(c.backend.capabilities.has("valueTrail"), "provider has no valueTrail capability");
+  for (const f of [...fl].sort((a, b) => a.size - b.size).filter((x) => x.size > 80).slice(0, 60)) {
+    const d = await c.program().decompiler.decompile({ entry: f.entry }).result;
+    for (const tok of d.tokens.filter((t) => t.kind === "param" && t.varName && t.line > 1 && !t.varAddress)) {
+      const want = await c.program().decompiler.valueTrail({ entry: f.entry, name: tok.varName, line: tok.line, colStart: tok.colStart }).result;
+      if (want.ops.filter((o) => o.dir === "forward").length < 3) continue;
+      await c.select(f.entry);
+      await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+      const ed = c.editor();
+      ed.setPosition({ lineNumber: tok.line + 1, column: tok.colStart + 2 }); ed.focus(); await sleep(150);
+      c.command({ type: "trail" });
+      await waitFor(() => document.querySelector('[aria-label="Value trail"]'), 20000, "trail status");
+      result.trail = { function: f.name, variable: tok.varName, status: document.querySelector('[aria-label="Value trail"]')!.textContent };
+      await sleep(400);
+      return true;
+    }
+  }
+  throw new Error("shot: no parameter with a trail");
 }

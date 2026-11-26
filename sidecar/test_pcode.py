@@ -50,3 +50,29 @@ def test_pcode_errors(sc, prog):
     with pytest.raises(RpcError) as e:
         sc.pcode("0x401002", job=jobs(sc))
     assert e.value.code == NOT_FOUND
+
+
+def test_value_trail_forward_slice_of_a_parameter_contains_the_call(sc, prog):
+    from ghidorita.core.errors import NOT_FOUND, RpcError
+    text = sc.decompile("0x401000", job=jobs(sc))
+    t = sc.value_trail("0x401000", name="x", job=jobs(sc))
+    fwd = [o for o in t["ops"] if o["dir"] == "forward"]
+    assert any(o["op"] == "CALL" and o["address"] == "0x401004" for o in fwd), t["ops"]  # x flows into the call's argument
+    assert any(o["op"] == "INT_ADD" and o["address"] == "0x401000" for o in fwd), t["ops"]  # through x + 5
+    assert not any(o["dir"] == "backward" and o["op"] == "CALL" for o in t["ops"])
+    lines = text["text"].split("\n")
+    call_line = next(i for i, l in enumerate(lines) if "fn_g" in l)
+    toks = [k for k in t["tokens"] if k["line"] == call_line]
+    shown = {lines[k["line"]][k["colStart"]:k["colEnd"]] for k in toks}
+    assert "fn_g" in shown and "x" in shown, (shown, lines)  # the call's name and its argument are highlighted in the C
+    assert all(k["dir"] in ("seed", "forward", "backward") and k["colStart"] < k["colEnd"] for k in t["tokens"])
+    # the same from the token: the `x` in the argument list
+    k = next(k for k in text["tokens"] if k["line"] == call_line and k.get("varName") == "x")
+    t2 = sc.value_trail("0x401000", line=k["line"], colStart=k["colStart"], job=jobs(sc))
+    assert any(o["op"] == "CALL" and o["dir"] == "forward" for o in t2["ops"])
+    for bad in ({"name": "nope"}, {"line": 99, "colStart": 0}):
+        with pytest.raises(RpcError) as e:
+            sc.value_trail("0x401000", job=jobs(sc), **bad)
+        assert e.value.code == NOT_FOUND
+    with pytest.raises(RpcError):
+        sc.value_trail("0x401000", job=jobs(sc))

@@ -238,3 +238,6 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .pc-scroll { flex: 1; overflow: auto; min-height: 0; font: 13px ui-monospace, Menlo, monospace; outline: none; }
 .pc-line { white-space: pre; line-height: 18px; padding: 0 12px; cursor: pointer; } .pc-line.head { color: #9cdcfe; } .pc-line.cur { background: #094771; }
 .pcode .ph-bar button.on { background: #094771; color: #fff; }
+/* value trail: seed bold, downstream (forward) underlined blue, upstream (backward) dashed orange; listing rows get the same marks in the gutter */
+.trail-seed { font-weight: 700; background: rgba(255, 255, 255, .16); } .trail-forward { background: rgba(90, 160, 224, .28); border-bottom: 2px solid #5aa0e0; } .trail-backward { background: rgba(224, 169, 59, .25); border-bottom: 2px dashed #e0a93b; }
+.lrow.trail-f { box-shadow: inset 3px 0 0 #5aa0e0; background: rgba(90, 160, 224, .14); } .lrow.trail-b { box-shadow: inset 3px 0 0 #e0a93b; background: rgba(224, 169, 59, .14); } .lrow.trail-f.trail-b { box-shadow: inset 3px 0 0 #5aa0e0, inset 6px 0 0 #e0a93b; }

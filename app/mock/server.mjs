@@ -592,6 +592,16 @@ const handlers = {
       truncated: false,
     };
   },
+  value_trail({ entry, name, line, colStart }) { // the tokens of the same name are the seed; the call and arithmetic tokens that follow on the next lines are downstream
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (i < 0) nf();
+    const d = decompile(i), seed = d.tokens.filter((t) => (name !== undefined ? t.varName === name : t.line === line && t.colStart === colStart) && t.varName);
+    if (!seed.length) nf();
+    const after = d.tokens.filter((t) => t.address && t.line > seed[0].line && !seed.includes(t)).slice(0, 3);
+    const at = (k) => hex(n + k * STRIDE);
+    return { ops: [{ address: at(2), op: "COPY", dir: "backward" }, { address: at(4), op: "INT_ADD", dir: "forward" }, { address: at(6), op: "CALL", dir: "forward" }],
+      tokens: [...seed.map((t) => ({ line: t.line, colStart: t.colStart, colEnd: t.colEnd, dir: "seed" })), ...after.map((t) => ({ line: t.line, colStart: t.colStart, colEnd: t.colEnd, dir: "forward" }))] };
+  },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);
     if (!(i >= 0 && i < NFUNC)) return [];

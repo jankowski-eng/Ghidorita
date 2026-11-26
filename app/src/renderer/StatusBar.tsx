@@ -9,9 +9,9 @@ const viewOf = (el: Element | null): HintView => (el?.closest(".graph") ? "graph
 
 export type Stats = { listingMs?: number; decompileMs?: number };
 
-export function StatusBar({ address, func, bytes, funcs, stats, error, dirty, saving, flash, analysis, onAnalysis, debug, debugNote, back, forward, onBack, onForward, caps }: {
+export function StatusBar({ address, func, bytes, funcs, stats, error, dirty, saving, flash, analysis, onAnalysis, debug, debugNote, trail, back, forward, onBack, onForward, caps }: {
   caps: ReadonlySet<Capability>;
-  address: string | null; func: string | null; bytes: number; funcs: number; stats: Stats; error: string; dirty: boolean; saving: boolean; flash: string; analysis: AnalysisState | null; onAnalysis: (a: AnalysisAction) => void; debug: DebugState | null; debugNote?: string;
+  address: string | null; func: string | null; bytes: number; funcs: number; stats: Stats; error: string; dirty: boolean; saving: boolean; flash: string; analysis: AnalysisState | null; onAnalysis: (a: AnalysisAction) => void; debug: DebugState | null; debugNote?: string; trail?: string;
   back: string[]; forward: string[]; onBack: () => void; onForward: () => void; // history addresses, nearest first
 }) {
   const backKey = showKey(KEYS["nav-back"], isMac), forwardKey = showKey(KEYS["nav-forward"], isMac);
@@ -34,7 +34,7 @@ export function StatusBar({ address, func, bytes, funcs, stats, error, dirty, sa
       <span>{address ?? "-"} {func ? `in ${func}` : address ? "(no function)" : ""} | bytes: {bytes} | funcs: {funcs} | last listing page: {stats.listingMs ?? "-"} ms | last decompile: {stats.decompileMs ?? "-"} ms</span>
       {(label || action) && <span role="status" aria-label="Analysis" className={analysis?.state === "failed" ? "err" : ""}> | {label} {action && <button aria-label={ACTION_LABEL[action]} onClick={() => onAnalysis(action)}>{action === "cancel" ? "Cancel" : action === "resume" ? "Resume" : "Run full analysis"}</button>}</span>}
       {debug && <span role="status" aria-label="Debugger" className={debug.state === "detached" && debug.error ? "err" : ""}> | Debugger: {debugLabel(debug)}{debugNote}</span>}
-      <span role="status" aria-label="Save state">{saving ? " | Saving…" : dirty ? " | ● unsaved changes" : ""}</span>{flash && <span role="status"> | {flash}</span>}
+      <span role="status" aria-label="Save state">{saving ? " | Saving…" : dirty ? " | ● unsaved changes" : ""}</span>{flash && <span role="status"> | {flash}</span>}{trail && <span role="status" aria-label="Value trail"> | {trail}</span>}
       {error && <span className="err" role="alert"> | {error}</span>}
       </div>
       <span className="keyhint" title={hint} aria-label="Keys">{hint}</span>

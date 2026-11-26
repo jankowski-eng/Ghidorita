@@ -34,7 +34,7 @@ export function autotestBackend(backend: ApplicationBackend, requests: AutotestC
       const program = backend.program(session);
       return {
         ...program,
-        decompiler: { graph: program.decompiler.graph, pcode: program.decompiler.pcode, decompile(params) {
+        decompiler: { graph: program.decompiler.graph, pcode: program.decompiler.pcode, valueTrail: program.decompiler.valueTrail, decompile(params) {
           const job = program.decompiler.decompile(params);
           const probe = held;
           if (probe?.entry !== params.entry || probe.started) return job;

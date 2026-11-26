@@ -102,6 +102,7 @@ export const results = {
   patch_instruction: shape({ address, length: positive, replaced: positive, overwritten: count }),
   list_patches: array(shape({ address, length: positive, original: nonempty, current: nonempty })),
   pcode: shape({ raw: array(shape({ address, asm: str, ops: array(str) })), high: array(shape({ block: count, address, text: str })), truncated: bool }),
+  value_trail: shape({ ops: array(shape({ address, op: nonempty, dir: oneOf("forward", "backward") })), tokens: array(shape({ line: count, colStart: count, colEnd: positive, dir: oneOf("seed", "forward", "backward") })) }),
   get_comments: shape(comments),
   rename_symbol: object,
   create_label: object,

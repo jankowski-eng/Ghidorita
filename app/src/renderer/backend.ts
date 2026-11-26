@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  AssembledInstruction, PatchedRange, PcodeResult, BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
+  AssembledInstruction, PatchedRange, PcodeResult, ValueTrail, BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -51,6 +51,8 @@ export interface Decompilation {
   graph(params: { entry: Address; timeoutSecs?: number }): Job<FunctionGraph>;
   /** Raw and high p-code of one function; only with the pcode capability. A decompile on the decompiler lane (cancel with the job). */
   pcode(params: { entry: Address; timeoutSecs?: number }): Job<PcodeResult>;
+  /** Forward and backward slice of a decompiler variable (the token at line/colStart, else `name`) inside one function; only with the valueTrail capability. */
+  valueTrail(params: { entry: Address; name?: string; line?: number; colStart?: number; timeoutSecs?: number }): Job<ValueTrail>;
 }
 
 export interface References {

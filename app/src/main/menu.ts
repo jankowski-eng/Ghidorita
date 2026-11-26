@@ -104,6 +104,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { label: lab("Forward", "nav-forward"), accelerator: acc("nav-forward"), enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
         { id: "command-bar", label: "Command Bar…", enabled: state.hasProgram, accelerator: acc("search"), click: () => send({ type: "search" }) },
         { id: "search-symbols", label: "Search Symbols…", enabled: state.hasProgram && caps.has("symbolSearch"), accelerator: acc("symbolSearch"), click: () => send({ type: "search" }) },
+        { id: "trail", label: lab("Show Value Trail", "trail"), enabled: state.hasProgram && allowsCommand(caps, { type: "trail" }), click: () => send({ type: "trail" }) },
         { id: "goto", label: lab("Go to Address…", "goto"), enabled: state.hasProgram, accelerator: acc("goto"), click: () => send({ type: "goto" }) },
         { id: "xrefs", label: "Show References To", accelerator: acc("xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },

@@ -15,7 +15,7 @@ import type { DebugFeature } from "./debug";
 
 export interface MenuTargets {
   back(): void; forward(): void; goTab(entry: Address | null): void; closeActive(): Address | null;
-  edit(a: EditAction): Promise<void> | void; showXrefs(): void; coverage: CoverageActions; copy(what: CopyWhat): Promise<void> | void; debug: DebugFeature;
+  edit(a: EditAction): Promise<void> | void; showXrefs(): void; trail(): void; coverage: CoverageActions; copy(what: CopyWhat): Promise<void> | void; debug: DebugFeature;
 }
 
 /** Every menu command (and the command bar's actions, and the autotest's `command`) ends here. */
@@ -36,6 +36,8 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "edit") void t.edit(c.action);
   else if (c.type === "dock") { if (opened()) set({ dock: c.panel }); }
   else if (c.type === "xrefs") t.showXrefs();
+  else if (c.type === "trail") t.trail();
+  else if (c.type === "trail-clear") set({ trail: null });
   else if (c.type === "copy") void t.copy(c.what);
   else if (c.type === "export") void exportAs(s, c.kind);
   else if (c.type === "debug") {

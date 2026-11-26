@@ -21,7 +21,7 @@ export const KEYS: Readonly<Record<string, string>> = {
   "dock:symbols": "CmdOrCtrl+T", "dock:changes": "CmdOrCtrl+Shift+H", "dock:bookmarks": "CmdOrCtrl+B", "dock:memsearch": "S", // changes app-only
   "debug:continue": "F5", "debug:pause": "F6", "debug:step": "F7", "debug:stepi": "F8", "debug:breakpoint": "F9", "debug:stepinto": "F10", "debug:stepout": "Shift+F10",
   "debug:back": "Shift+F7", "debug:forward": "Shift+F8",
-  "nav-back": "Alt+Left", "nav-forward": "Alt+Right", search: "CmdOrCtrl+K", symbolSearch: "CmdOrCtrl+Shift+O", goto: "G", xrefs: "CmdOrCtrl+Shift+F", // search, symbolSearch app-only
+  "nav-back": "Alt+Left", "nav-forward": "Alt+Right", search: "CmdOrCtrl+K", symbolSearch: "CmdOrCtrl+Shift+O", goto: "G", xrefs: "CmdOrCtrl+Shift+F", trail: "J", // search, symbolSearch app-only
 };
 
 /** Table id of a command. "edit:save" shares the id `save` with the File menu item. */
@@ -54,7 +54,7 @@ const E = (action: Extract<MenuCommand, { type: "edit" }>["action"]): MenuComman
 // most used first: a narrow window cuts the line from the end (ellipsis), so the rarer keys go first
 const HINTS: Record<"listing" | "decompiler", Hint[]> = {
   listing: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["comment", E("comment")], ["function", E("createFunction")], ["data", E("defineData")], ["array", E("defineArray")], ["pointer", E("definePointer")], ["clear", E("clear")]],
-  decompiler: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["retype", E("retype")], ["comment", E("comment")]],
+  decompiler: [["rename", E("rename")], ["refs", { type: "xrefs" }], ["graph", { type: "graph" }], ["retype", E("retype")], ["trail", { type: "trail" }], ["comment", E("comment")]],
 };
 const joined = (hs: Hint[], caps: ReadonlySet<Capability>, mac: boolean) =>
   hs.filter(([, c]) => allowsCommand(caps, c)).map(([w, c]) => `${showKey(keyOf(c)!, mac)} ${w}`).join(" · ");

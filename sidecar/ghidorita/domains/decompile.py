@@ -6,7 +6,7 @@ import contextlib, re, threading
 from collections import OrderedDict
 
 from ..core.args import MASK64, akey, lim, text_arg
-from ..core.errors import CANCELLED, INTERNAL, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
+from ..core.errors import CANCELLED, INTERNAL, INVALID, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
 from ..core.rpc import rpc
 
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
@@ -139,6 +139,92 @@ class Decompile:
         `high` = the decompiler's HighFunction ops in block order, each with the address of its instruction. Same lane, pool, cache and
         cancellation (cancel_decompile) as `decompile`: the high p-code is part of one decompile."""
         return self._run(entry, timeoutSecs, job, ("pcode",), self._pcode)[0]
+
+    @rpc(lane="decomp")
+    def value_trail(self, entry, name=None, line=None, colStart=None, timeoutSecs=30, job=None):
+        """The value trail of a decompiler variable inside the function at `entry`: the p-code ops its value flows to (`forward`, downstream) and
+        comes from (`backward`, upstream), and the C tokens of the same ops and varnodes, from Ghidra's own slice utilities
+        (DecompilerUtils.getForward/BackwardSliceToPCodeOps and getForward/BackwardSlice). The seed is the varnode of the token at `line`/`colStart`
+        (0-based, as in decompile's tokens) when given and the token has one, else every instance of the variable `name`. The slice stops at
+        calls (the CALL op is in the forward slice, its result is not followed) and does not leave the function. Decompiler lane, cancellable
+        with cancel_decompile, cached with the decompile cache (one entry per seed). NotFound: no function, or no such variable."""
+        if name is not None:
+            text_arg(name, "name")
+        if line is not None and (isinstance(line, bool) or not isinstance(line, int) or line < 0 or isinstance(colStart, bool) or not isinstance(colStart, int) or colStart < 0):
+            raise RpcError(INVALID, "line and colStart must be non-negative integers")
+        if name is None and line is None:
+            raise RpcError(INVALID, "name or line/colStart is required")
+        return self._run(entry, timeoutSecs, job, ("trail", name, line, colStart), lambda prog, func, res: self._trail(prog, res, name, line, colStart))[0]
+
+    def _trail(self, prog, res, name, line, col):
+        from ghidra.app.decompiler import ClangVariableToken
+        from ghidra.app.decompiler.component import DecompilerUtils
+        from ghidra.program.model.pcode import PcodeOp
+        from java.util import HashSet
+        hf, fa = res.getHighFunction(), self.ses.fmtr(prog)
+        toks, ln = [], 0  # (line, start, end, ClangToken), numbered exactly as _tokens does (lines of nothing but WARNING comments are not lines)
+        for ln_toks in DecompilerUtils.toLines(res.getCCodeMarkup()):
+            c, here, text = len(str(ln_toks.getIndentString())), [], str(ln_toks.getIndentString())
+            for t in ln_toks.getAllTokens():
+                n = len(str(t.getText()))
+                text += str(t.getText())
+                if str(t.getText()).strip():
+                    here.append((ln, c, c + n, t))
+                c += n
+            if WARNING_LINE.fullmatch(text.strip()) and WARNING_ONE.findall(text):
+                continue
+            toks += here
+            ln += 1
+        seeds = []
+        if line is not None:
+            for ln, a, b, t in toks:
+                if ln == line and a <= col < b:
+                    vn = DecompilerUtils.getVarnodeRef(t)
+                    if vn is not None:
+                        seeds.append(vn)
+                    elif name is None and t.getVarnode() is not None:
+                        seeds.append(t.getVarnode())
+                    break
+        if not seeds and name is not None:
+            for sym in hf.getLocalSymbolMap().getSymbols():
+                hv = sym.getHighVariable()
+                if hv is not None and str(sym.getName()) == name:
+                    seeds.extend(hv.getInstances())
+        if not seeds:
+            raise RpcError(NOT_FOUND, "no variable %s at that place in the function" % (name or "(token)"))
+        skip = (PcodeOp.MULTIEQUAL, PcodeOp.INDIRECT)
+        vns = {"forward": HashSet(), "backward": HashSet()}
+        ops = {"forward": HashSet(), "backward": HashSet()}
+        for sd in seeds:
+            vns["forward"].addAll(DecompilerUtils.getForwardSlice(sd))
+            vns["backward"].addAll(DecompilerUtils.getBackwardSlice(sd))
+            ops["forward"].addAll(DecompilerUtils.getForwardSliceToPCodeOps(sd))
+            ops["backward"].addAll(DecompilerUtils.getBackwardSliceToPCodeOps(sd))
+        seed_set = HashSet()
+        for sd in seeds:
+            seed_set.add(sd)
+        out_ops, seen = [], set()
+        for d in ("backward", "forward"):
+            for op in ops[d]:
+                if op.getOpcode() in skip:
+                    continue
+                k = (fa(op.getSeqnum().getTarget()), str(op.getMnemonic()), d)
+                if k not in seen:
+                    seen.add(k)
+                    out_ops.append({"address": k[0], "op": k[1], "dir": d})
+        out_ops.sort(key=lambda o: (akey(o["address"]), o["dir"], o["op"]))
+        out_toks = []
+        for ln, a, b, t in toks:
+            vn, d = DecompilerUtils.getVarnodeRef(t), None
+            if vn is not None:  # a variable (or parameter declaration): by its varnode
+                d = "seed" if seed_set.contains(vn) else "forward" if vns["forward"].contains(vn) else "backward" if vns["backward"].contains(vn) else None
+            elif not isinstance(t, ClangVariableToken):  # an operator or a call's name: by the op it belongs to
+                op = t.getPcodeOp()
+                if op is not None and op.getOpcode() not in skip:
+                    d = "forward" if ops["forward"].contains(op) else "backward" if ops["backward"].contains(op) else None
+            if d is not None:
+                out_toks.append({"line": ln, "colStart": a, "colEnd": b, "dir": d})
+        return {"ops": out_ops, "tokens": out_toks}
 
     @staticmethod
     def _vn(vn, lang):

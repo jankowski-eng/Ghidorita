@@ -177,6 +177,39 @@ async function layoutStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, 
   R.layout = { restored: "Listing,Functions,Decompiler", pcode: hasPcode };
 }
 
+async function trailStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("valueTrail"), "provider has no valueTrail capability");
+  // a function whose parameter or variable has a trail with ops, found through the backend (the same call the UI makes)
+  let pick: { f: FunctionInfo; tok: { line: number; colStart: number; varName?: string }; want: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["decompiler"]["valueTrail"]>["result"]> } | null = null;
+  for (const f of fl.filter((x) => x.size > 60).slice(0, 40)) {
+    const d = await c.program().decompiler.decompile({ entry: f.entry }).result;
+    const tok = d.tokens.find((t) => (t.kind === "param" || t.kind === "variable") && t.varName && t.line > 1 && t.address && !t.varAddress);
+    if (!tok) continue;
+    const want = await c.program().decompiler.valueTrail({ entry: f.entry, name: tok.varName, line: tok.line, colStart: tok.colStart }).result;
+    if (want.ops.length && want.tokens.length) { pick = { f, tok, want }; break; }
+  }
+  need(pick, "a variable with a value trail");
+  const { f, tok, want } = pick!;
+  await c.select(f.entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled text");
+  const ed = c.editor();
+  ed.setPosition({ lineNumber: tok.line + 1, column: tok.colStart + 2 }); ed.focus(); await sleep(150);
+  c.command({ type: "trail" });
+  const status = () => document.querySelector('[aria-label="Value trail"]')?.textContent ?? "";
+  const up = want.ops.filter((o) => o.dir === "backward").length, down = want.ops.filter((o) => o.dir === "forward").length;
+  await waitFor(() => status().includes(`${up} upstream, ${down} downstream`), 20000, "the status bar's trail counts");
+  await waitFor(() => document.querySelector(".monaco-editor .trail-seed"), 5000, "the seed token highlighted in the decompiler");
+  need(document.querySelectorAll(".monaco-editor .trail-forward, .monaco-editor .trail-backward").length >= want.tokens.filter((t) => t.dir !== "seed").length ? true : want.tokens.every((t) => t.dir === "seed"), "downstream/upstream tokens highlighted");
+  // the listing marks the instruction of an op
+  const op = want.ops[0];
+  await c.goAddr(op.address);
+  await waitFor(() => [...document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")].some((r) => rowAddr(r) === op.address && (r.classList.contains("trail-f") || r.classList.contains("trail-b"))), 10000, "the op's instruction marked in the listing");
+  // Esc clears it everywhere
+  document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await waitFor(() => !status() && !document.querySelector(".monaco-editor .trail-seed") && !document.querySelector(".lbox .trail-f, .lbox .trail-b"), 5000, "Esc clears the trail");
+  R.trail = { function: f.name, variable: tok.varName, up, down, tokens: want.tokens.length };
+}
+
 async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
   need(c.backend.capabilities.has("calls"), "provider has no calls capability");
   let pick: { f: FunctionInfo; r: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["references"]["calls"]>["result"]> } | null = null;
@@ -305,6 +338,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   await hexStep(fl, c, R);
   await pcodeStep(fl, c, R);
   await layoutStep(fl, c, R);
+  await trailStep(fl, c, R);
   await patchStep(fl, c, R, result);
   await bookmarkStep(fl, c, R, result);
   return true;

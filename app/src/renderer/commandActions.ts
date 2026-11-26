@@ -61,6 +61,8 @@ export const ACTIONS: CommandAction[] = [
   { label: "Load Coverage…", cmd: { type: "coverage-load" } },
   { label: "Clear Coverage", cmd: { type: "coverage-clear" } },
   { label: "Toggle Control-Flow Graph", cmd: { type: "graph" } },
+  { label: "Show Value Trail (variable at the cursor)", cmd: { type: "trail" } },
+  { label: "Clear Value Trail", cmd: { type: "trail-clear" } },
   { label: "Toggle P-code", cmd: { type: "pcode" } },
   { label: "Toggle Call Graph", cmd: { type: "callgraph" } },
   { label: "Export Symbol Map (JSON)", cmd: { type: "export", kind: "symbols" } },

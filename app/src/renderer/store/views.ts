@@ -6,7 +6,7 @@ import type { PaneId } from "../Layout";
 import type { EditSpec } from "../EditDialog";
 import type { FormField, FormPreview } from "../FormDialog";
 import type { XrefTarget } from "../editActions";
-import type { CommentKind } from "../../../../protocol";
+import type { CommentKind, ValueTrail } from "../../../../protocol";
 import { emptyNav } from "../nav";
 import { createStore } from "./createStore";
 import { layoutNames, readLayouts, startupLayout, type Sizes } from "../layouts";
@@ -24,6 +24,7 @@ export interface Views {
   xrefVersion: number;
   cursorAt: Address | null;            // the shared cursor: the listing row or decompiler token last clicked or moved to (the hex view follows it)
   xrefTarget: XrefTarget | null;       // pinned "show references" target; null = follow the cursor
+  trail: { entry: Address; name: string; trail: ValueTrail } | null; // the value trail shown in the decompiler and listing (Esc clears it)
   useHl: { name: string; address: Address } | null; // a clicked decompiler-variable use: its token is highlighted
   dock: DockId | null;
   graphOn: boolean;                    // the decompiler pane shows the control-flow graph of the active function
@@ -41,7 +42,7 @@ export interface Views {
   importFor: string | null;
 }
 export const initialViews: Views = {
-  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, useHl: null,
+  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, useHl: null,
   dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
   visible: { functions: true, listing: true, decompiler: true }, paneOrder: ["functions", "listing", "decompiler"], paneSizes: { functions: 260, listing: 560 }, layoutNames: ["Default"], dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };

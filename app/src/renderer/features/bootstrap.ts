@@ -67,6 +67,12 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
       if (hit) { e.preventDefault(); e.stopPropagation(); api().handleMenu(hit[1]); }
     };
     window.addEventListener("keydown", hintKey, true);
+    // Esc clears the value trail (not while a dialog or the command bar is up: their Esc closes them)
+    const trailEsc = (e: KeyboardEvent) => {
+      const v = s.views.getState();
+      if (e.key === "Escape" && v.trail && !v.dlg && !v.formDlg && !v.searchOpen && !v.gotoOpen && !v.importFor) s.views.dispatch({ type: "set", patch: { trail: null } });
+    };
+    window.addEventListener("keydown", trailEsc);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") refs.lastPane.current = k; };
     window.addEventListener("focusin", pane);
     // quit: save first (the status bar shows "Saving…"), then main stops the sidecar
@@ -83,6 +89,6 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); offDebug(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", hintKey, true); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); offDebug(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", hintKey, true); window.removeEventListener("keydown", trailEsc); window.removeEventListener("focusin", pane); };
   }, []); // eslint-disable-line
 }

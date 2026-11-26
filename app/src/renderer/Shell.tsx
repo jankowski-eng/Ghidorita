@@ -72,10 +72,10 @@ export function TypeManager() {
 export function AppStatusBar({ nav }: { nav: Navigation }) {
   const { map, funcs, stats, error, saving, flash, analysis, debug } = useProgram((p) => p);
   const session = useSession(), shown = useProgram(shownDebug), at = useProgram((p) => p.debugAt), n = useProgram((p) => p.debugHistory.length);
-  const dirty = useProgram((p) => p.undo.dirty);
+  const dirty = useProgram((p) => p.undo.dirty), trail = useViews((v) => v.trail);
   return (
     <>
-      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} debug={shown} debugNote={shown && debug && at !== null ? ` · recorded stop ${at + 1} of ${n}, the target is at ${debug.address ?? debug.state}` : ""} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
+      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} trail={trail ? `value trail ${trail.name}: ${trail.trail.ops.filter((o) => o.dir === "backward").length} upstream, ${trail.trail.ops.filter((o) => o.dir === "forward").length} downstream · Esc clears` : undefined} analysis={analysis} debug={shown} debugNote={shown && debug && at !== null ? ` · recorded stop ${at + 1} of ${n}, the target is at ${debug.address ?? debug.state}` : ""} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
         back={[...nav.nav.back].reverse().map((l) => l.address)} forward={[...nav.nav.forward].reverse().map((l) => l.address)} onBack={nav.back} onForward={nav.forward} />
     </>
   );

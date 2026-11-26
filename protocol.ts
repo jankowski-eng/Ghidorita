@@ -85,6 +85,11 @@ export interface RawPcode { address: Address; asm: string; ops: string[] } // on
 export interface HighPcodeOp { block: number; address: Address; text: string } // block = basic block index, in block order; address = the instruction the op belongs to
 export interface PcodeResult { raw: RawPcode[]; high: HighPcodeOp[]; truncated: boolean } // truncated: a large function was cut (5000 instructions, 30000 ops)
 
+/** forward = downstream (where the value goes), backward = upstream (where it comes from). `address` is the instruction of the op; phi (MULTIEQUAL) and INDIRECT ops are not listed. The slice stops at calls: a CALL is in the forward slice, its result is not followed. */
+export interface TrailOp { address: Address; op: string; dir: "forward" | "backward" }
+export interface TrailToken { line: number; colStart: number; colEnd: number; dir: "seed" | "forward" | "backward" } // seed: a token of the variable the trail starts from
+export interface ValueTrail { ops: TrailOp[]; tokens: TrailToken[] }
+
 export interface ListingRow {
   address: Address;
   length: number;    // code unit length in bytes; next row (if contiguous) starts at address + length
@@ -151,7 +156,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -206,6 +211,8 @@ export interface Methods {
   debug_pause: { params: {}; result: {} };
   // P-code of one function (capability "pcode", needs "decompile"): raw per instruction and the decompiler's high p-code per op. Decompiler lane, cancellable with cancel_decompile, same cache and invalidation as decompile.
   pcode: { params: { entry: Address; timeoutSecs?: number }; result: PcodeResult };
+  // Forward and backward slice of a decompiler variable inside one function (capability "valueTrail", needs "decompile"): the p-code ops and the C tokens the value flows to and comes from. Decompiler lane, cancellable with cancel_decompile. Seed: the token at line/colStart (0-based, as in decompile's tokens) when it has a varnode, else the variable `name`. NotFound for no function or no such variable.
+  value_trail: { params: { entry: Address; name?: string; line?: number; colStart?: number; timeoutSecs?: number }; result: ValueTrail };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
