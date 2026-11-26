@@ -48,7 +48,7 @@ test("optionsSummary / reopenParams", () => {
   assert.deepEqual(reopenParams({ programId: "x", name: "n", sourcePath: "/a/n", sizeBytes: 1, analyzed: true, options: { loader: "L" } }), { path: "/a/n", loader: "L" });
 });
 test("windowTitle", () => {
-  assert.equal(windowTitle(null, false), "Ghidra desktop spike");
-  assert.equal(windowTitle("ls", false), "ls — Ghidra desktop spike");
-  assert.equal(windowTitle("ls", true), "• ls — Ghidra desktop spike");
+  assert.equal(windowTitle(null, false), "Ghidrette");
+  assert.equal(windowTitle("ls", false), "ls — Ghidrette");
+  assert.equal(windowTitle("ls", true), "• ls — Ghidrette");
 });

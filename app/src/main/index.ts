@@ -136,11 +136,13 @@ async function finishAutotest(result: { ok: boolean; persist?: unknown }) {
   console.log("AUTOTEST_RESULT " + JSON.stringify(result));
 }
 
+app.setName("Ghidrette");
 app.whenReady().then(async () => {
+  if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
   ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(appDir, "out/autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null }));
-  win = new BrowserWindow({ width: 1400, height: 900, webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
+  win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
   menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
 });

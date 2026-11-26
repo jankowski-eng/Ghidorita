@@ -1,4 +1,4 @@
-# Ghidra desktop spike: Electron frontend
+# Ghidrette (Ghidra desktop spike): Electron frontend
 
     npm install
     npm start                                  # builds (electron-vite) and launches; spawns sidecar/.venv/bin/python sidecar/main.py
