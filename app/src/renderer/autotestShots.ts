@@ -1,4 +1,3 @@
-import { rpc } from "./client";
 import { press, setSelect, sleep, waitFor, type AutotestCtx } from "./autotest";
 
 // Screenshot flows (AUTOTEST=/bin/ls AUTOTEST_FLOW=shot-<name> npm start): arrange one UI state through the real DOM, check it, and end there;
@@ -18,7 +17,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
 
 async function graphShot(fl: { name: string; entry: string; size: number }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const f = fl.find((x) => x.name === "main") ?? [...fl].sort((a, b) => a.size - b.size).find((x) => x.size > 300)!;
-  const g = await rpc.call("function_graph", { entry: f.entry });
+  const g = await c.program().decompiler.graph({ entry: f.entry }).result;
   need(g.blocks.length >= 3, "function with at least three blocks");
   await c.select(f.entry);
   await waitFor(() => document.querySelector(".editor")?.getBoundingClientRect().height, 10000, "decompiler visible");
@@ -51,7 +50,7 @@ async function barShot(c: AutotestCtx, result: Record<string, any>): Promise<boo
 // shot-map:<coverage file A>:<coverage file B>: a rename plus two coverage runs, then the map's layers
 async function mapShot(fl: { name: string; entry: string }[], files: string[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   need(files.length === 2, "two coverage files");
-  await rpc.call("rename_symbol", { address: fl[3].entry, newName: "named_by_me" });
+  await c.program().edits.renameSymbol({ address: fl[3].entry, newName: "named_by_me" });
   for (const f of files) { c.command({ type: "coverage-path", path: f }); await sleep(800); }
   c.command({ type: "dock", panel: "coverage" });
   const runB = await waitFor(() => document.querySelector<HTMLSelectElement>('select[aria-label="Run B"]'), 5000, "Run B select"); // the last loaded run is A; compare it with the first
@@ -70,7 +69,7 @@ async function mapShot(fl: { name: string; entry: string }[], files: string[], c
 
 // needs AUTOTEST_EXPORT_DIR (answers the save dialog); the files are checked by whoever runs the flow
 async function exportShot(fl: { entry: string }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
-  await rpc.call("rename_symbol", { address: fl[3].entry, newName: "renamed_for_export" });
+  await c.program().edits.renameSymbol({ address: fl[3].entry, newName: "renamed_for_export" });
   const flash = () => document.querySelector(".statusbar, footer, [role=status]")?.parentElement?.textContent ?? document.body.textContent ?? "";
   c.command({ type: "export", kind: "symbols" });
   await waitFor(() => /Exported \d+ functions, \d+ labels/.test(flash()), 30000, "symbol map exported");

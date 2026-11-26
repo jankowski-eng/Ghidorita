@@ -2,7 +2,7 @@ import type {
   ActiveSession, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  ChangeKind,
+  ChangeKind, FunctionGraph, TopSymbol,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "connection" | "protocol" | "internal";
@@ -39,6 +39,8 @@ export interface FunctionNavigation {
 
 export interface Decompilation {
   decompile(params: { entry: Address; timeoutSecs?: number }): Job<DecompileResult>;
+  /** Basic-block graph of one function; only with the controlFlowGraph capability. */
+  graph(params: { entry: Address; timeoutSecs?: number }): Job<FunctionGraph>;
 }
 
 export interface References {
@@ -50,6 +52,8 @@ export interface References {
 
 export interface Searches {
   searchSymbols(params: { query: string; limit?: number }): Job<SymbolHit[]>;
+  /** What an empty command bar suggests (suggestions capability): entry points, most used imports and functions. */
+  topSymbols(params: { limit?: number }): Job<TopSymbol[]>;
   listSymbols(params: ListSymbolsParams): Job<{ total: number; items: SymbolRow[] }>;
   listStrings(params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }): Job<{ total: number; items: StringItem[] }>;
   searchMemory(params: SearchMemoryParams): Job<{ items: MemoryHit[]; next: Address | null }>;
@@ -96,6 +100,11 @@ export interface CoverageReads {
   load(params: { path: string }): Promise<{ ranges: { start: Address; end: Address }[] }>;
 }
 
+export interface Exports {
+  symbols(params: { path: string }): Promise<{ path: string; functions: number; labels: number; data: number; comments: number }>;
+  header(params: { path: string }): Promise<{ path: string; types: number; functions: number; skipped: number }>;
+}
+
 export interface ProjectCatalog {
   list(): Promise<ProgramEntry[]>;
   remove(params: { programId: string }): Promise<{}>;
@@ -119,6 +128,7 @@ export interface ProgramOperations {
   edits: ProgramEdits;
   history: ProgramHistory;
   coverage: CoverageReads;
+  exports: Exports;
 }
 export interface ApplicationBackend {
   capabilities: ReadonlySet<Capability>;

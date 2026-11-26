@@ -171,7 +171,7 @@ export class WebSocketBackend implements ApplicationBackend {
     return {
       listing: { info: () => read("listing_info", {}), rows: (p) => read("listing_rows", p) },
       functions: { list: () => read("list_functions", {}), containing: (p) => read("get_function_at", p) },
-      decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile") },
+      decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile"), graph: (p) => job("controlFlowGraph", "function_graph", p, "cancel_decompile") },
       references: {
         xrefsTo: (p) => read("xrefs_to", p, "references"),
         xrefsFrom: (p) => read("xrefs_from", p, "references"),
@@ -180,6 +180,7 @@ export class WebSocketBackend implements ApplicationBackend {
       },
       searches: {
         searchSymbols: (p) => job("symbolSearch", "search_symbols", p, "cancel_search"),
+        topSymbols: (p) => job("suggestions", "top_symbols", p, "cancel_search"),
         listSymbols: (p) => job("symbolTable", "list_symbols", p, "cancel_search"),
         listStrings: (p) => job("strings", "list_strings", p, "cancel_search"),
         searchMemory: (p) => job("memorySearch", "search_memory", p, "cancel_search"),
@@ -218,6 +219,7 @@ export class WebSocketBackend implements ApplicationBackend {
         save: () => edit("save", "save", "save", {}),
       },
       coverage: { load: (p) => read("load_coverage", p, "coverage") },
+      exports: { symbols: (p) => read("export_symbols", p, "export"), header: (p) => read("export_header", p, "export") },
     };
   }
 

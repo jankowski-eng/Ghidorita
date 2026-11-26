@@ -431,12 +431,12 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
   };
   const pickCoverage = async () => { const p = await window.host.pickFile(); if (p) void loadCoverage(p); };
   const exportAs = async (kind: "symbols" | "header") => {
-    if (!openedRef.current || openingRef.current) return;
-    const base = (programName ?? "program").replace(/[\\/]/g, "_"), path = await window.host.pickSavePath(kind === "symbols" ? `${base}.symbols.json` : `${base}.h`);
+    if (!openedRef.current || openingRef.current || !caps.has("export")) return;
+    const base = (program?.session.name ?? "program").replace(/[\\/]/g, "_"), path = await window.host.pickSavePath(kind === "symbols" ? `${base}.symbols.json` : `${base}.h`);
     if (!path) return;
     try {
-      if (kind === "symbols") { const r = await rpc.call("export_symbols", { path }); setFlash(`Exported ${r.functions} functions, ${r.labels} labels, ${r.data} data, ${r.comments} comments to ${r.path}`); }
-      else { const r = await rpc.call("export_header", { path }); setFlash(`Exported ${r.types} types and ${r.functions} prototypes to ${r.path}${r.skipped ? ` (${r.skipped} names are not C identifiers)` : ""}`); }
+      if (kind === "symbols") { const r = await ops!.exports.symbols({ path }); setFlash(`Exported ${r.functions} functions, ${r.labels} labels, ${r.data} data, ${r.comments} comments to ${r.path}`); }
+      else { const r = await ops!.exports.header({ path }); setFlash(`Exported ${r.types} types and ${r.functions} prototypes to ${r.path}${r.skipped ? ` (${r.skipped} names are not C identifiers)` : ""}`); }
     } catch (e) { fail(e); }
   };
   const handleMenu = (c: MenuCommand) => {
@@ -455,7 +455,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
     else if (c.type === "dock") { if (openedRef.current) setDock(c.panel); }
     else if (c.type === "xrefs") showXrefs();
     else if (c.type === "export") void exportAs(c.kind);
-    else if (c.type === "graph") { if (openedRef.current) setGraphOn((g) => !g); }
+    else if (c.type === "graph") { if (openedRef.current && allowsCommand(caps, c)) setGraphOn((g) => !g); }
     else if (c.type === "datatypes") { if (openedRef.current) setTypesOpen((o) => !o); }
     else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
   };
@@ -559,7 +559,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
       {importFor && !opening && <ImportDialog imports={backend.imports} key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
       {deleting && <Confirm title="Delete program?" message={`Remove ${deleting.entry.name} from the project? Its analysis is deleted; the original file is not touched.`} error={deleting.error} busy={deleting.busy}
         actions={[{ label: "Delete", onClick: () => void deleteStored() }]} onCancel={() => setDeleting(null)} />}
-      {searchOpen && opened && <SearchPanel capabilities={caps} searchSymbols={symbolSearch} listStrings={caps.has("strings") ? ops?.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={(c) => api.current.handleMenu(c)} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && opened && <SearchPanel capabilities={caps} searchSymbols={symbolSearch} topSymbols={caps.has("suggestions") ? ops?.searches.topSymbols : undefined} listStrings={caps.has("strings") ? ops?.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={(c) => api.current.handleMenu(c)} onClose={() => setSearchOpen(false)} />}
       {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => setGotoOpen(false)} />}
       {opened ? (map ? (
         <Panes key={program!.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && caps.has("decompile") }}>{{
@@ -581,7 +581,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
               {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
                 <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
               {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
-              {graphOn && active && <GraphView entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
+              {graphOn && active && <GraphView source={ops!.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
               <div className="editor" style={{ display: active && !graphOn ? undefined : "none" }}>
                 <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} onCallClick={clickAt} editorRef={editorRef} onEdit={(a) => void edit(a)} canAt={canAt} onXrefs={showXrefs} />
               </div>

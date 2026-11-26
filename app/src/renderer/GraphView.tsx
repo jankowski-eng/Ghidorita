@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Address, FunctionGraph } from "../../../protocol";
 import { coverage } from "./coverage";
 import { blockAt, layout } from "./graphLayout";
-import { rpc } from "./client";
+import type { Decompilation } from "./backend";
 
 const CW = 7.3, LH = 15, PAD = 8, MAXC = 90, MAXL = 40; // character width / line height of the 12px monospace, padding, caps per node
 const EDGE = { true: "#5aa0e0", false: "#e0a93b", uncond: "#888" } as const; // blue / orange / neutral: no red-green
@@ -10,16 +10,17 @@ const COV: Record<string, string> = { " cov": "#4ec36b", " cov-a": "#e0a93b", " 
 const cut = (s: string) => (s.length > MAXC ? s.slice(0, MAXC - 1) + "…" : s);
 
 /** Control-flow graph of the function at `entry`: one node per basic block (C where the decompiler maps it, else assembly). Wheel zooms, drag pans, click a node to go there. */
-export function GraphView({ entry, here, version, covVersion, onGo }: { entry: Address; here: Address | null; version: number; covVersion: number; onGo: (a: Address) => void }) {
+export function GraphView({ source, entry, here, version, covVersion, onGo }: { source: Decompilation["graph"]; entry: Address; here: Address | null; version: number; covVersion: number; onGo: (a: Address) => void }) {
   const [g, setG] = useState<FunctionGraph | null>(null), [err, setErr] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const box = useRef<HTMLDivElement>(null), drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   useEffect(() => {
     let live = true;
     setErr("");
-    rpc.call("function_graph", { entry }).then((r) => { if (live) setG(r); }, (e) => { if (live) { setG(null); setErr(e instanceof Error ? e.message : String(e)); } });
-    return () => { live = false; };
-  }, [entry, version]);
+    const job = source({ entry });
+    job.result.then((r) => { if (live) setG(r); }, (e) => { if (live) { setG(null); setErr(e instanceof Error ? e.message : String(e)); } });
+    return () => { live = false; job.cancel(); };
+  }, [source, entry, version]);
   const L = useMemo(() => {
     if (!g) return null;
     const nodes = g.blocks.map((b) => { const ls = b.lines.slice(0, MAXL).map(cut); return { id: b.start, b, ls, more: b.lines.length > MAXL, w: Math.max(40, ...ls.map((l) => l.length)) * CW + 2 * PAD, h: (ls.length + (b.lines.length > MAXL ? 1 : 0)) * LH + 2 * PAD }; });

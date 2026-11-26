@@ -43,6 +43,7 @@ Advertise only implemented groups. Operations in the following reference belong 
 | `variableEditing` | `rename_variable`, `retype_variable`, `auto_create_structure`. Requires decompilation. |
 | `undo`, `save` | `undo_state`, `undo`, `redo` and `save` respectively. Save reports whether it ended the undo history. |
 | `dataTypes`, `typeEditing` | Type reads including `list_data_types` with `cancel_search`, detail and category reads. Editing includes type mutations, `define_data` and `create_struct_from_data`. |
+| `controlFlowGraph`, `suggestions`, `export` | `function_graph` (needs `decompile`), `top_symbols`, and `export_symbols` / `export_header`. |
 | `projects`, `recovery`, `coverage` | Project listing and removal, recovery snapshots, and coverage parsing respectively. |
 
 ### PyGhidra compatibility

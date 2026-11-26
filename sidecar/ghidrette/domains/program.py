@@ -14,7 +14,7 @@ from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 CAPABILITIES = [
     "importOptions", "decompile", "editing", "variableEditing", "undo", "save", "symbolSearch",
     "symbolTable", "strings", "memorySearch", "references", "variableReferences", "dataTypes",
-    "typeEditing", "projects", "coverage",
+    "typeEditing", "projects", "coverage", "controlFlowGraph", "suggestions", "export",
 ]
 
 

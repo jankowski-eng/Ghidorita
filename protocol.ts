@@ -128,7 +128,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "suggestions", "export",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }

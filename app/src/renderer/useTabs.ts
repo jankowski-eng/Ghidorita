@@ -17,7 +17,7 @@ export function useTabs(decompiler: Decompilation | undefined, onError: (e: unkn
   const tabsRef = useRef<Tabs>(emptyTabs);
   const dataRef = useRef<Record<number, TabData>>({});
   const current = useRef(decompiler); current.current = decompiler;
-  const jobs = useRef(decompileJobs({ decompile: (p) => current.current!.decompile(p) }));
+  const jobs = useRef(decompileJobs({ decompile: (p) => current.current!.decompile(p), graph: (p) => current.current!.graph(p) }));
   const anyway = useRef(new Set<number>());       // tabs the user confirmed ("Decompile anyway"): long timeout, no size warning
 
   const set = (next: Tabs) => {

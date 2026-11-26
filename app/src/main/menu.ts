@@ -63,7 +63,7 @@ export function createMenu({ getWin, pick }: Deps) {
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
         // Space is only a hint in the label (a real accelerator would swallow the space typed into text inputs): App handles the key itself
-        { label: "Control-Flow Graph   (Space)", enabled: state.canEdit, click: () => send({ type: "graph" }) },
+        { label: "Control-Flow Graph   (Space)", enabled: state.hasProgram && allowsCommand(caps, { type: "graph" }), click: () => send({ type: "graph" }) },
         { type: "separator" },
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: "CmdOrCtrl+Shift+Y", click: () => send({ type: "dock", panel: "symbols" }) },
         { id: "strings", label: "Defined Strings", enabled: state.hasProgram && caps.has(dockCapability.strings), accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
