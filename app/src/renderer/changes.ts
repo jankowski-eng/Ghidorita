@@ -36,7 +36,7 @@ export interface ChangeDeps {
   currentFunctions(): FunctionInfo[];
   tabs(): { id: number; entry: Address }[];
   reloadTab(id: number): void;
-  refreshListing(): void;
+  refreshListing(ranges: Params["ranges"]): void; // null = refetch from the top row (type edits and other address-less changes)
   refreshXrefs(): void;
   setUndo(u: Params["undo"]): void;
 }
@@ -44,8 +44,9 @@ export interface ChangeDeps {
 /**
  * The one place that reacts to program_changed (edits, undo, redo). Undo state first (menu labels, dirty marker), then:
  * the function list only when names/functions can have changed, tabs (all of them for name-affecting kinds, else those
- * overlapping the ranges), the listing around the top row and the xrefs. Views keep their place: tabs re-decompile in place
- * (the editor maps scroll/cursor onto the new text), the listing refetches at its top row and keeps its row cursor.
+ * overlapping the ranges), the listing and the xrefs. Views keep their place: tabs re-decompile in place (the editor maps scroll/cursor onto
+ * the new text); the listing refetches only its buffered rows that intersect the ranges (all from the top row when a type changed) and keeps
+ * its row cursor.
  */
 export async function onProgramChanged(p: Params, d: ChangeDeps): Promise<void> {
   d.setUndo(p.undo);
@@ -53,6 +54,6 @@ export async function onProgramChanged(p: Params, d: ChangeDeps): Promise<void> 
   const funcs = broad && functionsMayChange(p, d.currentFunctions()) ? await d.refetchFunctions() : d.currentFunctions();
   const open = d.tabs();
   for (const id of broad ? open.map((t) => t.id) : affectedTabs(p.ranges, open, funcs)) d.reloadTab(id);
-  d.refreshListing();
+  d.refreshListing(p.kinds.includes("type") ? null : p.ranges);
   d.refreshXrefs();
 }

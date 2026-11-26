@@ -40,7 +40,8 @@ export function App() {
   const [funcs, setFuncs] = useState<FunctionInfo[]>([]);
   const [map, setMap] = useState<AddrMap | null>(null);
   const [nav, setNavState] = useState<Nav>(emptyNav);
-  const [scrollReq, setScrollReq] = useState<{ address: Address; n: number; refresh?: boolean }>({ address: "" as Address, n: 0 });
+  const [scrollReq, setScrollReq] = useState<{ address: Address; n: number }>({ address: "" as Address, n: 0 });
+  const [listingChange, setListingChange] = useState<{ n: number; ranges: { start: Address; end: Address }[] | null }>({ n: 0, ranges: null });
   const [stats, setStats] = useState<Stats>({});
   const [error, setError] = useState("");
   const [gotoOpen, setGotoOpen] = useState(false);
@@ -204,7 +205,7 @@ export function App() {
       refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
       tabs: () => tabsRef.current().tabs,
       reloadTab: (id) => tabs.reload(id),
-      refreshListing: () => { const a = topAddrRef.current; if (a) setScrollReq((s) => ({ address: a, n: s.n + 1, refresh: true })); },
+      refreshListing: (ranges) => setListingChange((c) => ({ n: c.n + 1, ranges })),
       currentFunctions: () => funcsRef.current, setUndo,
       refreshXrefs: () => setXrefVersion((v) => v + 1),
     }).catch((e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); });
@@ -447,7 +448,7 @@ export function App() {
               <XrefPanel address={here} target={xrefTarget} version={xrefVersion} onGo={(a) => go(a, "xrefs")} onFollow={() => setXrefTarget(null)} />
             </div>
           ),
-          listing: <Listing map={map!} scrollReq={scrollReq} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} onXrefs={(a) => setXrefTarget({ type: "address", address: a, label: a })} />,
+          listing: <Listing map={map!} scrollReq={scrollReq} change={listingChange} topAddrRef={topAddrRef} cursorRef={cursorRef} onEdit={(a) => void edit(a)} onLatency={(ms) => setStats((s) => ({ ...s, listingMs: ms }))} onError={(e) => { if (!(e instanceof RpcError && e.code === -32001)) fail(e); }} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={(a) => setXrefTarget({ type: "address", address: a, label: a })} />,
           decompiler: (
             <div className="dec">
               <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />

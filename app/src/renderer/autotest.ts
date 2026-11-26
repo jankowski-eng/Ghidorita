@@ -6,6 +6,7 @@ import type { MenuCommand, MenuState } from "../preload/index";
 import { runEditFlow, runPhase2, runTypesFlow } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
 import { runR5Flow } from "./autotestR5";
+import { runListingFlow } from "./autotestListing";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -230,6 +231,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.navFindOk = await runNavFlow(await rpc.call("list_functions", {}), c, result);
       result.ok = result.navOk && result.navFindOk === true && result.searchOk && result.quickSwitchOk && result.saveOk === true && result.closeOk === true && result.importOk === true && result.r5Ok === true && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
+      if (result.ok) result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
       if (result.ok) {
         const ed = await runEditFlow(fl, c, result);
         let ok = ed.ok;
@@ -283,9 +285,12 @@ export async function runBench(file: string, c: AutotestCtx) {
           if (d < 100) { stall++; stallRun += performance.now() - t; worst = Math.max(worst, stallRun); } else stallRun = 0;
           t = performance.now();
         }
-        return { frames: f, linesMoved: moved, stallFrames: stall, worstConsecutiveStallMs: Math.round(worst), frameGapMs: frames() };
+        return { frames: f, linesMoved: moved, stallFrames: stall, stallPct: Math.round((1000 * stall) / Math.max(f, 1)) / 10, worstConsecutiveStallMs: Math.round(worst), frameGapMs: frames() };
       };
-      result.fling20s = await fling(20000);
+      for (const [name, t] of [["batch100_margin60", { batch: 100, margin: 60 }], ["batch250_margin400", undefined]] as const) { // round 2 settings vs round 8, same session
+        (window as any).__tune = t; result["fling20s_" + name] = await fling(20000);
+      }
+      (window as any).__tune = undefined;
       (window as any).__lst.length = 0;
 
       let done = false; const dl: number[] = [];

@@ -862,8 +862,8 @@ class Sidecar:
                 continue
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
-            if s is None or s.isExternalAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
-                broad = True  # type events, ...: no usable range
+            if s is None or not s.isMemoryAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
+                broad = True  # type events, stack/register/external addresses, ...: no usable range
             else:
                 ranges.append(self._rng(s, e or s))
         if not kinds:

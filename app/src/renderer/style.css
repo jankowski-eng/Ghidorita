@@ -27,6 +27,10 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .lpane { position: absolute; left: 0; top: 0; bottom: 0; right: 16px; overflow: hidden; }
 .lbar { position: absolute; right: 0; top: 0; bottom: 0; width: 16px; overflow-y: scroll; }
 .lrow.lbl { padding-left: 24px; }
+.lrow .hd { color: #4ec9b0; font-weight: 600; } .lrow .hi { color: #6a9955; } .lrow .pl { color: #ce9178; }
+.lrow .xh { color: #888; } .lrow .xl2 { color: #9cdcfe; cursor: pointer; } .lrow .xl2:hover { text-decoration: underline; } .lrow .xm { color: #dcdcaa; }
+.lrow .pt { width: auto; } .lrow .fold { cursor: pointer; color: #888; font-weight: normal; display: inline-block; width: 0; transform: translateX(-12px); }
+.lrow .rp { color: #7a9a69; }
 :focus-visible { outline: 2px solid #4fc1ff; outline-offset: -2px; }
 .main { overflow: hidden; }
 .pane { min-width: 120px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }

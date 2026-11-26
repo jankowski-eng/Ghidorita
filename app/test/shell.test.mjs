@@ -56,6 +56,9 @@ test("resolveGoto", async () => {
   assert.equal(await ok("add"), "0x5000"); // a name that is also hex: the symbol wins
   assert.equal(await ok("ad"), "0xad");    // bare hex beats a prefix
   assert.equal(await ok("mainl"), "0x2000");
+  assert.equal(await ok("OVL1::0010"), "OVL1::10");           // space-qualified (protocol.md), normalised
+  assert.equal(await ok("code:FF"), "code:ff");
+  assert.equal(await ok("0xffffffffffffffff"), "0xffffffffffffffff");
   for (const bad of ["", "  ", "0x", "0xzz", "0x1ffffffffffffffff", "nope"]) assert.ok("error" in (await resolveGoto(bad, search)), bad);
 });
 test("latest: only the newest request resolves", async () => {

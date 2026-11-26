@@ -1,9 +1,12 @@
 import type { Address, SymbolHit } from "../../../protocol";
+import { fmtAddr, parseAddr } from "./address";
 
 export type GotoResult = { address: Address } | { error: string };
 export type Search = (query: string) => Promise<SymbolHit[]>;
 
 const HEX = /^(0x)?[0-9a-f]{1,16}$/i;
+const QUAL = /^[^:\s]+::?[0-9a-f]{1,16}$/i; // "code:1000", "OVL1::1000" (see protocol.md); "std::add" matches too, so a symbol of that name wins first
+const qual = (s: string): GotoResult => { const p = parseAddr(s)!; return { address: fmtAddr(p.space, p.off) }; };
 const MAX = (1n << 64n) - 1n;
 const norm = (h: string): GotoResult => { const v = BigInt(/^0x/i.test(h) ? h : "0x" + h); return v > MAX ? { error: "address out of range" } : { address: "0x" + v.toString(16) }; };
 
@@ -20,7 +23,7 @@ export function pickHit(hits: SymbolHit[], query: string): SymbolHit | null {
   return best;
 }
 
-/** Go-to input: 0x-hex; else a symbol whose name is exactly the input (so "add" stays a name); else bare hex; else the best name match. */
+/** Go-to input: 0x-hex; else a symbol whose name is exactly the input (so "add" stays a name); else bare hex or a space-qualified address; else the best name match. */
 export async function resolveGoto(input: string, search: Search): Promise<GotoResult> {
   const s = input.trim();
   if (!s) return { error: "enter an address or symbol name" };
@@ -29,6 +32,7 @@ export async function resolveGoto(input: string, search: Search): Promise<GotoRe
   const exact = hits.find((h) => h.name === s);
   if (exact) return { address: exact.address };
   if (HEX.test(s)) return norm(s);
+  if (QUAL.test(s)) return qual(s);
   const h = pickHit(hits, s);
   return h ? { address: h.address } : { error: `no symbol named ${s}` };
 }
