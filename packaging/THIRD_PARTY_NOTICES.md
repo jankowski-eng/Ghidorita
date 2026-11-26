@@ -16,4 +16,13 @@ Ghidrette bundles the components below. The license texts in this folder were co
 | React, React DOM, scheduler | MIT | `react/` |
 | TanStack Virtual | MIT | `tanstack/` |
 
-Not included: the license texts of the C libraries linked into python-build-standalone (OpenSSL, SQLite, libffi, zlib, xz, bzip2, ncurses, readline, gdbm and so on). The `install_only` archive does not ship them; they are listed in python-build-standalone's own documentation.
+The C libraries linked into python-build-standalone (OpenSSL, SQLite, libffi, zlib, xz, bzip2, ncurses, libedit, expat, mpdecimal, zstd, …) have their license texts in `python/LICENSE.*.txt`. They come from the `python/licenses/` folder of python-build-standalone's `-full` archive for release 20261110 (CPython 3.12.16), kept in the repository under `packaging/licenses/python-build-standalone/`; refresh them when the pinned Python changes.
+
+## GPL components and corresponding source
+
+The Ghidra `GPL/` folder (`../ghidra/GPL/`) contains the GNU demangler (`demangler_gnu_v2_24`, `demangler_gnu_v2_41`, GPL-3.0, built from GNU binutils) and the DMG file-system support. They are separate programs/modules that Ghidra starts or loads; the OpenJDK runtime is GPLv2 with the Classpath Exception. The corresponding source:
+
+- Ghidra, including `GPL/`: https://github.com/NationalSecurityAgency/ghidra at the commit in `../BUILD_INFO.json` (`ghidraCommit`).
+- OpenJDK: https://github.com/openjdk/jdk, the tag matching `jdk` in `../BUILD_INFO.json`.
+
+The Ghidrette maintainers still have to decide whether to add a written offer for the source (for example in the release notes or the download page); this file only records where the source is.

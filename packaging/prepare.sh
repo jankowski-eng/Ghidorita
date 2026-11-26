@@ -16,10 +16,10 @@ MODS=java.base,java.compiler,java.datatransfer,java.desktop,java.instrument,java
 GH=$B/ghidra; mkdir -p $GH
 rsync -a --exclude '.DS_Store' "$GHIDRA_INSTALL_DIR"/ $GH/
 trim() { for p in "$@"; do if [ -e "$GH/$p" ]; then printf '%8s  %s\n' "$(du -sh "$GH/$p" | awk '{print $1}')" "$p" >> $LOG; rm -rf "$GH/$p"; fi; done; }
-# Function ID: the .fidbf databases cover MSVC runtimes for Windows PE (x86/x64) only, no Linux/macOS. Keep vs2015/2017/2019 (~93 MB), trim vs2012 and vsOlder (~102 MB).
+# Function ID: the .fidbf databases cover MSVC runtimes for Windows PE (x86/x64) only, no Linux/macOS. Keep vs2015/2017/2019 (~93 MB) and vsOlder_x86 (39 MB: alone it restores all 222 matches of WinHelloCPP.exe, Round 12), trim vs2012 and vsOlder_x64 (~63 MB).
 FID=Ghidra/Features/FunctionID/data
-trim $(cd $GH && ls -d $FID/vs2012_* $FID/vsOlder_* 2>/dev/null)
-for p in $(cd $GH && ls -d $FID/vs20*.fidbf 2>/dev/null); do printf '%8s  %s (kept)\n' "$(du -sh "$GH/$p" | awk '{print $1}')" "$p" >> $LOG; done
+trim $(cd $GH && ls -d $FID/vs2012_* $FID/vsOlder_x64* 2>/dev/null)
+for p in $(cd $GH && ls -d $FID/vs20*.fidbf $FID/vsOlder_x86*.fidbf 2>/dev/null); do printf '%8s  %s (kept)\n' "$(du -sh "$GH/$p" | awk '{print $1}')" "$p" >> $LOG; done
 trim docs Extensions Ghidra/Debug Ghidra/Features/GhidraServer Ghidra/Features/BSim
 trim GPL/DMG/data/os GPL/DemanglerGnu/os/mac_x86_64 Ghidra/Features/Decompiler/os/mac_x86_64 Ghidra/Features/FileFormats/os/mac_x86_64
 trim support/GhidraGo support/bsim support/bsim_ctl support/eclipse support/jshellRun support/buildGhidraJar support/convertStorage support/updateServerAllowList support/ghidraClean support/ghidraDebug
@@ -52,7 +52,8 @@ N=$B/THIRD_PARTY_NOTICES; mkdir -p $N/{ghidra,jdk,python,jpype,websockets,electr
 cp "$GHIDRA_INSTALL_DIR/LICENSE" $N/ghidra/LICENSE; [ -n "${GHIDRA_SRC:-}" ] && cp "$GHIDRA_SRC/NOTICE" $N/ghidra/NOTICE   # NOTICE is not in the distribution zip
 cp $B/jdk/legal/java.base/{LICENSE,ASSEMBLY_EXCEPTION,ADDITIONAL_LICENSE_INFO} $N/jdk/
 cp $B/python/lib/python3.12/LICENSE.txt $N/python/LICENSE.cpython.txt
-curl -fsSL https://raw.githubusercontent.com/astral-sh/python-build-standalone/main/LICENSE -o $N/python/LICENSE.python-build-standalone.txt
+# licenses of the C libraries inside python-build-standalone (OpenSSL, SQLite, libffi, zlib, xz, ...): copied from the python/licenses/ of PBS's -full archive for the pinned release (packaging/licenses/)
+cp packaging/licenses/python-build-standalone/*.txt $N/python/
 SP=$B/python/lib/python3.12/site-packages
 cp $SP/jpype1-*.dist-info/licenses/{LICENSE,NOTICE} $N/jpype/; cp $SP/websockets-*.dist-info/licenses/LICENSE $N/websockets/
 for f in $SP/packaging-*.dist-info/licenses/LICENSE*; do cp $f $N/python/LICENSE.packaging${f##*/LICENSE}; done
