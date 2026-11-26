@@ -103,3 +103,38 @@ def test_wrong_architecture(qemu, proc):
             assert "architecture" in r["error"]["message"].lower(), r
             assert (await c.ok("debug_status"))["state"] == "detached"
     run(go())
+
+
+def test_statement_step(qemu, proc):
+    """Statement steps in main_loop run over the calls, stop at the boundaries of main_loop, and a breakpoint inside a called function ends the step there."""
+    async def go():
+        async with Client(proc.port) as c:
+            await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x0")
+            await c.ok("clear_code", address=WORK_A, length=0x2a)  # a raw image has no functions yet: the analysis left data after the vectors
+            for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop")):
+                await c.ok("create_function", address=a, name=n)
+            toks = (await c.ok("decompile", entry=MAIN))["tokens"]
+            first = {}
+            for t in toks:
+                if t.get("address"):
+                    first[t["line"]] = min(first.get(t["line"], int(t["address"], 16)), int(t["address"], 16))
+            bounds = sorted(hex(a) for a in first.values())
+            assert len(bounds) >= 2, toks
+            await c.err("debug_step", INVALID, mode="statement")
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu)
+            n, st = await stop_at(c)
+            for _ in range(3):  # never inside work_a / work_b (0x8..0x27): the calls are run over
+                await c.ok("debug_step", mode="statement", boundaries=bounds)
+                assert (await stop_at(c, n, "running"))[1]["state"] == "running"
+                n, st = await stop_at(c, n)
+                assert st["address"] in bounds and int(st["address"], 16) >= 0x28, (st["address"], bounds)
+            await c.ok("debug_breakpoint", address=WORK_B)
+            n, _ = await stop_at(c, n)  # the toggle announces the same stop again
+            for _ in range(4):
+                await c.ok("debug_step", mode="statement", boundaries=bounds)
+                n, st = await stop_at(c, n)
+                if st["address"] == WORK_B:
+                    break
+            assert st["address"] == WORK_B, st["address"]  # the breakpoint inside the call ended the step
+            await c.ok("debug_detach")
+    run(go())

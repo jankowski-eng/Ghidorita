@@ -178,7 +178,7 @@ Row building stays on thread R and costs a few Ghidra calls per row; bench numbe
 | `debug_detach` | `{}` | Detaches (`D`) and closes. The breakpoints stay. |
 | `debug_breakpoint` | `{address}` | Toggles a breakpoint at the program address (`Z0`/`z0` at address + offset when attached and stopped; otherwise only remembered and installed on the next attach). `Busy` while running ("Pause the target before changing breakpoints"). |
 | `debug_continue` | `{}` | Resumes (first one instruction off a breakpoint at the pc, like gdb). `state` `running` is announced, the next stop arrives as `stopped`. |
-| `debug_step` | `{}` | One instruction, then `stopped` is announced. |
+| `debug_step` | `{mode?="instruction", boundaries?}` | `instruction`: one instruction, then `stopped` is announced. `statement` (needs `boundaries`: the program addresses where a statement of the pc's function starts, at most 5000, taken from the client's decompiler line mapping so the stop and the highlight agree): `running` is announced and the target is stepped instruction by instruction until the pc is at a boundary, at a breakpoint, or outside the function. A call is run over (a temporary breakpoint after it); a return stops in the caller; `debug_pause` ends it; after 20000 instructions it stops where it is. `InvalidArgument` for a statement step without boundaries. |
 | `debug_pause` | `{}` | Ctrl-C; the stop arrives as `stopped`. `Busy` if not running. |
 | `debug_status` | `{}` | The current `DebugState`. |
 

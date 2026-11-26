@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Address } from "../../../protocol";
-import { bpLines, firstAddress, inFunction, lineForAddress } from "./debug";
+import { bpLines, firstAddress, inFunction, lineForAddress, statementRange } from "./debug";
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
@@ -44,6 +44,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const toggleBp = (a: Address | null) => { if (a) void s.debugAction("breakpoint", a); };
   const here_fn = active ? funcs.find((f) => f.entry === active.entry) : undefined;
   const pcLine = ad && stoppedAt && here_fn && inFunction(here_fn, stoppedAt) ? lineForAddress(ad.tokens, stoppedAt) : null; // only in the function that holds the stop
+  const stmt = ad && pcLine !== null && stoppedAt ? statementRange(ad.tokens, pcLine, stoppedAt) : null; // the instructions behind the current line
   const bpl = useMemo(() => (ad && bps.length ? bpLines(ad.tokens, bps) : []), [ad?.tokens, bps.join(",")]); // eslint-disable-line
 
   if (!map) return (
@@ -64,7 +65,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {caps.has("references") && <XrefPanel references={ops.references} variableReferences={caps.has("variableReferences")} address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { set({ useHl: use ? { name: use.name, address: a } : null }); void go(a, "xrefs"); }} onFollow={() => set({ xrefTarget: null, useHl: null })} />}
         </div>
       ),
-      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
+      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} stmt={stmt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
       decompiler: caps.has("decompile") && (
         <div className="dec">
           <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />

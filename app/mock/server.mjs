@@ -495,7 +495,14 @@ const handlers = {
     if (dbg.state === "running") throw { code: -32005, message: "Pause the target before changing breakpoints" };
     dbgNotify = notify; dbg.bps = dbg.bps.includes(a) ? dbg.bps.filter((x) => x !== a) : [...dbg.bps, a]; dbgPublish(); return {};
   },
-  debug_step(_, notify) { dbgNotify = notify; dbgNeed("stopped"); const f = dbg.pc - ((dbg.pc - BASE) % STEP); dbgStopAt(f + ((dbg.pc - f + 4) % 0x30)); return {}; },
+  debug_step({ mode = "instruction", boundaries } = {}, notify) {
+    dbgNotify = notify; dbgNeed("stopped"); const f = dbg.pc - ((dbg.pc - BASE) % STEP);
+    if (mode === "statement") { // the next boundary after the pc, else the first one (the sidecar stops at a boundary, a breakpoint or outside the function)
+      const b = (boundaries ?? []).map(parseAddr).filter((a) => a >= 0).sort((x, y) => x - y); if (!b.length) bad("boundaries");
+      dbgStopAt(b.find((a) => a > dbg.pc) ?? b[0]); return {};
+    }
+    dbgStopAt(f + ((dbg.pc - f + 4) % 0x30)); return {};
+  },
   debug_continue(_, notify) {
     dbgNotify = notify; dbgNeed("stopped"); const from = dbg.pc; dbg.state = "running"; dbgPublish();
     const next = [...dbg.bps].sort((x, y) => x - y).find((b) => b > from) ?? dbg.bps.slice().sort((x, y) => x - y)[0];

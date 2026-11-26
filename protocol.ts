@@ -176,7 +176,8 @@ export interface Methods {
   debug_status: { params: {}; result: DebugState };
   debug_breakpoint: { params: { address: Address }; result: {} };
   debug_continue: { params: {}; result: {} };
-  debug_step: { params: {}; result: {} };
+  // mode "statement": runs instruction by instruction until the pc is at one of `boundaries` (program addresses where a statement of the pc's function starts: the client's decompiler line mapping; at most 5000), at a breakpoint or outside the function; a call is run over, a return stops in the caller; debug_pause ends it. The state is `running` meanwhile.
+  debug_step: { params: { mode?: "instruction" | "statement"; boundaries?: Address[] }; result: {} };
   debug_pause: { params: {}; result: {} };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };

@@ -125,7 +125,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
 
   /** The debug menu (attach is a dialog, features/debug.ts): detach, continue, pause, step, toggle a breakpoint at `address`. The result is the debug_state that follows. */
   const debugChanged = (sessionId: string, state: DebugState) => { if (get().program?.session.sessionId === sessionId) dispatch({ type: "debug", state }); };
-  const debugAction = (a: "detach" | "continue" | "pause" | "step" | "breakpoint", address?: Address) => send(async () => {
+  const debugAction = (a: "detach" | "continue" | "pause" | "step" | "breakpoint", address?: Address, step?: { mode: "statement"; boundaries: Address[] }) => send(async () => {
     const current = get().program;
     if (!current) return;
     const d = current.api.debug, st = get().debug?.state ?? "detached";
@@ -133,7 +133,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
     else if (st === "detached") flash("Not attached to a target. Use Debug > Attach to QEMU…");
     else if (a === "detach") await d.detach();
     else if (a === "pause") { if (st === "running") await d.pause(); }
-    else if (st === "stopped") await (a === "continue" ? d.continue() : d.step());
+    else if (st === "stopped") await (a === "continue" ? d.continue() : d.step(step));
   });
 
   const closeProgram = async () => {

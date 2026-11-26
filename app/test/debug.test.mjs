@@ -56,3 +56,12 @@ test("program: registers changed since the last stop; a repeated state is not a 
   assert.deepEqual(s.debugLast, {});
   assert.deepEqual(programReducer(s, { type: "program", program: null }).debug, null);
 });
+
+const { lineStarts, statementRange } = await load("debug.ts");
+test("lineStarts and statementRange: statement starts, and the instructions behind a line", () => {
+  assert.deepEqual(lineStarts(tokens), ["0x1010", "0x1020"]); // the lowest address of each line with one; "ram:30" is another space
+  assert.deepEqual(statementRange(tokens, 3, "0x1014"), { start: "0x1010", end: "0x101f" }); // up to the next statement start
+  assert.deepEqual(statementRange(tokens, 4, "0x1020"), { start: "0x1020", end: "0x1020" }); // the last statement: its first address only
+  assert.deepEqual(statementRange(tokens, 3, "0x1000"), { start: "0x1000", end: "0x101f" }); // the prologue before the first statement belongs to it
+  assert.equal(statementRange(tokens, 5, "0x1000"), null);
+});

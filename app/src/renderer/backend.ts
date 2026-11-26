@@ -147,7 +147,8 @@ export interface DebugControl {
   detach(): Promise<{}>;
   breakpoint(params: { address: Address }): Promise<{}>;
   continue(): Promise<{}>;
-  step(): Promise<{}>;
+  /** mode "statement": run to the next of `boundaries` (program addresses where a statement of the pc's function starts) */
+  step(params?: { mode?: "instruction" | "statement"; boundaries?: Address[] }): Promise<{}>;
   pause(): Promise<{}>;
   status(): Promise<DebugState>;
 }

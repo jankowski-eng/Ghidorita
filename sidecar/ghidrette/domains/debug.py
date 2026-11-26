@@ -16,7 +16,8 @@ from ..core.rpc import rpc
 # gdb architecture name -> Ghidra processor, for the "unknown architecture" check (an architecture missing here is only checked by its pc)
 PROCESSORS = {"arm": "ARM", "aarch64": "AARCH64", "riscv": "RISCV", "i386": "x86", "mips": "MIPS", "powerpc": "PowerPC", "xtensa": "Xtensa", "m68k": "68000", "sparc": "sparc"}
 ALIASES = {"xpsr": "cpsr"}  # a gdb register name Ghidra spells differently (Cortex-M's program status)
-MAX_BITS = 128  # wider registers (vectors) are not shown
+MAX_BITS = 128
+MAX_STEPS, CALL_SECS, MAX_BOUNDARIES = 20000, 60, 5000  # a statement step gives up after this many instructions (it stops where it is)  # wider registers (vectors) are not shown
 
 
 class Debug:
@@ -27,6 +28,7 @@ class Debug:
         self.sid = None
         self.state, self.target, self.error = "detached", "", ""
         self.offset = 0
+        self.cancel = threading.Event()  # pause during a statement step
         self.stops = 0  # stops announced since the process started: a client tells a new stop from a repeated state (a breakpoint toggled while stopped)
         self.address, self.registers, self.bps = None, [], []  # bps: program addresses (ints) in the order they were set
         self.regs, self.pc, self.big, self.bp_kind = [], None, False, 4
@@ -202,30 +204,47 @@ class Debug:
             self.publish()
             return {}
 
-    def _single_step(self, g):
+    def _single_step(self, g, pc):
         """One instruction, waited for, with a breakpoint at the pc taken out meanwhile (like gdb); returns the stop reply."""
-        at = self.address in self.bps
+        at = pc in self.bps
         if at:
-            self._z(g, "z", self.address)
+            self._z(g, "z", pc)
         try:
             return g.resume("s", wait=True)
         finally:
             if at and not g.closed:
-                self._z(g, "Z", self.address)
+                self._z(g, "Z", pc)
 
     def _pc_of(self, g):
         r = self._req(g, "p%x" % next(n for n, name in self.names.items() if name == self.pc))
         return int.from_bytes(bytes.fromhex(r), "big" if self.big else "little") - self.offset
 
     @rpc(lane="R")
-    def debug_step(self):
-        """One instruction; the stop arrives as debug_state."""
+    def debug_step(self, mode="instruction", boundaries=None):
+        """One instruction, or (mode "statement") up to the next of `boundaries` (program addresses where a statement of the pc's function
+        starts, from the client's decompiler mapping); the stop arrives as debug_state."""
+        if mode not in ("instruction", "statement"):
+            raise RpcError(INVALID, "mode is instruction or statement")
+        if mode == "statement":
+            try:
+                starts = {int(a, 16) for a in boundaries[:MAX_BOUNDARIES]} if isinstance(boundaries, list) and boundaries and all(isinstance(a, str) and a.lower().startswith("0x") for a in boundaries) else None
+            except ValueError:
+                starts = None
+            if starts is None:
+                raise RpcError(INVALID, "A statement step needs the statement start addresses (boundaries)")
         with self.lock:
             g = self._live()
             if self.state != "stopped":
                 raise RpcError(BUSY, "The target is running")
+            pc = self.address
+            if mode == "statement":
+                self.cancel.clear()
+                self.state, self.address, self.registers, self.error = "running", None, [], ""
+                self.publish()
+                threading.Thread(target=self._statement, args=(g, pc, starts), daemon=True, name="debug-statement").start()
+                return {}
             try:
-                r = self._single_step(g)
+                r = self._single_step(g, pc)
             except GdbError as e:
                 if g.running:  # no stop reply yet (an instruction that waits): it will arrive on its own
                     self.state, self.address, self.registers = "running", None, []
@@ -233,6 +252,58 @@ class Debug:
                 raise RpcError(TARGET, str(e))
             self._stopped(g, r)
             return {}
+
+    def _statement(self, g, pc, starts):
+        """Worker: instruction by instruction until the pc is at a statement start, a user breakpoint, outside the function (a call is run over
+        to the instruction after it; a return stops in the caller), or pause. shortcut: the temporary breakpoint after a call also stops a
+        recursive callee's return to the same address; upgrade: compare sp."""
+        r = "T05"
+        try:
+            prog = self.ses.need()
+            func = prog.getFunctionManager().getFunctionContaining(prog.getAddressFactory().getDefaultAddressSpace().getAddress(pc))
+            body = func.getBody() if func is not None else None
+            listing, space = prog.getListing(), prog.getAddressFactory().getDefaultAddressSpace()
+            for _ in range(MAX_STEPS):
+                ins = listing.getInstructionAt(space.getAddress(pc))
+                r = self._single_step(g, pc)
+                if r[0] in "WX" or self.cancel.is_set():
+                    break
+                npc = self._pc_of(g)
+                if npc in self.bps or (body is not None and body.contains(space.getAddress(npc)) and npc in starts):
+                    break
+                if body is None or ins is None or body.contains(space.getAddress(npc)):
+                    pc = npc
+                    if body is None:
+                        break
+                    continue
+                if not ins.getFlowType().isCall():  # left the function by a return or a jump: stop there
+                    break
+                after = ins.getFallThrough()
+                if after is None:
+                    break
+                back, temp = after.getOffset(), after.getOffset() not in self.bps
+                if temp:
+                    self._z(g, "Z", back)
+                try:
+                    r = g.resume("c", wait=True, timeout=CALL_SECS)
+                finally:
+                    if temp and not g.closed:
+                        self._z(g, "z", back)
+                if r[0] in "WX" or self.cancel.is_set():
+                    break
+                pc = self._pc_of(g)
+                if pc != back or pc in self.bps or pc in starts:  # a user breakpoint or pause inside the callee, or the next statement begins right after the call
+                    break
+            self._stopped(g, r)
+        except (GdbError, RpcError) as e:
+            if g.running:  # the stop will still arrive (on_stop) when the target stops
+                return
+            if self.g is g:
+                self._drop(str(e))
+        except Exception as e:  # noqa: a bug here must not leave the UI on "running"
+            log("statement step failed:", repr(e))
+            if self.g is g:
+                self._drop("The statement step failed: %s" % e)
 
     @rpc(lane="R")
     def debug_continue(self):
@@ -242,7 +313,7 @@ class Debug:
                 raise RpcError(BUSY, "The target is already running")
             try:
                 if self.address in self.bps:  # off the breakpoint first, or it would hit again at once
-                    r = self._single_step(g)
+                    r = self._single_step(g, self.address)
                     if r[0] in "WX" or self._pc_of(g) in self.bps:
                         self._stopped(g, r)
                         return {}
@@ -260,7 +331,9 @@ class Debug:
             if self.state != "running":
                 raise RpcError(BUSY, "The target is not running")
             try:
-                g.interrupt()
+                self.cancel.set()  # a statement step ends after its current instruction
+                if g.running:
+                    g.interrupt()
             except GdbError as e:
                 raise RpcError(TARGET, str(e))
             return {}

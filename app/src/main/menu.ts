@@ -94,7 +94,7 @@ export function createMenu({ getWin, pick }: Deps) {
       ] },
       { label: "Debug", submenu: ([
         ["Attach to QEMU…", "", "attach"], ["Detach", "", "detach"], [null, "", ""],
-        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Instruction", "F7", "step"], ["Toggle Breakpoint", "F9", "breakpoint"],
+        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Statement", "F7", "step"], ["Step Instruction", "F8", "stepi"], ["Toggle Breakpoint", "F9", "breakpoint"],
       ] as const).map(([label, key, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
         : { id: "debug-" + action, label, accelerator: key || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
       { role: "windowMenu" },

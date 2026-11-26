@@ -203,3 +203,4 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .regs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 18px; }
 .reg { display: flex; gap: 10px; padding: 1px 4px; border-radius: 2px; } .reg .rn { min-width: 6ch; color: #9cdcfe; }
 .reg.changed { background: #4d3a12; color: #ffd866; } .reg.changed .rn { color: #ffd866; font-weight: 700; } .reg.stale { opacity: .5; }
+.lrow.stmt { background: #2b2a12; box-shadow: inset 3px 0 0 #8a7a2e; } .lrow.stmt.cursor { background: #094771; }

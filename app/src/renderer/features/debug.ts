@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Address } from "../../../../protocol";
-import { firstAddress, parseTarget } from "../debug";
+import { firstAddress, lineStarts, parseTarget } from "../debug";
 import { useProgram, useSession } from "../store/session";
 import type { TabsApi } from "../useTabs";
 import type { Navigation } from "./navigation";
@@ -35,6 +35,19 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
     views.dispatch({ type: "set", patch: { formDlg: { title: "Attach to QEMU", submit: "Attach", fields: [{ key: "target", label: "gdbstub address (host:port)", initial: "localhost:1234" }],
       go: async (v) => { await current.api.debug.attach(parseTarget(v.target)); } } } });
   };
-  return { breakpointAddress, attachDialog };
+  /** F7: one statement of the function holding the stop (the decompiler's line mapping gives the statement starts), else one instruction. */
+  const stepStatement = async () => {
+    const current = s.program(), d = store.getState().debug;
+    if (!current || !d || d.state !== "stopped" || !d.address) return void s.debugAction("step");
+    let starts: Address[] = [];
+    try {
+      const f = await current.lookup.containing(d.address);
+      const tab = f && tabs.state.tabs.find((t) => t.entry === f.entry), data = tab ? tabs.data[tab.id] : undefined;
+      if (f && s.caps.has("decompile")) starts = lineStarts(data?.status === "ready" ? data.tokens : (await current.api.decompiler.decompile({ entry: f.entry }).result).tokens);
+    } catch (e) { s.fail(e); return; }
+    if (!starts.length) { s.flash("No decompiler lines here: stepped one instruction."); return void s.debugAction("step"); }
+    await s.debugAction("step", undefined, { mode: "statement", boundaries: starts });
+  };
+  return { breakpointAddress, attachDialog, stepStatement };
 }
 export type DebugFeature = ReturnType<typeof useDebug>;

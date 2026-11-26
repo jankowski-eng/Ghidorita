@@ -244,7 +244,7 @@ export class WebSocketBackend implements ApplicationBackend {
       },
       debug: {
         attach: (p) => read("debug_attach", p, "debugger"), detach: () => read("debug_detach", {}, "debugger"), breakpoint: (p) => read("debug_breakpoint", p, "debugger"),
-        continue: () => read("debug_continue", {}, "debugger"), step: () => read("debug_step", {}, "debugger"), pause: () => read("debug_pause", {}, "debugger"),
+        continue: () => read("debug_continue", {}, "debugger"), step: (p) => read("debug_step", p ?? {}, "debugger"), pause: () => read("debug_pause", {}, "debugger"),
         status: () => read("debug_status", {}, "debugger"),
       },
     };

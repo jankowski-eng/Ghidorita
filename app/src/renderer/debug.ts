@@ -62,3 +62,19 @@ export function parseTarget(text: string): { host: string; port: number } {
   const m = /^\s*(.*?)(?::(\d+))?\s*$/.exec(text) ?? [];
   return { host: m[1] || "localhost", port: m[2] ? Number(m[2]) : 1234 };
 }
+
+/** The first (lowest) address of every decompiler line that maps one, sorted and unique: where a statement starts (what a statement step runs to). */
+export function lineStarts(tokens: Token[]): Address[] {
+  const first = new Map<number, { a: bigint; s: Address }>();
+  for (const t of tokens) { const a = t.address ? num(t.address) : null; if (a !== null && (!first.has(t.line) || a < first.get(t.line)!.a)) first.set(t.line, { a, s: t.address! }); }
+  const seen = new Set<bigint>();
+  return [...first.values()].filter((v) => !seen.has(v.a) && !!seen.add(v.a)).sort((x, y) => (x.a < y.a ? -1 : 1)).map((v) => v.s);
+}
+
+/** The instructions behind a decompiler line: from its first address (or the stop, if it is earlier: the prologue) up to the next statement start. */
+export function statementRange(tokens: Token[], line: number, pc: Address): { start: Address; end: Address } | null {
+  const mine = firstAddress(tokens, line), p = num(pc), m = mine ? num(mine) : null;
+  if (m === null || p === null) return null;
+  const next = lineStarts(tokens).map((s) => num(s)!).find((a) => a > m);
+  return { start: "0x" + (p < m ? p : m).toString(16), end: "0x" + ((next ?? m + 1n) - 1n).toString(16) };
+}
