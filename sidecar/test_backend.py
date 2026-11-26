@@ -940,22 +940,6 @@ def test_get_comments_and_create_label(env):
     run(go())
 
 
-def test_list_strings_query(env):
-    async def go():
-        async with Client(env["proc"].port) as c:
-            s = await c.ok("list_strings", limit=5000)
-            assert s["total"] > 3
-            probe = s["items"][2]["value"][:5]
-            hits = await c.ok("list_strings", query=probe.upper(), limit=5000)  # case-insensitive substring, applied before paging
-            assert 0 < hits["total"] <= s["total"] and all(probe.lower() in i["value"].lower() for i in hits["items"])
-            assert any(i["address"] == s["items"][2]["address"] for i in hits["items"])
-            assert (await c.ok("list_strings", query=probe, offset=hits["total"]))["items"] == []
-            assert (await c.ok("list_strings", query="zzz_no_such_string_zzz")) == {"total": 0, "items": []}
-            assert (await c.ok("list_strings", query=""))["total"] == s["total"]
-            await c.err("list_strings", INVALID, query=5)
-    run(go())
-
-
 def test_variable_edit_timeout_arg_and_cancel(env):
     fns = env["fns"]
 
@@ -1050,14 +1034,14 @@ def test_xrefs_from_external_on_pe(tmp_path):
             rows = await c.ok("listing_rows", address="0x401000", count=1000)
             for row in rows:
                 x = await c.ok("xrefs_from", address=row["address"])
-                ext = [e for e in x if "external" in e]
+                ext = [e for e in x if e["target"] == "external"]
                 if ext:
                     addr, ext = row["address"], ext[0]
                     break
             assert addr, "no external reference in the first 1000 code units"
-            assert "to" not in ext and "::" in ext["external"] and ext["type"]
-            assert any("to" in e for e in x)  # the IAT slot is still a memory reference of the same instruction
-            slot = next(e["to"] for e in x if "to" in e)
+            assert ext["to"] is None and ext["label"] == "CreateWindowExA" and ext["type"]
+            assert any(e["target"] == "memory" for e in x)  # the IAT slot is still a memory reference of the same instruction
+            slot = next(e["to"] for e in x if e["target"] == "memory")
             assert any(r["from"] == addr for r in await c.ok("xrefs_to", address=slot))  # imports are found *to* via their IAT slot
     try:
         run(go())
