@@ -54,6 +54,7 @@ export interface Token {
   colEnd: number;    // exclusive
   kind: TokenKind;
   address?: Address;        // address of the originating instruction, if any
+  varAddress?: Address;     // variable/param tokens only: the memory address of a global variable (xrefs_to this address finds its references); absent for locals and temporaries
   varName?: string;
   targetFunction?: Address; // set on function-name tokens of calls to a known function
 }
@@ -138,6 +139,8 @@ export interface Methods {
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
+  // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.
+  variable_uses: { params: { entry: Address; name: string; timeoutSecs?: number }; result: XrefTo[] };
   xrefs_from: { params: { address: Address }; result: XrefFrom[] };
   list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string }; result: { total: number; items: StringItem[] } };
   search_memory: { params: SearchMemoryParams; result: { items: MemoryHit[]; next: Address | null } };

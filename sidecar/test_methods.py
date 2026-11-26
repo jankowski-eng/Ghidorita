@@ -11,7 +11,7 @@ GOLDEN = {
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
     "search_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "search_memory": "scan", "list_data_types": "scan",
-    "decompile": "decomp",
+    "decompile": "decomp", "variable_uses": "decomp",
     "rename_variable": "R+job", "retype_variable": "R+job", "auto_create_structure": "R+job",
     **{m: "R" for m in (
         "list_functions", "load_coverage", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable", "xrefs_from",

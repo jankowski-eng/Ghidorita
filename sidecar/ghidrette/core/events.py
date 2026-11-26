@@ -3,7 +3,7 @@
 The listener runs on Ghidra's event thread; it only copies data and never touches the DB. Everything that caches something derived
 from the program (decompile cache, symbol/string snapshots) calls `subscribe(fn(kinds, ranges, broad))`: fn runs for every change
 (and for `reset()`, a program swap) on whatever thread caused it, so it must be quick and thread-safe. `ranges` is a list of
-(start, end) offsets, None when `broad` (no usable range: type events, other spaces, undo/redo, a swap).
+(space name, first offset, last offset), None when `broad` (no usable range: type events, stack/register addresses, undo/redo, a swap).
 """
 import threading
 
@@ -72,7 +72,7 @@ class Events:
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
             if s is None or not s.isMemoryAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
-                broad = True  # type events, stack/register/external addresses, ...: no usable range
+                broad = True  # type events, stack/register/external addresses, a range across spaces: no usable range
             else:
                 ranges.append(self.ctx.session.rng(s, e or s))
         if not kinds:

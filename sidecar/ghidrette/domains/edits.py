@@ -54,6 +54,7 @@ class Edits:
 
     @rpc(lane="R")
     def create_function(self, address, name=None):
+        from ghidra.app.cmd.disassemble import DisassembleCommand
         from ghidra.app.cmd.function import CreateFunctionCmd
         from ghidra.program.model.symbol import SourceType
         prog = self.ses.need()
@@ -63,7 +64,11 @@ class Edits:
         if fm.getFunctionContaining(a) is not None:
             raise RpcError(INVALID, "address is already inside a function")
         cmd = (CreateFunctionCmd(name, a, None, SourceType.USER_DEFINED) if name else CreateFunctionCmd(a))
-        self.ses.edit("Create function at %s" % address, self.ses.cmd(cmd))
+        def run(p):  # as Ghidra's Create Function action: undefined bytes are disassembled first (else the body is the entry byte only)
+            if p.getListing().getInstructionAt(a) is None and p.getListing().getDefinedDataAt(a) is None:
+                DisassembleCommand(a, None, True).applyTo(p)
+            self.ses.cmd(cmd)(p)
+        self.ses.edit("Create function at %s" % address, run)
         f = fm.getFunctionAt(a)
         if f is None:
             raise RpcError(INTERNAL, "function was not created")

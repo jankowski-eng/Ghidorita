@@ -31,3 +31,10 @@ def bproc(tmp_path_factory):
     proc = Proc(d / "projects")
     yield proc, d
     proc.stop()
+
+
+@pytest.fixture(scope="session")
+def sc():
+    """The in-process sidecar (inproc.py), one JVM for every test file that uses it."""
+    import inproc
+    return inproc.start()

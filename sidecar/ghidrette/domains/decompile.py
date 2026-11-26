@@ -5,7 +5,7 @@ decompile_for_edit is the one function other domains may call (highvars): a deco
 import contextlib, threading
 from collections import OrderedDict
 
-from ..core.args import MASK64, lim
+from ..core.args import MASK64, akey, lim, text_arg
 from ..core.errors import CANCELLED, INTERNAL, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
 from ..core.rpc import rpc
 
@@ -46,7 +46,7 @@ def decompile_for_edit(ctx, prog, func, timeoutSecs, job):
 class Decompile:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
-        self.cache = OrderedDict()   # entry offset -> (lo, hi, result); cache_lock
+        self.cache = OrderedDict()   # (space, entry offset) -> (space, lo, hi, result); cache_lock
         self.cache_ver = 0
         self.cache_lock = threading.Lock()
         ctx.events.subscribe(self._invalidate)
@@ -54,13 +54,10 @@ class Decompile:
     def _invalidate(self, kinds, ranges, broad):
         # decompile output embeds names/types of other symbols, so only comment/code changes are ranged; shortcut:
         # symbol/function/data/type/other changes clear the whole cache, upgrade by tracking referenced addresses per entry.
-        # the cache is keyed by default-space offsets (shortcut: a function inside an overlay clears everything, upgrade by keying on the Address)
-        prog = self.ses.program
-        dname = str(prog.getAddressFactory().getDefaultAddressSpace().getName()) if prog is not None else ""
-        if broad or not kinds <= RANGE_ONLY_KINDS or any(sp != dname for sp, _, _ in ranges):
+        if broad or not kinds <= RANGE_ONLY_KINDS:
             self.cache_clear()
         else:
-            self.cache_invalidate([(a, b) for _, a, b in ranges])
+            self.cache_invalidate(ranges)
 
     # ---- decompile cache (shared by the pool and by the event listener) ----
     def cache_clear(self):
@@ -69,14 +66,29 @@ class Decompile:
             self.cache_ver += 1
 
     def cache_invalidate(self, ranges):
+        """ranges: (space name, first offset, last offset), as events.record gives them."""
         with self.cache_lock:
-            for k in [k for k, (lo, hi, _) in self.cache.items() if any(s <= hi and e >= lo for s, e in ranges)]:
+            for k in [k for k, (sp, lo, hi, _) in self.cache.items() if any(sp == rs and s <= hi and e >= lo for rs, s, e in ranges)]:
                 del self.cache[k]
             self.cache_ver += 1  # also stops in-flight decompiles from storing a pre-edit result
 
     # ---- decompile (pool worker) ----
     @rpc(lane="decomp")
     def decompile(self, entry, timeoutSecs=30, job=None):
+        out, hit = self._run(entry, timeoutSecs, job, (), lambda prog, func, res: self._tokens(prog, res))
+        return {**out, "cached": hit}
+
+    @rpc(lane="decomp")
+    def variable_uses(self, entry, name, timeoutSecs=30, job=None):
+        """Where the decompiler's variable `name` (iVar1, a register temporary, a global...) is written and read inside the function at
+        `entry`: [{from, type, kind: "write"|"read", function}] sorted by address. The uses of every variable of the function are
+        computed from one decompile and cached with the decompile cache (same invalidation), so a second variable costs nothing."""
+        text_arg(name, "name")
+        uses, _ = self._run(entry, timeoutSecs, job, ("uses",), self._uses)
+        return uses.get(name, [])
+
+    def _run(self, entry, timeoutSecs, job, tag, work):
+        """The pool worker's decompile: returns (work(prog, func, results), cached). The cache key is the entry's (space, offset) plus `tag`."""
         from ghidra.app.decompiler import DecompInterface
         from ghidra.pyghidra import PyGhidraTaskMonitor
         w = self.ctx.lanes.worker()
@@ -94,13 +106,13 @@ class Decompile:
             func = prog.getFunctionManager().getFunctionAt(a)
             if func is None:
                 raise RpcError(NOT_FOUND, "no function at %s" % entry)
-            key = a.getOffset()
+            key = (str(a.getAddressSpace().getName()), a.getOffset() & MASK64) + tag
             with self.cache_lock:
                 ver = self.cache_ver
                 hit = self.cache.get(key)
                 if hit is not None:
                     self.cache.move_to_end(key)
-                    return {**hit[2], "cached": True}
+                    return hit[3], True
             if w.decomp is None or w.epoch != epoch:
                 self.ctx.lanes.dispose(w)
                 d = DecompInterface()
@@ -119,24 +131,49 @@ class Decompile:
                 raise RpcError(TIMEOUT, "decompile timed out after %ss" % timeoutSecs)
             if not res.decompileCompleted():
                 raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
-            out = self._tokens(prog, res)
+            out = work(prog, func, res)
             body = func.getBody()
             with self.cache_lock:
                 if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store
-                    self.cache[key] = (body.getMinAddress().getOffset() & MASK64, body.getMaxAddress().getOffset() & MASK64, out)
+                    self.cache[key] = (key[0], body.getMinAddress().getOffset() & MASK64, body.getMaxAddress().getOffset() & MASK64, out)
                     if len(self.cache) > 256:
                         self.cache.popitem(last=False)
-            return {**out, "cached": False}
+            return out, False
         finally:
             with self.ses.lock:
                 w.busy = False
                 self.ctx.lanes.running.discard(job)
 
+    def _uses(self, prog, func, res):
+        """name -> sorted [{from, type, kind, function}] for every high variable of the function: the defining op of each varnode
+        instance is a write, each op reading it a read. Instruction address of the op; phi (MULTIEQUAL) and INDIRECT ops are not uses.
+        Locals only (globals have an address: xrefs_to), whose p-code includes the decompiler's own save/restore copies."""
+        from ghidra.program.model.pcode import PcodeOp
+        hf, fa, fname = res.getHighFunction(), self.ses.fmtr(prog), str(func.getName())
+        skip = (PcodeOp.MULTIEQUAL, PcodeOp.INDIRECT)
+        out = {}
+        for sym in hf.getLocalSymbolMap().getSymbols():  # locals only: a global's references are xrefs_to its address
+            hv = sym.getHighVariable()
+            if hv is None:
+                continue
+            seen = {}
+            for vn in hv.getInstances():
+                d = vn.getDef()
+                if d is not None and d.getOpcode() not in skip:
+                    seen.setdefault((fa(d.getSeqnum().getTarget()), "write"), str(d.getMnemonic()))
+                for op in vn.getDescendants():
+                    if op.getOpcode() not in skip:
+                        seen.setdefault((fa(op.getSeqnum().getTarget()), "read"), str(op.getMnemonic()))
+            rows = [{"from": a, "type": ty, "kind": k, "function": fname} for (a, k), ty in seen.items()]
+            rows.sort(key=lambda r: (akey(r["from"]), r["kind"]))
+            out.setdefault(str(sym.getName()), rows)
+        return out
+
     def _tokens(self, prog, res):
         from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
-        fm, fa = prog.getFunctionManager(), self.ses.fmtr(prog)
+        fm, fa, hf = prog.getFunctionManager(), self.ses.fmtr(prog), res.getHighFunction()
         lines_out, tokens = [], []
         for ln, line in enumerate(DecompilerUtils.toLines(res.getCCodeMarkup())):
             indent = str(line.getIndentString())
@@ -159,6 +196,9 @@ class Decompile:
                     tok["address"] = fa(ma)
                 if kind in ("variable", "param"):
                     tok["varName"] = s
+                    ga = self._global_addr(t, hf, fa)
+                    if ga is not None:
+                        tok["varAddress"] = ga
                 if isinstance(t, ClangFuncNameToken):
                     # only tokens that belong to a call op; the function's own name in its signature has no op
                     op = t.getPcodeOp()
@@ -169,6 +209,22 @@ class Decompile:
                 tokens.append(tok)
             lines_out.append(text)
         return {"text": "\n".join(lines_out), "tokens": tokens}
+
+    @staticmethod
+    def _global_addr(t, hf, fa):
+        """Memory address of the variable a ClangVariableToken shows when it is a global, else None. The high symbol decides: the varnode of
+        a store's destination (`g = ...`) can be the register that holds the value."""
+        from ghidra.app.decompiler import ClangVariableToken
+        if not isinstance(t, ClangVariableToken):
+            return None
+        sym = t.getHighSymbol(hf)
+        if sym is not None and sym.isGlobal():
+            a = sym.getStorage().getMinAddress()
+            return fa(a) if a is not None and a.isMemoryAddress() else None
+        vn = t.getVarnode()  # no symbol: a varnode that lives in memory (stack, register and unique varnodes are not memory addresses)
+        if vn is not None and not vn.isConstant() and vn.getAddress().isMemoryAddress():
+            return fa(vn.getAddress())
+        return None
 
     # ---- loop-thread side ----
     @rpc(lane="loop")

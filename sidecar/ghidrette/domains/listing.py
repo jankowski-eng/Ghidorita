@@ -1,7 +1,7 @@
 """The listing and function reads (thread R): the table behind the listing pane, the function list, comments."""
 import os
 
-from ..core.args import MASK64, akey, hx, ref_kind, text_arg
+from ..core.args import akey, hx, ref_kind, text_arg
 from ..core.errors import INVALID, NOT_FOUND, RpcError
 from ..core.rpc import rpc
 
@@ -17,17 +17,14 @@ class Listing:
     # ---- reads (thread R) ----
     @rpc(lane="R")
     def list_functions(self):
-        out = []
-        dspace = self.ses.need().getAddressFactory().getDefaultAddressSpace()
-        for f in self.ses.program.getFunctionManager().getFunctions(True):
-            if f.isExternal():
-                continue
-            ea = f.getEntryPoint()
-            if ea.getAddressSpace() != dspace:  # shortcut: functions in other spaces are not listed (the listing shows them), upgrade with qualified entries
-                continue
-            out.append((ea.getOffset() & MASK64, str(f.getName()), f.getBody().getNumAddresses(), str(f.getSymbol().getSource())))
-        out.sort()
-        return [{"name": n, "entry": hx(o), "size": int(s), "source": SOURCES.get(src, "other")} for o, n, s, src in out]
+        """Every non-external function in every address space (entries in protocol form), in Ghidra's address order. `source`: where the name came from."""
+        import functools
+        prog = self.ses.need()
+        fns = [f for f in prog.getFunctionManager().getFunctions(True) if not f.isExternal()]
+        fns.sort(key=functools.cmp_to_key(lambda x, y: int(x.getEntryPoint().compareTo(y.getEntryPoint()))))
+        fa = self.ses.fmtr(prog)
+        return [{"name": str(f.getName()), "entry": fa(f.getEntryPoint()), "size": int(f.getBody().getNumAddresses()),
+                 "source": SOURCES.get(str(f.getSymbol().getSource()), "other")} for f in fns]
 
     @rpc(lane="R")
     def load_coverage(self, path):
