@@ -222,7 +222,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],

@@ -317,7 +317,7 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
       <div className="lpane">
         {vis.map((l, i) => (
           <div key={l.key} className={`lrow k-${l.kind}` + (l.kind === "main" ? "" : " lbl") + (isCur(l.row) ? " cursor" : "") + (l.kind === "main" ? coverage.mark(l.row.address, l.row.length) + (isPc(l.row) ? " pc" : inStmt(l.row) ? " stmt" : "") + (bps.has(l.row.address) ? " bp" : "") : "") + (l.kind === "main" && trail ? (trail.forward.has(l.row.address) ? " trail-f" : "") + (trail.backward.has(l.row.address) ? " trail-b" : "") : "")} style={{ top: i * ROW_H }} aria-current={isCur(l.row) && l.kind === "main" ? "true" : undefined}
-            onClick={(e) => { if (l.kind === "main" && onGutter && e.clientX - e.currentTarget.getBoundingClientRect().left < 16) { onGutter(l.row.address); return; } setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}
+            onClick={(e) => { if (l.kind === "main" && onGutter && e.detail > 0 && e.clientX - e.currentTarget.getBoundingClientRect().left < 16) { onGutter(l.row.address); return; } setCur(l.row.address); box.current?.focus(); render(); onRowClick?.(l.row.address); }}
             onContextMenu={menu ? (e) => { setCur(l.row.address); box.current?.focus(); render(); ctx.open(e, menu()); } : undefined}>
             {body(l)}
           </div>
