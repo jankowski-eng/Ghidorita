@@ -24,6 +24,7 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
     const offChanged = s.backend.events.onChange((id, p) => s.programChanged(id, p));
     const offError = s.backend.events.onError(s.fail);
     const offAnalysis = s.backend.events.onAnalysis(s.analysisChanged);
+    const offDebug = s.backend.events.onDebug(s.debugChanged);
     const policyViolation = (e: SecurityPolicyViolationEvent) => {
       if (!(window as any).__expectCsp) s.fail("CSP blocked " + e.violatedDirective + ": " + e.blockedURI);
     };
@@ -34,7 +35,7 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
         if (!current) throw new Error("No program open");
         return current.api;
       },
-      open: (p) => s.open(p), openBg: (p, o) => s.open(p, o, undefined, "background"), analysis: () => store.getState().analysis, command: (c) => api().handleMenu(c), lastMenu: () => s.menu.current, title: () => document.title,
+      open: (p) => s.open(p), openBg: (p, o) => s.open(p, o, undefined, "background"), analysis: () => store.getState().analysis, debug: () => store.getState().debug, command: (c) => api().handleMenu(c), lastMenu: () => s.menu.current, title: () => document.title,
       status: () => { const g = store.getState(); return { funcs: g.funcs.length, opened: !!g.program, opening: !!g.opening, phase: g.progress?.phase ?? "", notice: g.notice }; },
       select: (e) => api().go(e, "functions"), goAddr: (a) => api().go(a, "goto"), clickAt: (l, c) => api().clickAt(l, c),
       back: () => api().back(), forward: () => api().forward(), fail: s.fail, errors: s.errors,
@@ -77,6 +78,6 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", spaceKey); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); offDebug(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", spaceKey); window.removeEventListener("focusin", pane); };
   }, []); // eslint-disable-line
 }

@@ -9,6 +9,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-start") return startShot(c);
   if (name === "shot-import") return importShot(file, c);
   if (name === "shot-analysis") return analysisShot(file, c, result);
+  if (name === "shot-debugger") return debuggerShot(file, args, c, result);
   const fl = await c.open(file);
   need(fl?.length, "no functions");
   if (name === "shot-graph") return graphShot(fl!, c, result);
@@ -182,6 +183,43 @@ async function analysisShot(file: string, c: AutotestCtx, result: Record<string,
   need(c.analysis()?.state === "running", "analysis still running");
   await sleep(1500);
   result.analysis = c.analysis();
+  return true;
+}
+
+// shot-debugger:<gdbstub port>, AUTOTEST=sidecar/testdata/fw/fw.bin, with `qemu-system-arm -M lm3s6965evb -kernel fw.bin -S -gdb tcp::<port> -display none` running:
+// the Cortex-M test image imported raw at 0, its functions created (addresses from sidecar/testdata/fw/build.sh), attached, a breakpoint in scale() hit twice.
+async function debuggerShot(file: string, args: string[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  const port = Number(args[0]);
+  need(port > 0, "the gdbstub port: shot-debugger:<port>");
+  await c.openBg(file, { loader: "Raw Binary", language: "ARM:LE:32:Cortex", baseAddress: "0x0" });
+  await waitFor(() => c.analysis()?.state === "done", 120000, "analysis done");
+  const ops = c.program(), size = (await ops.listing.info()).totalBytes;
+  await ops.edits.clearCode({ address: "0x8", length: size - 8 }); // the analysis left data after the vector table
+  for (const [address, name] of [["0x8", "work_a"], ["0x18", "work_b"], ["0x28", "main_loop"], ["0x54", "scale"], ["0xa4", "fact"]]) {
+    await ops.edits.createFunction({ address, name }).catch(() => ops.edits.renameSymbol({ address, newName: name })); // a call target is already a function (FUN_...): name it
+  }
+  await ops.history.save(); // no "unsaved changes" in the status bar
+  const scale = (await ops.functions.list()).find((f) => f.name === "scale");
+  need(scale, "scale() exists");
+  await c.select(scale!.entry);
+  await waitFor(() => document.querySelector(".editor .view-line"), 15000, "decompiler text");
+  const bp = "0x" + (BigInt(scale!.entry) + 2n).toString(16); // after its sub sp
+  await ops.debug.attach({ host: "127.0.0.1", port });
+  await waitFor(() => c.debug()?.state === "stopped", 15000, "stopped after attach");
+  await ops.debug.breakpoint({ address: bp });
+  for (let hit = 1; hit <= 2; hit++) { // the second stop gives the values something to have been
+    const before = c.debug()!.stop;
+    c.command({ type: "debug", action: "continue" });
+    await waitFor(() => c.debug()?.state === "stopped" && c.debug()!.stop > before, 15000, `breakpoint hit ${hit}`);
+    await waitFor(() => c.debug()?.values, 15000, `the variables at hit ${hit}`); // the next stop compares with this one
+  }
+  need(c.debug()!.address === bp, "stopped at the breakpoint: " + c.debug()!.address);
+  c.command({ type: "dock", panel: "locals" });
+  const q = (sel: string) => document.querySelectorAll(sel).length;
+  await waitFor(() => q(".vals tbody tr") > 0 && q(".vals tr.changed") > 0 && q(".dval") > 0 && q(".dpc") > 0, 15000, "locals, values after the lines, the current line");
+  need(q(".lrow.pc") === 1 && q(".lrow.bp") === 1 && q(".lrow.stmt") > 0, "current row, breakpoint and the statement's instructions in the listing");
+  result.debugger = { address: c.debug()!.address, stops: c.debug()!.stop, locals: q(".vals tbody tr"), changed: q(".vals tr.changed") };
+  await sleep(500);
   return true;
 }
 

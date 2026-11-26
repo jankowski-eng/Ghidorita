@@ -30,7 +30,7 @@ test("key table: every key is used once, and every command-bar action with a key
   for (const id of ids) if (KEYS[id]) assert.equal(ids.filter((x) => x === id).length, 1, id + " listed twice");
   const menu = readFileSync(new URL("../src/main/menu.ts", import.meta.url), "utf8");
   assert.doesNotMatch(menu, /accelerator: "/, "menu.ts hard-codes an accelerator; read it from keys.ts");
-  for (const id of Object.keys(KEYS)) assert.ok(menu.includes(`"${id}"`) || id.startsWith("copy:") || id.startsWith("edit:") || id.startsWith("dock:") || id === "datatypes", `menu.ts never reads ${id}`);
+  for (const id of Object.keys(KEYS)) assert.ok(menu.includes(`"${id}"`) || id.startsWith("copy:") || id.startsWith("edit:") || id.startsWith("dock:") || id.startsWith("debug:") || id === "datatypes", `menu.ts never reads ${id}`);
 });
 
 test("hint bar lists the keys of the focused view and only what the capabilities allow", () => {
@@ -65,4 +65,14 @@ test("graph: a back edge targets a block that starts at or before its source", (
   assert.ok(!isBackEdge("0x1000", "0x1010"));
   assert.ok(isBackEdge("0x10000254b", "0x100002000"));
   assert.ok(!isBackEdge("code:0ff0", "code:1000"));
+});
+
+test("the debugger's keys are in the table, are real accelerators, and the command bar shows them", () => {
+  assert.equal(keyOf({ type: "debug", action: "step" }), "F7");
+  assert.equal(keyOf({ type: "debug", action: "stepout" }), "Shift+F10");
+  assert.equal(keyId({ type: "debug", action: "breakpoint" }), "debug:breakpoint");
+  for (const id of ["debug:continue", "debug:pause", "debug:step", "debug:stepi", "debug:stepinto", "debug:stepout", "debug:back", "debug:forward", "debug:breakpoint"]) assert.equal(isHint(id), false, id + " is a hint, not an accelerator");
+  assert.equal(isHint("edit:rename"), true); // plain letters stay hints
+  for (const [label] of ACTIONS.filter((a) => a.cmd.type === "debug" && a.cmd.action !== "attach" && a.cmd.action !== "detach").map((a) => [a.label])) assert.ok(label);
+  assert.equal(showKey("Shift+F10", true), "⇧F10");
 });

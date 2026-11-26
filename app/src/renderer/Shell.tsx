@@ -12,6 +12,7 @@ import { coverageActions } from "./features/coverage";
 import { requestOpen } from "./features/dialogs";
 import { useBusy } from "./features/menu";
 import type { Navigation } from "./features/navigation";
+import { shownDebug } from "./store/program";
 import { useProgram, useSession, useViews } from "./store/session";
 
 /** The chrome around the panes: toolbar, search and go-to bars, bottom dock, status bar, data type manager. Each renders the stores and calls the features. */
@@ -59,12 +60,12 @@ export function TypeManager() {
 }
 
 export function AppStatusBar({ nav }: { nav: Navigation }) {
-  const { map, funcs, stats, error, saving, flash, analysis } = useProgram((p) => p);
-  const session = useSession();
+  const { map, funcs, stats, error, saving, flash, analysis, debug } = useProgram((p) => p);
+  const session = useSession(), shown = useProgram(shownDebug), at = useProgram((p) => p.debugAt), n = useProgram((p) => p.debugHistory.length);
   const dirty = useProgram((p) => p.undo.dirty);
   return (
     <>
-      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
+      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} debug={shown} debugNote={shown && debug && at !== null ? ` · recorded stop ${at + 1} of ${n}, the target is at ${debug.address ?? debug.state}` : ""} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
         back={[...nav.nav.back].reverse().map((l) => l.address)} forward={[...nav.nav.forward].reverse().map((l) => l.address)} onBack={nav.back} onForward={nav.forward} />
     </>
   );

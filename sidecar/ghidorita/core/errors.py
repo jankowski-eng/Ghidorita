@@ -2,7 +2,7 @@
 import sys
 
 NO_PROGRAM, CANCELLED, TIMEOUT, NOT_FOUND, BUSY, INTERNAL, NO_METHOD, INVALID = -32001, -32002, -32003, -32004, -32005, -32603, -32601, -32602
-PROJECT_LOCKED, STALE_SESSION = -32006, -32007
+PROJECT_LOCKED, STALE_SESSION, TARGET = -32006, -32007, -32008
 # Ghidra exceptions that mean "the caller's arguments are wrong" (-> InvalidArgument); anything else Java throws is Internal
 INVALID_JAVA = {"InvalidInputException", "DuplicateNameException", "ParseException", "InvalidDataTypeException",
                 "IllegalArgumentException", "CancelledException", "UsrException", "AddressOutOfBoundsException",

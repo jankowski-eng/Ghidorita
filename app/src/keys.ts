@@ -16,17 +16,19 @@ export const KEYS: Readonly<Record<string, string>> = {
   graph: "Space", callgraph: "CmdOrCtrl+Shift+G",
   "dock:symbols": "CmdOrCtrl+Shift+Y", "dock:strings": "CmdOrCtrl+Shift+E", "dock:changes": "CmdOrCtrl+Shift+H", "dock:calls": "CmdOrCtrl+Shift+J",
   "dock:bookmarks": "CmdOrCtrl+Shift+B", "dock:memsearch": "CmdOrCtrl+Shift+F", datatypes: "CmdOrCtrl+Shift+T",
+  "debug:continue": "F5", "debug:pause": "F6", "debug:step": "F7", "debug:stepi": "F8", "debug:breakpoint": "F9", "debug:stepinto": "F10", "debug:stepout": "Shift+F10",
+  "debug:back": "Shift+F7", "debug:forward": "Shift+F8",
   "nav-back": "CmdOrCtrl+[", "nav-forward": "CmdOrCtrl+]", search: "CmdOrCtrl+K", symbolSearch: "CmdOrCtrl+Shift+O", goto: "CmdOrCtrl+G", xrefs: "X",
 };
 
 /** Table id of a command. "edit:save" shares the id `save` with the File menu item. */
 export const keyId = (c: MenuCommand): string =>
-  c.type === "edit" ? (c.action === "save" ? "save" : "edit:" + c.action) : c.type === "copy" ? "copy:" + c.what : c.type === "dock" ? "dock:" + c.panel : c.type;
+  c.type === "edit" ? (c.action === "save" ? "save" : "edit:" + c.action) : c.type === "copy" ? "copy:" + c.what : c.type === "dock" ? "dock:" + c.panel : c.type === "debug" ? "debug:" + c.action : c.type;
 
 export const keyOf = (c: MenuCommand): string | undefined => KEYS[keyId(c)];
 
-/** A key that only shows in a label because the view handles it itself (a real accelerator would swallow it in text inputs): plain keys and Cmd+L. */
-export const isHint = (id: string): boolean => !KEYS[id]?.includes("CmdOrCtrl") || id === "edit:retype";
+/** A key that only shows in a label because the view handles it itself (a real accelerator would swallow it in text inputs): plain keys and Cmd+L. Function keys (the debugger's) are accelerators. */
+export const isHint = (id: string): boolean => (!KEYS[id]?.includes("CmdOrCtrl") && !/^(Shift\+)?F\d+$/.test(KEYS[id] ?? "")) || id === "edit:retype"; // function keys type nothing: real accelerators
 
 /** "CmdOrCtrl+Shift+G" -> "⌘⇧G" (mac) or "Ctrl+Shift+G". */
 export function showKey(key: string, mac: boolean): string {

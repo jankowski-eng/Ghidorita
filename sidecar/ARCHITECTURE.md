@@ -12,6 +12,7 @@ sidecar/
     app.py             wiring: builds Ctx, Project, Program and DOMAINS, registers their RPCs, sets the shutdown hooks
     core/              runtime, no Ghidra API except Opening.monitor / Events listener / Session.edit
       errors.py        RpcError, error codes, INVALID_JAVA, java_error(), log()
+      gdb.py           GDB Remote Serial Protocol client (framing, reader thread, resume/stop replies, target.xml); no Ghidra
       args.py          hx, lim, text_arg, name_arg
       lanes.py         Job, Scan, Opening, Worker; Lanes = the queues and threads, run(), on_r(), scanning(), cancel()
       session.py       Session = the open program: program, epoch, program_id, session_id (fresh per open, via publish()), undo snapshot, need(), addr(), edit(), cmd(), function()
@@ -34,6 +35,7 @@ sidecar/
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
       xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from (R); function_calls, call_graph (scan lane; call_graph is bounded by visited functions and seconds as well as output nodes, checks cancel in its loops, `truncated` says a bound hit)
       bookmarks.py     list_bookmarks (scan lane, snapshot of plain dicts dropped on program_changed), set_bookmark, remove_bookmark {address, type, category?} (BookmarkManager; set/remove are edits on R that announce their address)
+      debug.py         the debugger: debug_attach, debug_detach, debug_status, debug_breakpoint, debug_continue, debug_step (instruction, statement, into, out), debug_pause, debug_memory (R); debug_values (scan lane). A GDB remote client (core/gdb.py) to QEMU's gdbstub, `debug_state` notifications; threads: one reader per connection, a worker per stop, a worker per statement step. `teardown()` (called by Program.close through `ctx.debug`) ends it all with the program
       datatypes.py     list_data_types and the data-type-manager RPCs
   jscans/              GhidoritaScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
   test_*.py, testlib.py, conftest.py    tests: mostly one file per domain, black box over WebSocket against real Ghidra on /bin/ls
@@ -47,9 +49,9 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 
 | lane | thread | notes |
 |---|---|---|
-| `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
+| `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close), and the debugger's calls (they only talk to the target, never wait for it to run). NoProgram "open_binary in progress" fail-fast during an open |
 | `edit` | S pool, then R | variable edits decompile and infer structure fields on S, then queue the write on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. Structure inference shares a deadline across the initial decompile, direct callees, and pointer tracing. The commit checks program epoch and write revision |
-| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `list_bookmarks`, `function_calls`, `call_graph`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
+| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `list_bookmarks`, `function_calls`, `call_graph`, `debug_values`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
 | `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile`, `variable_uses`, `function_graph`. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `file` | asyncio file thread | `load_coverage` parses its file without occupying R and checks the program epoch before returning |
 | `project` | R | `list_programs`, `delete_program`, `import_candidates`, `list_languages`, `close_program`. `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
@@ -74,8 +76,12 @@ While thread A runs, `ses.analyzing` is true: `Session.edit()`, `undo` and `redo
 ## The context object
 
 `ctx` (`core/context.py`) is the only thing a domain gets: `ctx.session`, `ctx.lanes`, `ctx.events`, `ctx.project`, `ctx.analysis`, `ctx.notify()`,
-`ctx.progress()`, `ctx.loop`, `ctx.shutdown_hooks`. A domain keeps `self.ctx` and `self.ses = ctx.session`. Domains never touch each
+`ctx.progress()`, `ctx.loop`, `ctx.shutdown_hooks`, and `ctx.debug` (set by the debugger domain so that closing a program can tear the debugger down first; the one domain another module calls). A domain keeps `self.ctx` and `self.ses = ctx.session`. Domains never touch each
 other's attributes.
+
+## The debugger
+
+`core/gdb.py` is the RSP client (framing and checksums, one reader thread that routes replies: a command's reply to its waiter, a stop reply to a waiter that armed `sync` or to `on_stop`; `resume(before=...)` and `ctl` keep a pause and the start of a resume from missing each other; a request that times out closes the connection because replies carry no id). `domains/debug.py` owns the connection, the breakpoints (program addresses, kept across attaches, installed at attach) and the stop state, and announces it as `debug_state`. A stop reply arrives on the reader thread; a `debug-stop` worker reads the registers and publishes. A live breakpoint toggle (`_toggle`) interrupts the running target, changes the breakpoint and resumes (a genuine stop it meets is announced instead); when the target's stop is already in but not published it lets go of the lock and retries, because the handler needs that lock. A statement step (`statement`, `into`, `out`) is a `debug-statement` worker stepping instruction by instruction (owner token in `Debug.worker`); breakpoint changes it owes to a target that was still running are deferred to the stop (`Debug.deferred`, per connection). Addresses above 2^63 go through `Session.addr` and are masked when read back (Ghidra offsets are signed). Tests: `test_gdb.py` (fake stub), `test_debug_high.py` (in-process, fake gdb), `test_debug.py` (real `qemu-system-arm` / `qemu-system-aarch64`, skipped without them).
 
 ## Events and invalidation
 
@@ -100,6 +106,8 @@ Everything a domain shares goes through `ctx`. The only direct calls between dom
 4. `analysis` -> `project`: `FAST_PROFILE` (which analyzers the fast profile skips).
 5. `exports` -> `listing`: `ROW_COMMENT_KINDS`, `SOURCES` (the same comment kinds and symbol sources as the listing rows).
 6. `project` -> `layout`: `file_layout`, `shannon` for the import card.
+7. `debug` -> `decompile.decompile_for_edit`: `debug_values` decompiles on its scan worker to learn the variables' storage.
+8. `program` -> `debug`: `Program.close()` calls `ctx.debug.teardown()` after the analysis stopped and the save succeeded (also for a replacement), before the program is released.
 
 Shared helpers that are not edges live in `core`: `session.edit()` (one transaction, flushes events), `session.cmd()`, `session.function()`,
 `args.name_arg()`.

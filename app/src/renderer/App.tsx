@@ -8,6 +8,7 @@ import { DialogHost } from "./features/DialogHost";
 import { useBootstrap, type Api, type TestDriver } from "./features/bootstrap";
 import { coverageActions } from "./features/coverage";
 import { useCopy } from "./features/copy";
+import { useDebug } from "./features/debug";
 import { useEditing } from "./features/editing";
 import { routeMenu, useMenuState, useWindowTitle } from "./features/menu";
 import { useNavigation } from "./features/navigation";
@@ -29,11 +30,12 @@ function Main({ onReady }: { onReady?: (driver: TestDriver) => void }) {
   const nav = useNavigation(tabs);
   const editing = useEditing(tabs);
   const copy = useCopy(tabs);
+  const debug = useDebug(nav, tabs);
   const coverage = useMemo(() => coverageActions(s), [s]);
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
   const api = useRef<Api>(null!);
-  const handleMenu: Api["handleMenu"] = (c) => routeMenu(s, c, { back: nav.back, forward: nav.forward, goTab: nav.goTab, closeActive: tabs.closeActive, edit: editing.edit, showXrefs: editing.showXrefs, coverage, copy: copy.copy });
+  const handleMenu: Api["handleMenu"] = (c) => routeMenu(s, c, { back: nav.back, forward: nav.forward, goTab: nav.goTab, closeActive: tabs.closeActive, edit: editing.edit, showXrefs: editing.showXrefs, coverage, copy: copy.copy, debug });
   api.current = { go: nav.go, back: nav.back, forward: nav.forward, clickAt: nav.clickAt, edit: editing.edit, handleMenu, selected: () => tabs.state.tabs.find((x) => x.id === tabs.state.active)?.entry ?? null };
 
   useBootstrap(() => api.current, onReady);
