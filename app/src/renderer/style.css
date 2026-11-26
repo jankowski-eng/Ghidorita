@@ -12,7 +12,7 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .editor { flex: 1; min-height: 0; border-bottom: 1px solid #444; display: flex; flex-direction: column; }
 .edwrap { flex: 1; min-height: 0; }
-.dwarn { flex: none; background: #3a3320; color: #e8d9a0; font-size: 12px; padding: 2px 8px; border-bottom: 1px solid #5a4d25; }
+.dwarn { flex: none; max-height: 40%; overflow-y: auto; background: #3a3320; color: #e8d9a0; font-size: 12px; padding: 2px 8px; border-bottom: 1px solid #5a4d25; }
 .dwarn .dw { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dwarn .dim { opacity: 0.75; }
 .dwarn summary { cursor: pointer; opacity: 0.85; }

@@ -116,16 +116,24 @@ class Edits:
         base = dtm.getDataType(m.group(1)) if m else None
         if base is None:
             return None
-        dt = base
-        for s in re.findall(r"\[\d+\]|\*", m.group(2)):
-            if s == "*":
-                dt = PointerDataType(dt)
-            else:
-                n = int(s[1:-1])
+        dt, group = base, []
+
+        def arrays(dt):  # Ghidra's name parser reverses each consecutive run of array suffixes: S[2][3] is two arrays of three
+            for n in reversed(group):
                 if n < 1 or dt.getLength() <= 0:
                     return None
                 dt = ArrayDataType(dt, n, dt.getLength())
-        return dt
+            group.clear()
+            return dt
+        for s in re.findall(r"\[\d+\]|\*", m.group(2)):
+            if s != "*":
+                group.append(int(s[1:-1]))
+                continue
+            dt = arrays(dt)
+            if dt is None:
+                return None
+            dt = PointerDataType(dt)
+        return arrays(dt)
 
     @rpc(lane="R")
     def clear_code(self, address, length=None):

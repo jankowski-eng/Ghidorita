@@ -114,7 +114,7 @@ def test_row_data_type(sc):
 
 def test_row_data_type_same_name_in_two_categories(sc):
     from ghidra.program.model.data import CategoryPath, StructureDataType, DataTypeConflictHandler
-    build(sc, "t_dtype2", [("ram", 0x610000, bytes(64), False)])
+    build(sc, "t_dtype2", [("ram", 0x610000, bytes(256), False)])
 
     def mk(p):
         dtm = p.getDataTypeManager()
@@ -130,3 +130,10 @@ def test_row_data_type_same_name_in_two_categories(sc):
     assert rows["0x610000"]["dataType"] == "/A/S" and rows["0x610008"]["dataType"] == "/B/S"
     sc.define_data("0x610010", "/A/S[3]")  # the client builds `<dataType>[n]`
     assert sc.listing_rows("0x610010", 1)[0]["length"] == 3
+    assert sc.listing_rows("0x610010", 1)[0]["dataType"] == "/A/S[3]"  # the wrapper keeps the element's category
+    sc.define_data("0x610020", "/B/S *")
+    assert sc.listing_rows("0x610020", 1)[0]["dataType"] == "/B/S *"
+    # consecutive array suffixes reverse like Ghidra's name parser: qualified and unqualified give the same layout
+    sc.define_data("0x610030", "/A/S[2][3]")
+    sc.define_data("0x610050", "byte[2][3]")
+    assert sc.listing_rows("0x610030", 1)[0]["dataType"] == "/A/S[2][3]" and sc.listing_rows("0x610050", 1)[0]["dataType"] == "byte[2][3]"

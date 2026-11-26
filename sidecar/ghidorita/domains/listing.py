@@ -134,7 +134,15 @@ class Listing:
     def _dt_ref(dt):
         """The data type as define_data takes it: its name, or its category path for structures, unions, enums and typedefs (two `S` in different
         categories are different types; the name alone would be ambiguous)."""
-        from ghidra.program.model.data import Composite, Enum, TypeDef
+        from ghidra.program.model.data import Array, Composite, Enum, Pointer, TypeDef
+        if isinstance(dt, Array):  # the wrappers keep their element's identity: "/A/S[2][3]", outermost dimension first
+            dims = ""
+            while isinstance(dt, Array):
+                dims += "[%d]" % dt.getNumElements()
+                dt = dt.getDataType()
+            return Listing._dt_ref(dt) + dims
+        if isinstance(dt, Pointer) and dt.getDataType() is not None:
+            return Listing._dt_ref(dt.getDataType()) + " *"
         return str(dt.getPathName()) if isinstance(dt, (Composite, Enum, TypeDef)) else str(dt.getName())
 
     def _row_parts(self, cu):
