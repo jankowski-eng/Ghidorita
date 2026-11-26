@@ -4,10 +4,10 @@ import os, re
 from ghidrette.app import App
 
 # lane: R (thread R), edit (prepare on S, commit on R), file (parse off R), scan (S pool), decomp (D pool), project (R, Busy during an open),
-# project+busy_ok (same, but answered during an open), loop (asyncio loop), open (own thread O)
+# project+busy_ok (same, but answered during an open), loop (asyncio loop), loop+scoped (asyncio loop after the session check), open (own thread O)
 GOLDEN = {
     "provider_info": "loop", "active_session": "loop",
-    "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop", "cancel_analysis": "loop", "analysis_status": "loop",
+    "cancel_decompile": "loop", "cancel_search": "loop", "cancel_open": "loop", "cancel_analysis": "loop+scoped", "analysis_status": "loop+scoped",
     "open_binary": "open",
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",

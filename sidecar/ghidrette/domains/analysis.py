@@ -142,13 +142,13 @@ class Analysis:
             self.st = idle(analysis, profile)
 
     # ---- RPCs ----
-    @rpc(lane="loop")
+    @rpc(lane="loop", scoped=True)
     def analysis_status(self):
         if self.ses.program is None:
             raise RpcError(NO_PROGRAM, "no program open")
         return self.state()
 
-    @rpc(lane="loop")
+    @rpc(lane="loop", scoped=True)
     def cancel_analysis(self):
         with self.lock:
             mon, running = self.mon, self.st["state"] == "running"
@@ -174,17 +174,34 @@ class Analysis:
 
     # ---- running ----
     def start(self, prog, key, disabled, profile, upgrade=False):
-        """Spawn the analysis thread for the published program (any thread; flips the flags first so no edit slips in). Returns the state."""
+        """Spawn the analysis thread for the published program (any thread; flips the flags first so no edit slips in). Returns the state.
+        Owns the flags until the thread runs: if the record or the thread cannot be created, everything is rolled back and the program
+        stays open with state "failed" (program.py already set ses.analyzing when it published, so this also clears that)."""
         with self.lock:
             if self.st["state"] == "running":
                 raise RpcError(BUSY, "analysis already running")
-            mon = self.mon = new_monitor()
+            prev = self.st
             self.ended.clear()
             self.st = {"state": "running", "analysis": "partial", "profile": profile, "analyzer": "", "done": 0, "pct": -1}
         self.ses.analyzing = True
         self.ctx.events.bulk = True
-        self.ctx.project.meta_update(key, analysis="partial", analysisProfile=profile, analyzed=False)
-        threading.Thread(target=self._run, args=(prog, key, self.ses.epoch, mon, disabled, profile, upgrade), daemon=True, name="analysis").start()
+        recorded = False
+        try:
+            mon = new_monitor()
+            with self.lock:
+                self.mon = mon
+            self.ctx.project.meta_update(key, analysis="partial", analysisProfile=profile, analyzed=False)
+            recorded = True
+            threading.Thread(target=self._run, args=(prog, key, self.ses.epoch, mon, disabled, profile, upgrade), daemon=True, name="analysis").start()
+        except Exception as e:  # noqa
+            log("analysis did not start:", repr(e))
+            with self.lock:
+                self.mon = None
+                self.st = {**prev, "state": "failed", "analyzer": "", "pct": -1, "error": "analysis did not start: %s" % e,
+                           **({"analysis": "partial", "profile": profile} if recorded else {})}
+            self.ses.analyzing = False
+            self.ctx.events.bulk = False
+            self.ended.set()
         st = self.state()
         self.ctx.notify("analysis_state", {"sessionId": self.ses.session_id, **st})
         return st
@@ -227,6 +244,8 @@ class Analysis:
             except Exception as e:  # noqa
                 log("analysis meta update failed:", repr(e))
             log("analysis %s in %.1fs" % ("done" if completed else "cancelled" if err is None else "failed", time.monotonic() - t0))
+            with self.ses.lock:  # the run wrote (and cleared undo): a variable edit prepared before it must not commit (highvars.py)
+                self.ses.revision += 1
             self.ses.analyzing = False
             self.ctx.events.bulk = False
             try:

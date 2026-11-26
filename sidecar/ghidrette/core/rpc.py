@@ -8,7 +8,8 @@ Lanes (who runs the method, see lanes.py):
   edit      prepare a variable edit on S, then commit on R after a revision check; gets `job=`.
   file      parse a local file off R, with a program generation check.
   project   thread R, but Busy instead of NoProgram during an open; busy_ok=True: answered during an open anyway.
-  loop      the asyncio loop itself (cancel_*): must be quick and only flip flags.
+  loop      the asyncio loop itself (cancel_*): must be quick and only flip flags. scoped=True: the sessionId is checked first
+            (StaleSession), like on R, and the method runs under the session lock so no swap slips in between.
   open      awaited on the loop, runs its own thread O (open_binary).
 """
 import asyncio, inspect, json, threading
@@ -19,21 +20,21 @@ from .lanes import Job, Scan
 LANES = ("R", "scan", "decomp", "edit", "file", "project", "loop", "open")
 
 
-def rpc(lane="R", job=False, busy_ok=False):
-    assert lane in LANES and not (job and lane != "R") and not (busy_ok and lane != "project"), (lane, job, busy_ok)
+def rpc(lane="R", job=False, busy_ok=False, scoped=False):
+    assert lane in LANES and not (job and lane != "R") and not (busy_ok and lane != "project") and not (scoped and lane != "loop"), (lane, job, busy_ok, scoped)
 
     def deco(fn):
-        fn._rpc = (lane, job, busy_ok)
+        fn._rpc = (lane, job, busy_ok, scoped)
         return fn
     return deco
 
 
 class Method:
-    def __init__(self, name, fn, lane, job, busy_ok):
-        self.name, self.fn, self.lane, self.job, self.busy_ok = name, fn, lane, job, busy_ok
+    def __init__(self, name, fn, lane, job, busy_ok, scoped):
+        self.name, self.fn, self.lane, self.job, self.busy_ok, self.scoped = name, fn, lane, job, busy_ok, scoped
 
     def describe(self):
-        return self.lane + ("+job" if self.job else "") + ("+busy_ok" if self.busy_ok else "")
+        return self.lane + ("+job" if self.job else "") + ("+busy_ok" if self.busy_ok else "") + ("+scoped" if self.scoped else "")
 
 
 class Registry:
@@ -97,6 +98,11 @@ class Dispatcher:
         if lane == "loop":
             if method == "cancel_open" and versioned and type(params.get("id")) is not int:
                 raise RpcError(INVALID, "cancel_open requires the open request id")
+            if m.scoped and (versioned or session_id is not None):
+                with ses.lock:
+                    if not isinstance(session_id, str) or session_id != ses.session_id:
+                        raise RpcError(STALE_SESSION, "program session is no longer active")
+                    return fn(**params)
             return fn(**params)
         if lane == "open":
             if "_request_id" in params:

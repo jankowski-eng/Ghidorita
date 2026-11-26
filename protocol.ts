@@ -157,7 +157,7 @@ export interface Methods {
   // Starts (or resumes) the analysis of the open program. profile omitted = the program's recorded profile. fast -> full on a finished fast program runs only the three analyzers the fast profile skipped; the programId does not change. No-op (returns the state) if the program is already analyzed with that profile or better. Busy while an analysis runs.
   start_analysis: { params: { profile?: "full" | "fast" }; result: AnalysisState };
   // Stops the running analysis at the next monitor check; what it found so far is kept (recorded analysis becomes "partial"). cancelled=false if none runs.
-  cancel_analysis: { params: {}; result: { cancelled: boolean } };
+  cancel_analysis: { params: {}; result: { cancelled: boolean } }; // session-scoped (StaleSession), unlike the cancels by request id
   import_candidates: { params: { path: string }; result: ImportChoices };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
@@ -344,7 +344,7 @@ export interface AnalysisState {
   analyzer: string;
   done: number;
   pct: number;
-  error?: string;               // state "failed"
+  error?: string;               // state "failed": the run broke, or could not start (the program stays open; `analysis` is the record as written)
 }
 
 export interface Notifications {

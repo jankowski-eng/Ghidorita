@@ -257,6 +257,7 @@ function anEnd(state, analysis) {
 }
 function anStart(notify, profile) {
   anNotify = notify; const upgrade = an.analysis === "done"; // fast -> full: the functions are all there already
+  if (process.env.MOCK_ANALYSIS_START_FAIL === "1") { an = { ...an, state: "failed", analyzer: "", pct: -1, error: "analysis did not start: mock" }; anPublish(); return; } // like the sidecar: the program stays open and editable, Resume retries
   an = { state: "running", analysis: "partial", profile, analyzer: ANALYZERS[0], done: 0, pct: 0 };
   anTick = upgrade ? 0 : Math.floor(TICKS * anFuncs / NFUNC); anRecord(); anPublish();
   anTimer = setInterval(() => {
