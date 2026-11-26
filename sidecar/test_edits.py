@@ -111,6 +111,10 @@ def test_set_equate_one_operand(sc, tmp_path, monkeypatch):
             await call("edit_enum", path=e, op={"op": "set", "name": "ALSO_42", "value": "42"})  # a second name for the same value is as valid
             await call("set_equate", address=at, value="42", size=4, name="ALSO_42", enum=e)
             assert "callee(ALSO_42)" in (await call("decompile", entry=fns["h"]))["text"]
+            await call("set_equate", address=at, value="42", size=4, name="FORTY_TWO", enum=e)  # and back, with both members existing
+            assert "callee(FORTY_TWO)" in (await call("decompile", entry=fns["h"]))["text"]
+            await call("set_equate", address=at, value="42", size=4, name="ALSO_42", enum=e)
+            assert "callee(ALSO_42)" in (await call("decompile", entry=fns["h"]))["text"]
             with pytest.raises(RpcError) as err:
                 await call("set_equate", address=at, value="42", size=4, name="NOPE", enum=e)
             assert err.value.code == INVALID

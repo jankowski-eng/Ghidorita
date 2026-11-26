@@ -13,9 +13,9 @@ class HighVars:
     def __init__(self, ctx):
         self.ctx, self.ses = ctx, ctx.session
 
-    def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job, prepare=None):
+    def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job, prepare=None, nameless=False):
         """Prepare on a scan worker, then commit on R only if the program and revision still match."""
-        if name is not None:  # None: an edit that finds its own target in `prepare` (force_union_field)
+        if not nameless:  # nameless: an edit that finds its own target in `prepare` (force_union_field only)
             text_arg(name, "name")
         timeoutSecs = lim(timeoutSecs, 30)
         deadline = None
@@ -29,12 +29,12 @@ class HighVars:
             if prepare is not None:
                 timeoutSecs = timeoutSecs or 30
                 deadline = time.monotonic() + timeoutSecs
-            with decompile_for_edit(self.ctx, prog, func, timeoutSecs, job, prepare is not None) as (hf, d, mon):
-                sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None) if name is not None else None
-                if sym is None and name is not None:
+            with decompile_for_edit(self.ctx, prog, func, timeoutSecs, job, prepare is not None) as (hf, d, mon, res):
+                sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None) if not nameless else None
+                if sym is None and not nameless:
                     raise RpcError(NOT_FOUND, "no variable %r in function at %s" % (name, entry))
                 if prepare is not None:
-                    fn = prepare(prog, sym, d, mon)
+                    fn = prepare(prog, sym, d, mon, res)
 
         def commit():
             with self.ses.lock:
@@ -108,7 +108,7 @@ class HighVars:
         if structName is not None:
             name_arg(structName, "structName")
 
-        def prepare(prog, sym, decompiler, monitor):
+        def prepare(prog, sym, decompiler, monitor, _res):
             hv = sym.getHighVariable()
             if hv is None:
                 raise RpcError(INVALID, "variable %r has no decompiler high variable" % name)
@@ -271,13 +271,8 @@ class HighVars:
         if not isinstance(occurrence, int) or isinstance(occurrence, bool) or occurrence < 0:
             raise RpcError(INVALID, "occurrence must be a non-negative integer")
 
-        def prepare(prog, _sym, d, mon):
+        def prepare(prog, _sym, d, mon, res):
             at = self.ses.addr(address, prog)
-            func = prog.getFunctionManager().getFunctionAt(self.ses.addr(entry, prog))
-            res = d.decompileFunction(func, timeoutSecs, mon)
-            mon.checkCancelled()
-            if not res.decompileCompleted():
-                raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
             hf = res.getHighFunction()
             same = [t for line in DecompilerUtils.toLines(res.getCCodeMarkup()) for t in line.getAllTokens()
                     if str(t.getText()) == text and t.getPcodeOp() is not None and t.getPcodeOp().getSeqnum().getTarget().equals(at)
@@ -306,4 +301,4 @@ class HighVars:
                 HighFunctionDBUtil.writeUnionFacet(func, parent, number, pc, h, True, SourceType.USER_DEFINED)
             return commit
 
-        return self._high_edit("Force union field in %s", entry, None, None, timeoutSecs, job, prepare=prepare)
+        return self._high_edit("Force union field in %s", entry, None, None, timeoutSecs, job, prepare=prepare, nameless=True)

@@ -42,7 +42,7 @@ def union_of(tok):
 
 @contextlib.contextmanager
 def decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False):
-    """Yield the high function, decompiler and monitor on the scan worker. A timed monitor
+    """Yield the high function, decompiler, monitor and the decompile results on the scan worker. A timed monitor
     also bounds any follow-up decompiles and analysis in the caller's with block."""
     from java.util.concurrent import TimeUnit
     from ghidra.app.decompiler import DecompInterface
@@ -69,7 +69,7 @@ def decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False):
             raise RpcError(CANCELLED, "decompile cancelled")
         if not res.decompileCompleted():
             raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
-        yield res.getHighFunction(), d, mon
+        yield res.getHighFunction(), d, mon, res
         mon.checkCancelled()
     except CancelledException as e:
         if timed and mon.didTimeout() and not job.cancelled:

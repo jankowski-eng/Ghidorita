@@ -81,7 +81,7 @@ class Listing:
         from ghidra.program.model.listing import Parameter
         prog, f = self.ses.function(entry)
         frame = f.getStackFrame()
-        slots = [{"offset": int(v.getStackOffset()), "size": int(v.getLength()), "name": str(v.getName()), "dataType": str(v.getDataType().getDisplayName()),
+        slots = [{"offset": int(v.getStackOffset()), "size": int(v.getLength()), "name": str(v.getName()), "dataType": self._dt_ref(v.getDataType()),
                   "parameter": isinstance(v, Parameter), "source": SOURCES.get(str(v.getSource()), "other")}
                  for v in sorted(frame.getStackVariables(), key=lambda v: v.getStackOffset())]
         return {"entry": self.ses.fmt(f.getEntryPoint(), prog), "name": str(f.getName()), "localSize": int(frame.getLocalSize()),

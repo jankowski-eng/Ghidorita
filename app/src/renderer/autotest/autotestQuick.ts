@@ -99,9 +99,11 @@ async function stackStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   c.command({ type: "dock", panel: "stack" });
   const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Stack frame"]'), 5000, "stack panel");
   const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
-  await waitFor(() => rows().length === slots.length && region.textContent!.includes(`${slots.length} slots`), 10000, "stack rows");
+  await waitFor(() => rows().length > 0 && region.textContent!.includes(`${slots.length} slots`), 10000, "stack rows");
+  // the table is virtualized: check the rendered window only (aria-rowindex maps a row to its slot)
+  const inferredAt = (r: HTMLElement) => { const s = slots[Number(r.getAttribute("aria-rowindex")) - 1]; return !!s && (s.source === "analysis" || s.source === "default"); };
   const inferred = slots.filter((s) => s.source === "analysis" || s.source === "default").length;
-  need(region.querySelectorAll(".psrc.ring").length === inferred, `amber rings on the ${inferred} inferred slots`);
+  need(rows().every((r) => (r.querySelector(".psrc.ring") !== null) === inferredAt(r)), "amber rings exactly on the inferred slots");
   const rename = region.querySelector<HTMLButtonElement>('button[aria-label="Rename slot"]');
   if (rename) {
     need(rename.disabled, "Rename needs a selected slot");
