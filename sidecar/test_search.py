@@ -82,6 +82,23 @@ def test_strings_query(env):
             assert (await c.ok("list_strings", query="zzzz_no_such_string_zzzz"))["total"] == 0
             assert all(len(i["value"]) <= 1000 for i in s["items"])
             await c.err("list_strings", INVALID, query=7)
+            await c.err("list_strings", INVALID, referencedOnly="yes")
+    run(go())
+
+
+def test_strings_references(env):
+    async def go():
+        async with Client(env["proc"].port) as c:
+            s = await c.ok("list_strings", limit=5000)
+            assert all(isinstance(i["refs"], int) and (i["refs"] > 0) == ("refFrom" in i) for i in s["items"])
+            r = await c.ok("list_strings", referencedOnly=True, limit=5000)
+            assert r["total"] == len([i for i in s["items"] if i["refs"] > 0]) <= s["total"]
+            assert all(i["refs"] > 0 and 1 <= len(i["refFrom"]) <= 3 for i in r["items"])
+            # the referrers agree with xrefs_to
+            if r["items"]:
+                i = r["items"][0]
+                refs = await c.ok("xrefs_to", address=i["address"])
+                assert {f["from"] for f in i["refFrom"]} <= {x["from"] for x in refs}
     run(go())
 
 

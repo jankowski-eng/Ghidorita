@@ -142,7 +142,7 @@ export interface Methods {
   // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.
   variable_uses: { params: { entry: Address; name: string; timeoutSecs?: number }; result: XrefTo[] };
   xrefs_from: { params: { address: Address }; result: XrefFrom[] };
-  list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string }; result: { total: number; items: StringItem[] } };
+  list_strings: { params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }; result: { total: number; items: StringItem[] } };
   search_memory: { params: SearchMemoryParams; result: { items: MemoryHit[]; next: Address | null } };
   cancel_search: { params: { id: number }; result: { cancelled: boolean } };
   get_comments: { params: { address: Address }; result: Partial<Record<CommentKind, string>> }; // only kinds that are set; NotFound if no code unit
@@ -222,7 +222,7 @@ export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data"
 export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
 /** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */
 export interface XrefFrom { to: Address | null; type: string; kind: XrefKind; target: "memory" | "stack" | "register" | "external"; label?: string }
-export interface StringItem { address: Address; value: string; length: number } // value cut at 1000 UTF-16 units; length = bytes of the defined string
+export interface StringItem { address: Address; value: string; length: number; refs: number; refFrom?: { from: Address; function?: string }[] } // value cut at 1000 UTF-16 units; length = bytes of the defined string; refs = references to it, refFrom = the first 3
 /** kind "bytes": hex with wildcards ("48 8b ?? 24"); "text": a string (encoding ascii | utf16le | utf16be, caseSensitive default true). start = where to continue (a previous `next`); limit default 1000, max 10000. */
 export interface SearchMemoryParams { pattern: string; kind?: "bytes" | "text"; encoding?: "ascii" | "utf16le" | "utf16be"; caseSensitive?: boolean; start?: Address; limit?: number }
 export interface MemoryHit { address: Address; length: number; bytes: string; function?: string } // bytes: hex of the match, at most 16 bytes

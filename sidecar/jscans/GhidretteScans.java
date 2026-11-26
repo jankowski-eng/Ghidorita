@@ -8,6 +8,7 @@ import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.symbol.Namespace;
+import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.SymbolType;
@@ -44,33 +45,35 @@ public final class GhidretteScans {
         private final String[] addr;  // formatted as the protocol does (default space "0x..", others space-qualified)
         private final int[] len;
         private final String[] val;
+        private final int[] refs;     // references to the string's address (ReferenceManager.getReferenceCountTo)
         private String[] lower;
-        private String lastQuery;
+        private String lastQuery;     // (referencedOnly ? "R" : "A") + query: the filter the cached hits belong to
         private int[] lastHits;
 
-        Strings(String[] addr, int[] len, String[] val) { this.addr = addr; this.len = len; this.val = val; }
+        Strings(String[] addr, int[] len, String[] val, int[] refs) { this.addr = addr; this.len = len; this.val = val; this.refs = refs; }
 
         public int size() { return val.length; }
 
-        /** Rows matching `queryLower` (empty = all) from offset, as {"total":n,"items":[{address,value,length}]}. ASCII-only JSON (non-ASCII as \\u escapes). */
-        public synchronized String page(int offset, int limit, String queryLower) {
+        /** Rows matching `queryLower` (empty = all) and, with refOnly, having at least one reference, from offset, as {"total":n,"items":[{address,value,length,refs}]}. ASCII-only JSON (non-ASCII as \\u escapes). */
+        public synchronized String page(int offset, int limit, String queryLower, boolean refOnly) {
             int[] hits = null;
             int total = val.length;
-            if (!queryLower.isEmpty()) {
-                if (!queryLower.equals(lastQuery)) {
-                    if (lower == null) {
+            if (!queryLower.isEmpty() || refOnly) {
+                String key = (refOnly ? "R" : "A") + queryLower;
+                if (!key.equals(lastQuery)) {
+                    if (!queryLower.isEmpty() && lower == null) {
                         lower = new String[val.length];
                         for (int i = 0; i < val.length; i++) lower[i] = val[i].toLowerCase(Locale.ROOT);
                     }
                     int[] h = new int[16];
                     int n = 0;
-                    for (int i = 0; i < lower.length; i++) {
-                        if (lower[i].contains(queryLower)) {
+                    for (int i = 0; i < val.length; i++) {
+                        if ((queryLower.isEmpty() || lower[i].contains(queryLower)) && (!refOnly || refs[i] > 0)) {
                             if (n == h.length) h = Arrays.copyOf(h, n * 2);
                             h[n++] = i;
                         }
                     }
-                    lastQuery = queryLower;
+                    lastQuery = key;
                     lastHits = Arrays.copyOf(h, n);
                 }
                 hits = lastHits;
@@ -83,7 +86,7 @@ public final class GhidretteScans {
                 if (k > offset) sb.append(',');
                 sb.append("{\"address\":\"").append(addr[i]).append("\",\"value\":");
                 json(sb, val[i]);
-                sb.append(",\"length\":").append(len[i]).append('}');
+                sb.append(",\"length\":").append(len[i]).append(",\"refs\":").append(refs[i]).append('}');
             }
             return sb.append("]}").toString();
         }
@@ -101,8 +104,9 @@ public final class GhidretteScans {
         ArrayList<String> vals = new ArrayList<>();
         String[] addr = new String[1024];
         long dsid = prog.getAddressFactory().getDefaultAddressSpace().getSpaceID();
-        int[] len = new int[1024];
+        int[] len = new int[1024], refs = new int[1024];
         int n = 0;
+        ReferenceManager rm = prog.getReferenceManager();
         for (Data d : DefinedStringIterator.forProgram(prog)) {
             if ((n & 255) == 0) mon.checkCancelled();
             Object v = d.getValue();  // the String for string data types; the StringDataInstance is the fallback (e.g. a pointer-typed string)
@@ -115,13 +119,14 @@ public final class GhidretteScans {
                 if (Character.isHighSurrogate(s.charAt(cut - 1))) cut--;
                 s = s.substring(0, cut);
             }
-            if (n == addr.length) { addr = Arrays.copyOf(addr, n * 2); len = Arrays.copyOf(len, n * 2); }
+            if (n == addr.length) { addr = Arrays.copyOf(addr, n * 2); len = Arrays.copyOf(len, n * 2); refs = Arrays.copyOf(refs, n * 2); }
             addr[n] = fmt(d.getMinAddress(), dsid);
             len[n] = d.getLength();
+            refs[n] = rm.getReferenceCountTo(d.getMinAddress());
             vals.add(s);
             n++;
         }
-        return new Strings(Arrays.copyOf(addr, n), Arrays.copyOf(len, n), vals.toArray(new String[0]));
+        return new Strings(Arrays.copyOf(addr, n), Arrays.copyOf(len, n), vals.toArray(new String[0]), Arrays.copyOf(refs, n));
     }
 
     // ---- symbols -------------------------------------------------------------------------------------------------------------

@@ -179,10 +179,11 @@ class Search:
             return {"total": total, "items": items}
 
     @rpc(lane="scan")
-    def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
+    def list_strings(self, offset=0, limit=500, minLength=4, query="", referencedOnly=False, scan=None):
         """Defined strings in address order. The full scan is cached per `minLength` until the next program change (first call on a
         big binary takes seconds, on a scan worker); `query` is a case-insensitive substring filter over the cached values; `total` is the
-        count after both filters. Values are cut at 1000 UTF-16 units, `length` stays the byte length of the defined string.
+        count after the filters. `referencedOnly` keeps strings something references. Each item has `refs` (reference count) and, when refs > 0,
+        `refFrom` (the first 3 referencing addresses with their function). Values are cut at 1000 UTF-16 units, `length` stays the byte length of the defined string.
         shortcut: one full scan per minLength (in Java, GIL released), upgrade to an index or lazy paging on huge binaries."""
         with self.ctx.lanes.scanning(scan) as prog:
             offset, limit, minLength = lim(offset, 0), lim(limit, 500, 5000), lim(minLength, 4)
@@ -190,7 +191,28 @@ class Search:
             scans = jscans.scans()
             strings = self.snap(("str", minLength), lambda: scan.java(scans.strings, prog, minLength))  # Java object: the 164k values stay in the JVM
             # the query filter runs in Java too (it keeps the hits of the last query, so paging a query is cheap); not part of the snapshot key
-            return json.loads(str(strings.page(offset, limit, query.strip().lower())))
+            if not isinstance(referencedOnly, bool):
+                raise RpcError(INVALID, "referencedOnly must be a boolean")
+            page = json.loads(str(strings.page(offset, limit, query.strip().lower(), referencedOnly)))
+            fm, rm = prog.getFunctionManager(), prog.getReferenceManager()
+            for it in page["items"]:
+                if it["refs"] > 0:
+                    it["refFrom"] = self._ref_from(fm, rm, self.ses.addr(it["address"]))
+            return page
+
+    def _ref_from(self, fm, rm, a, n=3):
+        """The first `n` references to `a` as {from, function?} (shortcut: the first Ghidra returns, not the lowest addresses; xrefs_to has the full list)."""
+        out = []
+        for r in rm.getReferencesTo(a):
+            fa = r.getFromAddress()
+            o = {"from": self.ses.fmt(fa)}
+            f = fm.getFunctionContaining(fa)
+            if f is not None:
+                o["function"] = str(f.getName())
+            out.append(o)
+            if len(out) >= n:
+                break
+        return out
 
     MEM_ENCODINGS = {"ascii": "US_ASCII", "utf16le": "UTF_16LE", "utf16be": "UTF_16BE"}
 

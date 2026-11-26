@@ -385,12 +385,13 @@ const handlers = {
     if (n === BASE + i * STEP + 9 * STRIDE) return [{ to: null, type: "COMPUTED_CALL", kind: "call", target: "external", label: "LIBMOCK.DLL::ext_" + i }]; // an import, like the PE case
     return [];
   },
-  list_strings({ offset, limit, minLength, query }) {
+  list_strings({ offset, limit, minLength, query, referencedOnly }) {
     const off = parseInt0(offset, 0, "offset"), lim = parseInt0(limit, 100, "limit"), min = parseInt0(minLength, 4, "minLength");
     if (query !== undefined && typeof query !== "string") bad("query");
     const q = (query ?? "").trim().toLowerCase();
     const all = Array.from({ length: 300 }, (_, k) => { const value = `mock string #${k}${"x".repeat(k % 20)}`; return { address: hex(BASE + (k * 6000 + 11) * STRIDE), value, length: value.length + 1 }; })
-      .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q) && S.data.get(parseAddr(s.address))?.mnemonic !== "??"); // clear_code removes a string
+      .map((s, k) => (k % 3 === 0 ? { ...s, refs: 0 } : { ...s, refs: (k % 4) + 1, refFrom: Array.from({ length: Math.min(3, (k % 4) + 1) }, (_, j) => ({ from: entryOf((k * 7 + j) % NFUNC), function: nameOf((k * 7 + j) % NFUNC) })) })) // every third string is unreferenced
+      .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q) && (!referencedOnly || s.refs > 0) && S.data.get(parseAddr(s.address))?.mnemonic !== "??"); // clear_code removes a string
     return { total: all.length, items: all.slice(off, off + lim) };
   },
   list_symbols({ offset, limit, query, kinds, sort, desc }) {

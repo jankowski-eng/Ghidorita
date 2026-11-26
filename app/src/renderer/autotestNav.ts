@@ -81,7 +81,19 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   await waitFor(() => status("String count").startsWith("0 strings"), 10000, "min length hides everything");
   typeInto(field("Minimum length"), "4"); typeInto(field("Filter strings"), "");
   await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 10000, "string count restored");
-  R.strings = { total: sTotal, filter: word, filtered: sw.total, clicked: sAddr };
+  // strings -> code: "referenced only" narrows to what the sidecar says is referenced; a "Used by" button goes to the referencing code, not to the string
+  const refTotal = (await rpc.call("list_strings", { referencedOnly: true, limit: 1 })).total;
+  field("Referenced only").click();
+  await waitFor(() => status("String count").startsWith(`${refTotal} strings`), 10000, "referenced-only count " + refTotal);
+  rows = await loaded(g, "referenced strings");
+  const used = rows[0].querySelector<HTMLButtonElement>(".c-refs button.lnk");
+  need(used, "a referenced string shows its referrers");
+  const refFrom = (await rpc.call("list_strings", { referencedOnly: true, limit: 1 })).items[0].refFrom![0].from;
+  used!.click();
+  await navigated(refFrom, "string referrer click");
+  field("Referenced only").click();
+  await waitFor(() => status("String count").startsWith(`${sTotal} strings`), 10000, "string count after referenced-only off");
+  R.strings = { total: sTotal, filter: word, filtered: sw.total, clicked: sAddr, referenced: refTotal, referrer: refFrom };
 
   // the panel follows a real edit: clear a string with clear_code (through the RPC, as the listing's C key does), the panel must drop it without
   // being touched, and show it again after undo. The string is picked so that its text matches exactly one string (the filter then reads 1 -> 0 -> 1).
