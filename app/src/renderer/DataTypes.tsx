@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DataTypeDetail, DataTypeHit, DtSource } from "../../../protocol";
 import { rpc } from "./client";
-import { RpcError } from "./rpc";
+import { RpcError } from "./backend";
 import { latest } from "./latest";
 import { useDebounced } from "./hooks";
 import { Confirm } from "./Confirm";

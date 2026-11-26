@@ -1,19 +1,19 @@
 {
- "jvm_start_s": 2.42,
- "import_analysis_s": 9.69,
- "reopen_s": 0.1,
+ "jvm_start_s": 2.24,
+ "import_analysis_s": 10.07,
+ "reopen_s": 0.08,
  "function_count": 136,
- "decompile_ms": 257.9,
+ "decompile_ms": 280.5,
  "decompile_fn": "FUN_100000718",
- "cache_hit_ms": 0.9,
+ "cache_hit_ms": 0.6,
  "targets_seen": 1,
  "total_bytes": 48128,
  "ranges": 1,
- "listing_rows_200_median_ms": 7.5,
+ "listing_rows_200_median_ms": 6.9,
  "cancel_running": [
   true,
   -32002
  ],
- "listing_during_decompile_ms": 8.8,
+ "listing_during_decompile_ms": 8.5,
  "exit_after_stdin_close_s": 0.18
 }

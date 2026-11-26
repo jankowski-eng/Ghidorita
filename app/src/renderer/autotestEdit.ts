@@ -307,9 +307,11 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
   // 8b. Auto Create Structure on a decompiler variable (real sidecar only: the mock's decompiler has no variable tokens).
   // Find a variable with inferable field accesses by trying the RPC (then undo it), then do it through the UI: cursor on the variable + Edit menu.
   let auto: { entry: string; v: string } | undefined;
-  for (const f of [...fl].sort((x, y) => y.size - x.size).slice(0, 60)) {
+  const hasVars = (await rpc.call("decompile", { entry })).tokens.some((t) => t.kind === "variable" || t.kind === "param");
+  for (const f of (hasVars ? [...fl] : []).sort((x, y) => y.size - x.size).slice(0, 60)) {
     if (f.entry === entry || f.entry === edit?.entry) continue;
-    const r = await rpc.call("decompile", { entry: f.entry });
+    const r = await rpc.call("decompile", { entry: f.entry }).catch(() => null); // (huge functions may time out)
+    if (!r) continue;
     const vars = [...new Set(r.tokens.filter((t) => (t.kind === "variable" || t.kind === "param") && t.varName).map((t) => t.varName!))];
     for (const v of vars) {
       const ok = await rpc.call("auto_create_structure", { entry: f.entry, name: v, structName: "AutotestProbe" }).then(() => true, () => false);
