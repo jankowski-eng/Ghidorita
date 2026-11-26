@@ -68,7 +68,7 @@ cd app && npm run dist        # -> app/dist/Ghidrette-<ver>-arm64.dmg and app/di
 
 What the bundle contains (`Contents/Resources/`):
 - `jdk/`: `jlink` runtime with the modules found by `jdeps -s` over every Ghidra jar and `org.jpype.jar` (java.base, desktop, sql, xml, naming, rmi, management, scripting, net.http, jdk.compiler, jdk.unsupported, …) plus `jdk.zipfs jdk.crypto.ec jdk.management jdk.charsets java.prefs`. Verified by running analysis + decompile + the edit flow with it.
-- `ghidra/`: copy of the distribution minus docs, Extensions, Debug (debugger), GhidraServer, BSim, x86_64/other-OS natives, `*-src.zip`, unused `support/` launchers (sizes in `app/bundle/trim-log.txt`). The `os/mac_arm_64` decompiler binary is kept and `chmod +x`'d; electron-builder preserves the mode. Kept although large: `Features/FunctionID` data (195 MB, Function ID analyzer), `Features/Base/data/typeinfo` (124 MB, data type archives), all processors.
+- `ghidra/`: copy of the distribution minus FunctionID databases, docs, Extensions, Debug (debugger), GhidraServer, BSim, x86_64/other-OS natives, `*-src.zip`, unused `support/` launchers (sizes in `app/bundle/trim-log.txt`). The `os/mac_arm_64` decompiler binary is kept and `chmod +x`'d; electron-builder preserves the mode. Also cut: `Features/FunctionID/data` (195 MB; the Function ID analyzer stays but has no databases, so it names no library functions in PE/ELF binaries). Kept although large: `Features/Base/data/typeinfo` (124 MB, data type archives), all processors.
 - `python/`: python-build-standalone 3.12 with websockets, jpype1, packaging, typing_extensions, pyghidra (wheel from the Ghidra build). Links only against system libs.
 - `sidecar/main.py`.
 
