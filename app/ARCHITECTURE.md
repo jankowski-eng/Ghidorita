@@ -36,7 +36,7 @@ src/renderer/
 
 - **Only `main.tsx` (and the adapter itself) touches `rpc.ts` / `wire.ts`.** Everything else works on `ApplicationBackend` operations bound to the active session (`backend.program(session)`). `test/backend-boundary.test.mjs` fails otherwise (it scans every file, `store/` and `features/` included).
 - **One session per backend.** `createSession(backend)` owns the program store and the views store; components read them with `useProgram(selector)` / `useViews(selector)`, code outside React with `store.getState()` (async code always sees the current state, no ref mirrors).
-- **Events down, not callbacks across.** The session announces `onReset` (the program is opened, replaced or closed) and `onChanged` (program_changed: edits, undo, redo; a save only updates undo). The views store resets itself on a reset (the pane layout, graph toggle and counters stay); `features/reactions.ts` is the one subscriber that reacts to a change with fetches. Same shape as `Events.subscribe` in the sidecar.
+- **Events down, not callbacks across.** The session announces `onReset` (the program is opened, replaced or closed) and `onChanged` (program_changed: edits, undo, redo; a save only updates undo). The views store resets itself on a reset (the pane layout, the control-flow and call graph toggles and counters stay); `features/reactions.ts` is the one subscriber that reacts to a change with fetches. Same shape as `Events.subscribe` in the sidecar.
 - **A failed open keeps the active program.** `selectSession` only resets when the session id changes; a held `program_changed` during an open is replayed for the session that is still active.
 - **Components render and call hooks.** `App` builds the feature hooks once and hands them to `Workbench`; handlers registered once (menu, mouse, keys) call the latest closures through `api.current`. Never `useA() || useB()`: use `useBusy()`.
 - **Scripted modes are not in the product chunk.** Only `main.tsx` imports `autotest/`, by dynamic `import()`; elsewhere only `import type`. `test/layering.test.mjs` checks it (verify in `app/out/renderer/assets`: `autotest-*.js` is its own file).
@@ -46,7 +46,7 @@ src/renderer/
 | store | holds | reset by |
 |---|---|---|
 | `session.store` (`program.ts`) | active program, open lifecycle, progress, functions, address map, first rows, undo/dirty, saving, stats, messages | `program` action when the session id changes |
-| `session.views` (`views.ts`) | history, current function, scroll/refetch signals, versions, pinned xref target, dock, bars, dialogs | `reset`: all but pane visibility, graph toggle, counters and the pending import |
+| `session.views` (`views.ts`) | history, current function, scroll/refetch signals, versions, pinned xref target, dock, bars, dialogs | `reset`: all but pane visibility, the control-flow and call graph toggles, counters and the pending import |
 | `useTabs` | decompiler tabs and results | `onReset` (reactions.ts) |
 | `coverage` (module) | coverage runs | `coverage.clear()` in the session's reset |
 
