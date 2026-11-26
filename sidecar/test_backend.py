@@ -1,5 +1,5 @@
 """Backend API tests against real Ghidra on /bin/ls (see ../README.md for JAVA_HOME and the venv)."""
-import asyncio, glob, json, os, subprocess, sys, time
+import asyncio, glob, hashlib, json, os, re, subprocess, sys, time
 
 import pytest
 import websockets
@@ -17,9 +17,9 @@ def ghidra_dir():
 
 
 class Proc:
-    def __init__(self, projects, extra_env=None):
+    def __init__(self, projects, extra_env=None, stderr=None):
         env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(projects), **(extra_env or {}))
-        self.p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
+        self.p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, env=env)
         self.port = int(self.p.stdout.readline())
 
     def stop(self):
@@ -645,10 +645,12 @@ def test_candidates_and_languages(bproc):
 
     async def go():
         async with Client(proc.port) as c:
-            assert (await c.ok("import_candidates", path=raw)) == {"candidates": []}  # nothing recognises a bare blob
+            assert (await c.ok("import_candidates", path=raw)) == {"candidates": [], "sizeBytes": os.path.getsize(raw)}  # nothing recognises a bare blob
             await c.err("import_candidates", NOT_FOUND, path=str(d / "nope"))
             await c.err("import_candidates", INVALID)
-            r = (await c.ok("import_candidates", path=BIN))["candidates"]
+            res = await c.ok("import_candidates", path=BIN)
+            assert res["sizeBytes"] == os.path.getsize(BIN)
+            r = res["candidates"]
             assert r and sum(x["preferred"] for x in r) == 1
             assert all(set(x) == {"loader", "language", "compilerSpec", "preferred", "acceptsBaseAddress"} for x in r)
             pref = next(x for x in r if x["preferred"])
@@ -882,3 +884,245 @@ def test_auth_mandatory(tmp_path):
     finally:
         p.stdin.close()
         p.wait(timeout=15)
+
+
+# ---- Round 5: comments, labels, strings query, cancellable variable edits, profiles, project lock, clean shutdown ----
+PROJECT_LOCKED = -32006
+TIMEOUT = -32003
+
+
+def win_exe():
+    g = glob.glob(os.path.join(ghidra_dir(), "docs/GhidraClass/ExerciseFiles/WinhelloCPP/WinHelloCPP.exe"))
+    return g[0] if g else None
+
+
+def test_get_comments_and_create_label(env):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            f = fns[len(fns) // 2]
+            at = f["entry"]
+            assert await c.ok("get_comments", address=at) == {}
+            texts = {"eol": "e1", "pre": "p1\nline2", "post": "o1", "plate": "pl1", "repeatable": "r1"}
+            for k, t in texts.items():
+                await c.ok("set_comment", address=at, kind=k, text=t)
+            assert await c.ok("get_comments", address=at) == texts
+            assert await c.ok("get_comments", address=hex(int(at, 16) + 0)) == texts
+            await c.ok("set_comment", address=at, kind="pre", text="")  # empty clears: the key disappears
+            assert "pre" not in await c.ok("get_comments", address=at)
+            await c.err("get_comments", INVALID, address="zz")
+            await c.err("get_comments", NOT_FOUND, address="0x1")
+            for _ in range(6):
+                await c.ok("undo")
+            assert await c.ok("get_comments", address=at) == {}
+
+            # an unlabeled code unit: rename_symbol says NotFound, create_label makes the label
+            rows = await c.ok("listing_rows", address=max(fns, key=lambda f: f["size"])["entry"], count=8)
+            row = next(r for r in rows[1:] if "label" not in r)
+            a = row["address"]
+            await c.err("rename_symbol", NOT_FOUND, address=a, newName="nope")
+            since = len(c.notes)
+            await c.ok("create_label", address=a, name="r5_label")
+            note = (await c.wait_note("program_changed", since=since))[0]
+            assert "symbol" in note["kinds"] and note["undo"]["dirty"] is True
+            assert (await c.ok("listing_rows", address=a, count=1))[0]["label"] == "r5_label"
+            assert any(h["name"] == "r5_label" and h["address"] == a and h["kind"] == "label" for h in await c.ok("search_symbols", query="r5_label"))
+            await c.err("create_label", INVALID, address=a, name="again")  # one primary label: rename it instead
+            await c.err("create_label", INVALID, address="0x1", name="x")  # not in memory
+            await c.err("create_label", INVALID, address=a)  # missing name
+            await c.ok("rename_symbol", address=a, newName="r5_renamed")
+            await c.ok("undo"); await c.ok("undo")
+            assert "label" not in (await c.ok("listing_rows", address=a, count=1))[0]
+            u = await c.ok("undo_state")
+            assert u["canRedo"] is True
+            await c.ok("redo"); await c.ok("undo")  # round trip; leaves the shared program as it was
+    run(go())
+
+
+def test_list_strings_query(env):
+    async def go():
+        async with Client(env["proc"].port) as c:
+            s = await c.ok("list_strings", limit=5000)
+            assert s["total"] > 3
+            probe = s["items"][2]["value"][:5]
+            hits = await c.ok("list_strings", query=probe.upper(), limit=5000)  # case-insensitive substring, applied before paging
+            assert 0 < hits["total"] <= s["total"] and all(probe.lower() in i["value"].lower() for i in hits["items"])
+            assert any(i["address"] == s["items"][2]["address"] for i in hits["items"])
+            assert (await c.ok("list_strings", query=probe, offset=hits["total"]))["items"] == []
+            assert (await c.ok("list_strings", query="zzz_no_such_string_zzz")) == {"total": 0, "items": []}
+            assert (await c.ok("list_strings", query=""))["total"] == s["total"]
+            await c.err("list_strings", INVALID, query=5)
+    run(go())
+
+
+def test_variable_edit_timeout_arg_and_cancel(env):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            big = max(fns, key=lambda f: f["size"])
+            await c.err("rename_variable", INVALID, entry=big["entry"], name="x", newName="y", timeoutSecs=-1)
+            await c.err("retype_variable", INVALID, entry=big["entry"], name="x", dataType="int", timeoutSecs="soon")
+            await c.err("rename_variable", NOT_FOUND, entry=big["entry"], name="no_such_var", newName="y", timeoutSecs=60)
+            # cancel_decompile reaches the decompile inside a variable edit (the cancel races a ~0.5 s decompile; a few tries)
+            seen = []
+            for _ in range(5):
+                rid = await c.send("rename_variable", entry=big["entry"], name="no_such_var", newName="y")
+                await c.ok("cancel_decompile", id=rid)
+                r = await c.reply(rid)
+                seen.append(r["error"]["code"])
+                if CANCELLED in seen:
+                    break
+            assert CANCELLED in seen and set(seen) <= {CANCELLED, NOT_FOUND}, seen
+            assert (await c.ok("cancel_decompile", id=999999)) == {"cancelled": False}
+    run(go())
+
+
+def test_open_profile_fast_and_full(tmp_path):
+    err = open(tmp_path / "stderr.log", "wb")
+    proc = Proc(tmp_path / "projects", stderr=err)
+    sha = hashlib.sha256(open(BIN, "rb").read()).hexdigest()
+
+    async def go():
+        async with Client(proc.port) as c:
+            await c.err("open_binary", INVALID, path=BIN, profile="turbo")
+            r = await c.ok("open_binary", path=BIN, profile="fast")
+            assert r["programId"].startswith(sha + "-") and r["persisted"] is False
+            fast_fns = len(await c.ok("list_functions"))
+            progs = await c.ok("list_programs")
+            assert [p["options"] for p in progs] == [{"profile": "fast"}]
+            await c.ok("close_program")
+            r2 = await c.ok("open_binary", path=BIN, profile="fast")  # same key: persisted, no re-analysis
+            assert r2["programId"] == r["programId"] and r2["persisted"] is True
+            full = await c.ok("open_binary", path=BIN, profile="full")  # explicit full == plain default key
+            assert full["programId"] == sha and full["persisted"] is False
+            assert len(await c.ok("list_functions")) > 0 and fast_fns > 0
+            assert {p["programId"]: p["options"] for p in await c.ok("list_programs")} == {sha: {}, r["programId"]: {"profile": "fast"}}
+    try:
+        run(go())
+    finally:
+        proc.stop()
+        err.close()
+    log = open(tmp_path / "stderr.log", errors="replace").read()
+    assert "analyzers disabled: ['Call Convention ID', 'Decompiler Switch Analysis', 'Stack']" in log, log[-2000:]
+    assert log.count("analyzers disabled") == 1  # the full open and the persisted reopen disable nothing
+
+
+def test_open_profile_on_raw_blob(bproc):
+    proc, d = bproc
+    raw = blob(d, "profile.bin")
+    opts = dict(path=raw, loader="Raw Binary", language=X86, baseAddress=BASE)
+
+    async def go():
+        async with Client(proc.port) as c:
+            full = await c.ok("open_binary", **opts)
+            fast = await c.ok("open_binary", profile="fast", **opts)
+            assert fast["programId"] != full["programId"] and fast["persisted"] is False
+            await c.ok("close_program")
+            ents = {p["programId"]: p["options"] for p in await c.ok("list_programs")}
+            assert ents[fast["programId"]] == {"loader": "Raw Binary", "language": X86, "baseAddress": BASE, "profile": "fast"}
+            assert "profile" not in ents[full["programId"]]
+            # raw-blob path of the Round 5 reads/edits
+            await c.ok("open_binary", **opts)
+            assert await c.ok("get_comments", address=BASE) == {}
+            await c.ok("set_comment", address=BASE, kind="plate", text="blob plate")
+            assert await c.ok("get_comments", address=BASE) == {"plate": "blob plate"}
+            mid = hex(int(BASE, 16) + 3)  # inside the second instruction? unlabeled either way
+            row = (await c.ok("listing_rows", address=mid, count=1))[0]
+            assert "label" not in row
+            await c.ok("create_label", address=row["address"], name="blob_lbl")
+            assert (await c.ok("listing_rows", address=row["address"], count=1))[0]["label"] == "blob_lbl"
+            await c.ok("undo"); await c.ok("undo")
+    run(go())
+
+
+def test_xrefs_from_external_on_pe(tmp_path):
+    exe = win_exe()
+    if not exe:
+        pytest.skip("Ghidra's WinHelloCPP.exe exercise file is not in the install")
+    proc = Proc(tmp_path / "projects")
+
+    async def go():
+        async with Client(proc.port) as c:
+            await c.ok("open_binary", path=exe)
+            addr = None
+            rows = await c.ok("listing_rows", address="0x401000", count=1000)
+            for row in rows:
+                x = await c.ok("xrefs_from", address=row["address"])
+                ext = [e for e in x if "external" in e]
+                if ext:
+                    addr, ext = row["address"], ext[0]
+                    break
+            assert addr, "no external reference in the first 1000 code units"
+            assert "to" not in ext and "::" in ext["external"] and ext["type"]
+            assert any("to" in e for e in x)  # the IAT slot is still a memory reference of the same instruction
+            slot = next(e["to"] for e in x if "to" in e)
+            assert any(r["from"] == addr for r in await c.ok("xrefs_to", address=slot))  # imports are found *to* via their IAT slot
+    try:
+        run(go())
+    finally:
+        proc.stop()
+
+
+def test_project_lock_clear_error(tmp_path):
+    p1, d = Proc(tmp_path / "projects"), tmp_path / "projects"
+    p2 = Proc(d)
+
+    async def go():
+        async with Client(p1.port) as c1:
+            await c1.ok("list_programs")  # p1 owns the project now
+            async with Client(p2.port) as c2:
+                for m, kw in (("list_programs", {}), ("open_binary", {"path": BIN})):
+                    r = await c2.call(m, **kw)
+                    assert r["error"]["code"] == PROJECT_LOCKED and "in use by another Ghidrette" in r["error"]["message"], r
+                assert await c2.ok("list_languages")  # the sidecar stays usable
+                assert (await c2.call("list_functions"))["error"]["code"] == NO_PROGRAM
+            return True
+    try:
+        run(go())
+        p1.stop()  # releases the project; the second sidecar's next call works (no sticky failure)
+
+        async def after():
+            async with Client(p2.port) as c2:
+                assert await c2.ok("list_programs") == []
+        run(after())
+    finally:
+        p1.stop(); p2.stop()
+
+
+def test_clean_shutdown_releases_project(tmp_path):
+    """After stdin EOF: exit 0, the project's lock files are gone, the edit was saved, and the next start opens it
+    without a lock or recovery message. (Before: spike.lock and spike.lock~ stayed behind, os._exit with the project open.)"""
+    d = tmp_path / "projects"
+    log1, log2 = open(tmp_path / "e1.log", "wb"), open(tmp_path / "e2.log", "wb")
+    p = Proc(d, stderr=log1)
+
+    async def first():
+        async with Client(p.port) as c:
+            await c.ok("open_binary", path=BIN)
+            f = (await c.ok("list_functions"))[3]
+            await c.ok("rename_symbol", address=f["entry"], newName="r5_shutdown_name")
+            return f["entry"]
+    entry = run(first())
+    t = time.monotonic()
+    p.p.stdin.close()
+    assert p.p.wait(timeout=60) == 0
+    stop_s = time.monotonic() - t
+    log1.close()
+    assert not [n for n in os.listdir(d) if n.endswith((".lock", ".lock~"))], os.listdir(d)
+    p2 = Proc(d, stderr=log2)
+
+    async def second():
+        async with Client(p2.port) as c:
+            t0 = time.monotonic()
+            r = await c.ok("open_binary", path=BIN)
+            assert r["persisted"] is True
+            assert (await c.ok("get_function_at", address=entry))["name"] == "r5_shutdown_name"
+            return time.monotonic() - t0
+    open_s = run(second())
+    p2.stop(); log2.close()
+    for name in ("e1.log", "e2.log"):
+        text = open(tmp_path / name, errors="replace").read()
+        assert not re.search(r"recover|unable to lock|lock exception|project is locked", text, re.I), (name, text[-1500:])
+    print("shutdown %.2fs, next open %.2fs" % (stop_s, open_s))

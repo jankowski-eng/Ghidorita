@@ -11,6 +11,7 @@ from collections import OrderedDict
 import websockets
 
 NO_PROGRAM, CANCELLED, TIMEOUT, NOT_FOUND, BUSY, INTERNAL, NO_METHOD, INVALID = -32001, -32002, -32003, -32004, -32005, -32603, -32601, -32602
+PROJECT_LOCKED = -32006
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
 # program_changed kinds, see protocol.md. Everything not listed is "other".
@@ -21,6 +22,8 @@ KIND_PREFIX = [("SYMBOL_", "symbol"), ("EXTERNAL_", "symbol"), ("REFERENCE_", "s
                ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code"}
+# analysis profiles (open_binary `profile`): "fast" switches these off for the first-open analysis (measured in SPIKE_REPORT round 4)
+FAST_PROFILE = ["Call Convention ID", "Decompiler Switch Analysis", "Stack"]
 RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a base address option ("-loader-baseAddr")
 KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 INVALID_JAVA = {"InvalidInputException", "DuplicateNameException", "ParseException", "InvalidDataTypeException",
@@ -136,7 +139,7 @@ class Sidecar:
         self.dj = {}                 # request id -> Job, loop thread only
         self.mon_lock = threading.Lock()
         self.opening = None          # Opening, loop thread only
-        self.proj = None
+        self.proj = self.gp = None
         self.proj_lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
         self.program_id = None
         self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
@@ -256,17 +259,37 @@ class Sidecar:
     def _project(self):
         """One Ghidra project for all programs, programs named by their programId. Only with proj_lock held (thread O
         during an open, thread R for list/delete).
-        shortcut: a second sidecar on the same projects dir fails on the project lock; one process per dir."""
+        A second sidecar on the same projects dir gets PROJECT_LOCKED (retried on every call, so it works once the other quits)."""
         if self.proj is None:
+            import jpype
             from ghidra.base.project import GhidraProject
             from ghidra.framework.model import ProjectLocator
             d = self._projects_dir()
             os.makedirs(d, exist_ok=True)
             # GhidraProject, not pyghidra.open_project: that one builds a GUI-oriented DefaultProjectManager which hangs headless here
-            gp = (GhidraProject.openProject(d, "spike", True) if ProjectLocator(d, "spike").exists()
-                  else GhidraProject.createProject(d, "spike", False))
-            self.proj = gp.getProject()
+            try:
+                gp = (GhidraProject.openProject(d, "spike", True) if ProjectLocator(d, "spike").exists()
+                      else GhidraProject.createProject(d, "spike", False))
+            except jpype.JException as e:
+                if str(e.getClass().getSimpleName()) == "LockException":
+                    raise RpcError(PROJECT_LOCKED, "projects dir in use by another Ghidrette (%s)" % d)
+                raise
+            self.gp, self.proj = gp, gp.getProject()
         return self.proj
+
+    def _close_project(self):
+        """Shutdown only (thread R, after _close): release the project so Ghidra removes its lock files."""
+        if not self.proj_lock.acquire(timeout=30):  # an open that does not stop: leave the project to the OS, Ghidra detects the stale lock
+            log("project still in use by an open, not closing it")
+            return
+        try:
+            gp, self.gp, self.proj = self.gp, None, None
+            if gp is not None:
+                gp.close()
+        except Exception as e:  # noqa
+            log("project close failed:", repr(e))
+        finally:
+            self.proj_lock.release()
 
     # ---- program browser metadata ----
     # list_programs needs sourcePath/sizeBytes/options/lastOpened/analyzed. They live in programs.json next to the project
@@ -332,8 +355,9 @@ class Sidecar:
             try:
                 lm = LoaderService.getAllSupportedLoadSpecs(p, TaskMonitor.DUMMY)
                 chosen = LoadSpecChooser.CHOOSE_THE_FIRST_PREFERRED.choose(lm)
+                size = os.path.getsize(path)
                 if chosen is None:  # only Raw Binary (always offered, needs a language) applies: "nothing recognises the file"
-                    return {"candidates": []}
+                    return {"candidates": [], "sizeBytes": size}
                 out = []
                 for e in lm.entrySet():
                     loader = str(e.getKey().getName())
@@ -347,7 +371,7 @@ class Sidecar:
                                     "compilerSpec": str(lcs.compilerSpecID) if lcs is not None else None,
                                     "preferred": spec == chosen,
                                     "acceptsBaseAddress": loader == RAW})
-                return {"candidates": out}
+                return {"candidates": out, "sizeBytes": size}
             finally:
                 p.close()
 
@@ -518,10 +542,10 @@ class Sidecar:
         return opts
 
     @staticmethod
-    def _program_key(sha, opts):
-        """protocol.md "Persistence key"."""
-        disabled = analysis_disabled()
-        if not opts and not disabled:
+    def _program_key(sha, opts, disabled=None):
+        """protocol.md "Persistence key". disabled = analyzer names switched off (default: SIDECAR_ANALYSIS_DISABLE)."""
+        disabled = analysis_disabled() if disabled is None else disabled
+        if not any(k in opts for k in ("loader", "language", "compilerSpec", "baseAddress")) and not disabled:
             return sha
         c = {k: opts.get(k) for k in ("loader", "language", "compilerSpec", "baseAddress")}
         if disabled:  # a reduced analysis never shares a key with a full one
@@ -529,19 +553,25 @@ class Sidecar:
         canon = json.dumps(c, separators=(",", ":"))
         return sha + "-" + hashlib.sha256(canon.encode()).hexdigest()[:12]
 
-    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None):
+    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None, profile=None):
         text_arg(path, "path")
         if self.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
         opts = self._check_options(loader, language, compilerSpec, baseAddress)
+        if profile not in (None, "full", "fast"):
+            raise RpcError(INVALID, "bad profile %r" % (profile,))
+        # no profile: SIDECAR_ANALYSIS_DISABLE if set (costs nothing), else full
+        disabled = analysis_disabled() if profile is None else FAST_PROFILE if profile == "fast" else []
+        if sorted(disabled) == FAST_PROFILE:
+            opts["profile"] = "fast"  # shown in the program browser, replayed on reopen
         op = self.opening = Opening()
         fut = self.loop.create_future()
 
         def body():
             try:
-                res, exc = self._do_open(path, op, opts), None
+                res, exc = self._do_open(path, op, opts, disabled), None
             except BaseException as e:  # noqa
                 res, exc = None, e
             self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
@@ -551,7 +581,7 @@ class Sidecar:
         finally:
             self.opening = None
 
-    def _do_open(self, path, op, opts):
+    def _do_open(self, path, op, opts, disabled):
         """Thread O. On cancel or any error: nothing is saved, the program is released, the project stays usable."""
         import pyghidra
         res = prog = None
@@ -566,7 +596,7 @@ class Sidecar:
                     h.update(chunk)
                     done += len(chunk)
                     self.progress("import", min(10, done * 10 // size), "hashing")
-            key = self._program_key(h.hexdigest(), opts)
+            key = self._program_key(h.hexdigest(), opts, disabled)
             proj = self._project()
             t0 = time.monotonic()
             persisted = proj.getProjectData().getFile("/" + key) is not None
@@ -586,7 +616,7 @@ class Sidecar:
                     self._meta_touch(key)
                     log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
             if not persisted:
-                res, prog, consumer = self._import_and_analyze(path, key, proj, op, opts), None, None
+                res, prog, consumer = self._import_and_analyze(path, key, proj, op, opts, disabled), None, None
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
                 self._meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=os.path.getsize(path),
@@ -626,7 +656,7 @@ class Sidecar:
         finally:
             self.proj_lock.release()
 
-    def _import_and_analyze(self, path, key, proj, op, opts):
+    def _import_and_analyze(self, path, key, proj, op, opts, disabled):
         from ghidra.app.util.importer import ProgramLoader
         self.progress("import", 10, "importing")
         last = [0.0]
@@ -648,13 +678,13 @@ class Sidecar:
         res = b.load()
         op.check()
         try:
-            self._analyze(res.getPrimaryDomainObject(), op)
+            self._analyze(res.getPrimaryDomainObject(), op, disabled)
         except BaseException:
             res.close()
             raise
         return res
 
-    def _analyze(self, prog, op):
+    def _analyze(self, prog, op, disabled):
         """Real signal available from Ghidra (AutoAnalysisManager): the monitor message is the analyzer name at each
         analyzer start (AnalysisScheduler.runAnalyzer: setMessage(name); setProgress(0)), analyzers then overwrite it
         and set their own max. The manager exposes no queue size or global total, so there is no honest overall pct:
@@ -687,7 +717,7 @@ class Sidecar:
         tx = prog.startTransaction("Analysis")
         try:
             mgr = AutoAnalysisManager.getAnalysisManager(prog)
-            self._disable_analyzers(prog)
+            self._disable_analyzers(prog, disabled)
             mgr.initializeOptions()
             mgr.reAnalyzeAll(None)
             mgr.startAnalysis(mon)  # blocks this thread; cancel_open cancels mon from the loop thread
@@ -699,13 +729,11 @@ class Sidecar:
             GhidraScriptUtil.releaseBundleHostReference()
 
     @staticmethod
-    def _disable_analyzers(prog):
-        """SIDECAR_ANALYSIS_DISABLE="Name 1;Name 2" switches analyzers off for the first-open analysis (exact analyzer
-        names, see bench/ for the measured trade-off). Unknown names are logged and ignored. The list is part of the
-        programId (_program_key), so a reduced analysis is stored apart from a full one.
-        shortcut: env var for the whole process; upgrade to an open_binary param once the UI offers profiles."""
+    def _disable_analyzers(prog, names):
+        """Switches the named analyzers off for the first-open analysis (exact analyzer names, see bench/ for the
+        measured trade-off). Unknown names are logged and ignored. The list is part of the programId (_program_key),
+        so a reduced analysis is stored apart from a full one."""
         from ghidra.program.model.listing import Program
-        names = analysis_disabled()
         if not names:
             return
         opts = prog.getOptions(Program.ANALYSIS_PROPERTIES)
@@ -713,7 +741,7 @@ class Sidecar:
             if opts.contains(n):
                 opts.setBoolean(n, False)
             else:
-                log("SIDECAR_ANALYSIS_DISABLE: unknown analyzer %r" % n)
+                log("unknown analyzer to disable: %r" % n)
         log("analyzers disabled: %s" % names)
 
     def _save(self, res, op):
@@ -1310,6 +1338,32 @@ class Sidecar:
         self.edit(("Clear %s comment" if not text else "Set %s comment") % kind, self._cmd(cmd))
         return {}
 
+    def get_comments(self, address):
+        from ghidra.program.model.listing import CommentType
+        cu = self.need().getListing().getCodeUnitContaining(self.addr(address))
+        if cu is None:
+            raise RpcError(NOT_FOUND, "no code unit at %s" % address)
+        out = {}
+        for k, t in (("eol", CommentType.EOL), ("pre", CommentType.PRE), ("post", CommentType.POST),
+                     ("plate", CommentType.PLATE), ("repeatable", CommentType.REPEATABLE)):
+            c = cu.getComment(t)
+            if c:
+                out[k] = str(c)
+        return out
+
+    def create_label(self, address, name):
+        from ghidra.app.cmd.label import AddLabelCmd
+        from ghidra.program.model.symbol import SourceType
+        prog = self.need()
+        self._name_arg(name)
+        a = self.addr(address)
+        if not prog.getMemory().contains(a):
+            raise RpcError(INVALID, "address %s is not in memory" % address)
+        if prog.getSymbolTable().getPrimarySymbol(a) is not None:
+            raise RpcError(INVALID, "a label already exists at %s (use rename_symbol)" % address)
+        self.edit("Create label %s" % name, self._cmd(AddLabelCmd(a, name, SourceType.USER_DEFINED)))
+        return {}
+
     def create_function(self, address, name=None):
         from ghidra.app.cmd.function import CreateFunctionCmd
         from ghidra.program.model.symbol import SourceType
@@ -1404,20 +1458,30 @@ class Sidecar:
         self.edit("Edit signature of %s" % f.getName(), go)
         return {}
 
-    def _high_edit(self, tx_name, entry, name, fn):
+    def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job):
         """rename_variable / retype_variable. Decided: the whole thing runs on thread R with a short-lived DecompInterface
         (not a pool worker). The HighFunction is only valid for the program state it was decompiled from; every write
         also runs on R, so no edit can slip between the decompile and the commit. Cost: R is blocked for one decompile.
-        shortcut: fixed 30 s decompile timeout on R and not cancellable, upgrade with a cancel path if huge functions bite."""
+        The timeout is the request's `timeoutSecs` (default 30); `cancel_decompile` with the request id cancels it (job)."""
         from ghidra.app.decompiler import DecompInterface
         from ghidra.pyghidra import PyGhidraTaskMonitor
         text_arg(name, "name")
+        timeoutSecs = lim(timeoutSecs, 30)
         prog, func = self._function(entry)
+        mon = PyGhidraTaskMonitor(None, None)
+        with self.mon_lock:
+            job.mon = mon
+            if job.cancelled:
+                mon.cancel()
         d = DecompInterface()
         try:
             if not d.openProgram(prog):
                 raise RpcError(INTERNAL, "decompiler failed to open program: %s" % d.getLastMessage())
-            res = d.decompileFunction(func, 30, PyGhidraTaskMonitor(None, None))
+            res = d.decompileFunction(func, timeoutSecs, mon)
+            if res.isCancelled() or mon.isCancelled():
+                raise RpcError(CANCELLED, "decompile cancelled")
+            if res.isTimedOut():
+                raise RpcError(TIMEOUT, "decompile timed out after %ss" % timeoutSecs)
             if not res.decompileCompleted():
                 raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
             hf = res.getHighFunction()
@@ -1443,7 +1507,7 @@ class Sidecar:
                 return True
         return False
 
-    def rename_variable(self, entry, name, newName):
+    def rename_variable(self, entry, name, newName, timeoutSecs=30, job=None):
         from ghidra.program.model.pcode import HighFunctionDBUtil
         from ghidra.program.model.symbol import SourceType
         self._name_arg(newName, "newName")
@@ -1454,9 +1518,9 @@ class Sidecar:
             if self._needs_full_commit(sym, hf):
                 HighFunctionDBUtil.commitParamsToDatabase(hf, False, HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, func.getSignatureSource())
             HighFunctionDBUtil.updateDBVariable(sym, newName, None, SourceType.USER_DEFINED)
-        return self._high_edit("Rename variable in %s", entry, name, go)
+        return self._high_edit("Rename variable in %s", entry, name, go, timeoutSecs, job)
 
-    def retype_variable(self, entry, name, dataType):
+    def retype_variable(self, entry, name, dataType, timeoutSecs=30, job=None):
         from ghidra.program.model.data import DataTypeConflictHandler
         from ghidra.program.model.pcode import HighFunctionDBUtil
         from ghidra.program.model.symbol import SourceType
@@ -1474,7 +1538,7 @@ class Sidecar:
                 HighFunctionDBUtil.commitParamsToDatabase(hf, func.getSignatureSource() != SourceType.DEFAULT,
                                                           HighFunctionDBUtil.ReturnCommitOption.NO_COMMIT, SourceType.USER_DEFINED)
             HighFunctionDBUtil.updateDBVariable(sym, None, dt, SourceType.USER_DEFINED)
-        return self._high_edit("Retype variable in %s", entry, name, go)
+        return self._high_edit("Retype variable in %s", entry, name, go, timeoutSecs, job)
 
     def _undo_redo(self, undo):
         prog = self.need()
@@ -1615,9 +1679,11 @@ class Sidecar:
 
     S_METHODS = ("search_symbols", "list_symbols", "list_strings", "search_memory")  # scan workers, see the module docstring
     R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "xrefs_to", "xrefs_to_variable",
-                 "xrefs_from", "list_data_types", "undo_state", "rename_symbol", "set_comment",
+                 "xrefs_from", "list_data_types", "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment",
                  "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo",
                  "define_data", "clear_code", "save")
+    # on R, with a Job registered under the request id so cancel_decompile can reach the decompile inside (see _high_edit)
+    CANCELLABLE = ("rename_variable", "retype_variable")
     # run on R, but never behind/alongside an open: Busy instead of NoProgram
     P_METHODS = ("close_program", "import_candidates", "list_languages", "list_programs", "delete_program")
 
@@ -1661,6 +1727,14 @@ class Sidecar:
                     job = self.dj[rid] = Job(self.epoch)
                     try:
                         result = await self.run(lambda: self.decompile(job=job, **params), self.djobs)
+                    finally:
+                        self.dj.pop(rid, None)
+                elif method in self.CANCELLABLE:
+                    if rid is None or rid in self.dj:
+                        raise RpcError(INVALID, "%s needs a unique request id" % method)
+                    job = self.dj[rid] = Job(self.epoch)
+                    try:
+                        result = await self.run(lambda: getattr(self, method)(job=job, **params))
                     finally:
                         self.dj.pop(rid, None)
                 else:
@@ -1710,8 +1784,11 @@ class Sidecar:
                 j.cancelled = True
                 if j.mon is not None:
                     j.mon.cancel()
-        for j in list(self.dj.values()):
-            j.cancelled = True
+        with self.mon_lock:
+            for j in list(self.dj.values()):  # queued decompiles and a variable edit running on R
+                j.cancelled = True
+                if j.mon is not None:
+                    j.mon.cancel()
         for sc in list(self.sj.values()):
             sc.cancel()
 
@@ -1720,7 +1797,10 @@ class Sidecar:
             time.sleep(0.02)  # never exit mid-save: a half-written project file would load as "persisted"
         t0 = time.monotonic()
         f = concurrent.futures.Future()
-        self.jobs.put((self._close, f))  # close (and autosave) on thread R, like every other program change
+        def close_all():
+            self._close()
+            self._close_project()  # releases the project so the lock files go away
+        self.jobs.put((close_all, f))  # close (and autosave) on thread R, like every other program change
         # R may be busy with a long edit; give up only if it is not saving (Electron's SIGKILL is the backstop)
         while not f.done() and (time.monotonic() - t0 < 45 or self.save_lock.locked()):
             time.sleep(0.02)
