@@ -2,7 +2,7 @@
 import json, os, re
 
 from ..core.args import text_arg
-from ..core.errors import INTERNAL, INVALID, RpcError, java_error
+from ..core.errors import BUSY, INTERNAL, INVALID, RpcError, java_error
 from ..core.rpc import rpc
 from .listing import ROW_COMMENT_KINDS, SOURCES
 
@@ -98,10 +98,11 @@ class Exports:
         """Ghidra archive -> `path` through GzfExporter (the whole database as a packed .gzf that Ghidra's importer opens). Lane R: it reads
         the entire database, so no edit can be half-applied while it runs. It exports what is in memory, unsaved edits included (the project
         copy is not touched). Not cancellable (shortcut: TaskMonitor.DUMMY, upgrade with a scan-lane monitor if big programs make the wait
-        noticeable). Once background analysis exists this must fail with Busy while it runs (shortcut: not yet checked, nothing runs in the
-        background today)."""
+        noticeable). `Busy` while background analysis runs: the analysis holds the program's one open transaction, which an export must not capture."""
         self._target(path)
         prog = self.ses.need()
+        if self.ses.analyzing:
+            raise RpcError(BUSY, "analysis running")
         import jpype
         from java.io import File
         from ghidra.app.util.exporter import GzfExporter

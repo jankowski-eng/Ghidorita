@@ -53,6 +53,7 @@ def test_background_open_reads_busy_edits_and_finishes(tmp_path):
             await c.err("undo", BUSY)
             await c.err("redo", BUSY)
             await c.err("start_analysis", BUSY)
+            await c.err("export_gzf", BUSY, path=str(tmp_path / "busy.gzf"))  # the export would capture the analysis transaction
             pid = r["programId"]
             assert (await programs(c))[pid]["analysis"] == "partial"
             end = await wait_state(c, ("done", "failed", "cancelled"))
