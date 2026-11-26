@@ -29,6 +29,8 @@ export const ACTIONS: CommandAction[] = [
   { label: "Load Coverage…", cmd: { type: "coverage-load" } },
   { label: "Clear Coverage", cmd: { type: "coverage-clear" } },
   { label: "Toggle Control-Flow Graph", cmd: { type: "graph" } },
+  { label: "Export Symbol Map (JSON)", cmd: { type: "export", kind: "symbols" } },
+  { label: "Export C Header", cmd: { type: "export", kind: "header" } },
   { label: "Close Tab", cmd: { type: "close-tab" } },
   { label: "Close Program", cmd: { type: "close-program" } },
 ];

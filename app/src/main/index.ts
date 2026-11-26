@@ -78,6 +78,13 @@ async function pickFile() {
 }
 let menu: ReturnType<typeof createMenu>;
 
+// Save dialog for exports; AUTOTEST_EXPORT_DIR answers it in autotest runs (a native dialog cannot be driven)
+ipcMain.handle("pick-save-path", async (e, name: unknown) => {
+  if (!fromWin(e) || typeof name !== "string" || !name || name.length > 200 || /[\\/]/.test(name)) return null;
+  if (autotest && process.env.AUTOTEST_EXPORT_DIR) return path.join(process.env.AUTOTEST_EXPORT_DIR, name);
+  const r = await dialog.showSaveDialog(win, { defaultPath: name });
+  return r.canceled || !r.filePath ? null : r.filePath;
+});
 ipcMain.handle("pick-file", async (e) => (fromWin(e) ? pickFile() : null));
 
 ipcMain.handle("recent-add", (e, p: unknown) => { if (fromWin(e) && validPath(p)) menu?.addRecent(p); });

@@ -11,6 +11,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   need(fl?.length, "no functions");
   if (name === "shot-graph") return graphShot(fl!, c, result);
   if (name === "shot-map") return mapShot(fl!, args, c, result);
+  if (name === "shot-export") return exportShot(fl!, c, result);
   if (name === "shot-bar") return barShot(c, result);
   throw new Error("unknown shot flow " + name);
 }
@@ -63,6 +64,19 @@ async function mapShot(fl: { name: string; entry: string }[], files: string[], c
   (document.querySelector('[aria-label="Coverage layer"]') as HTMLElement).click();
   await waitFor(() => /only in A/.test(map()), 5000, "coverage layer back on");
   result.map = { description: map() };
+  await sleep(300);
+  return true;
+}
+
+// needs AUTOTEST_EXPORT_DIR (answers the save dialog); the files are checked by whoever runs the flow
+async function exportShot(fl: { entry: string }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  await rpc.call("rename_symbol", { address: fl[3].entry, newName: "renamed_for_export" });
+  const flash = () => document.querySelector(".statusbar, footer, [role=status]")?.parentElement?.textContent ?? document.body.textContent ?? "";
+  c.command({ type: "export", kind: "symbols" });
+  await waitFor(() => /Exported \d+ functions, \d+ labels/.test(flash()), 30000, "symbol map exported");
+  c.command({ type: "export", kind: "header" });
+  await waitFor(() => /Exported \d+ types and \d+ prototypes/.test(flash()), 30000, "header exported");
+  result.export = flash().match(/Exported [^|]*/g);
   await sleep(300);
   return true;
 }

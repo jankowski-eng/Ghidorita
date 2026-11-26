@@ -166,6 +166,9 @@ export interface Methods {
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
   top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions
+  // Exports (protocol.md "Exports"): the sidecar writes the file at an absolute `path` the client picked.
+  export_symbols: { params: { path: string }; result: { path: string; functions: number; labels: number; data: number; comments: number } };
+  export_header: { params: { path: string }; result: { path: string; types: number; functions: number; skipped: number } };
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };

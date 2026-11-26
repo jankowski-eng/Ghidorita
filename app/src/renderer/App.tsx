@@ -430,6 +430,15 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
     } catch (e) { fail(e); }
   };
   const pickCoverage = async () => { const p = await window.host.pickFile(); if (p) void loadCoverage(p); };
+  const exportAs = async (kind: "symbols" | "header") => {
+    if (!openedRef.current || openingRef.current) return;
+    const base = (programName ?? "program").replace(/[\\/]/g, "_"), path = await window.host.pickSavePath(kind === "symbols" ? `${base}.symbols.json` : `${base}.h`);
+    if (!path) return;
+    try {
+      if (kind === "symbols") { const r = await rpc.call("export_symbols", { path }); setFlash(`Exported ${r.functions} functions, ${r.labels} labels, ${r.data} data, ${r.comments} comments to ${r.path}`); }
+      else { const r = await rpc.call("export_header", { path }); setFlash(`Exported ${r.types} types and ${r.functions} prototypes to ${r.path}${r.skipped ? ` (${r.skipped} names are not C identifiers)` : ""}`); }
+    } catch (e) { fail(e); }
+  };
   const handleMenu = (c: MenuCommand) => {
     if (!allowsCommand(caps, c) || blocked() || importRef.current) return;
     if (c.type === "open-path") requestOpen(c.path);
@@ -445,6 +454,7 @@ export function App({ backend, onReady }: { backend: ApplicationBackend; onReady
     else if (c.type === "edit") void edit(c.action);
     else if (c.type === "dock") { if (openedRef.current) setDock(c.panel); }
     else if (c.type === "xrefs") showXrefs();
+    else if (c.type === "export") void exportAs(c.kind);
     else if (c.type === "graph") { if (openedRef.current) setGraphOn((g) => !g); }
     else if (c.type === "datatypes") { if (openedRef.current) setTypesOpen((o) => !o); }
     else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));

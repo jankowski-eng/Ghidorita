@@ -8,7 +8,7 @@ export type MenuCommand =
   | { type: "open-path"; path: string } | { type: "coverage-path"; path: string } | { type: "coverage-clear" } | { type: "coverage-load" }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" } | { type: "close-program" } | { type: "datatypes" }
   | { type: "toggle-pane"; pane: Pane; visible: boolean }
-  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" } | { type: "xrefs" } | { type: "graph" }
+  | { type: "dock"; panel: "strings" | "symbols" | "memsearch" | "changes" | "coverage" } | { type: "xrefs" } | { type: "graph" } | { type: "export"; kind: "symbols" | "header" }
   | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward, File > Open Binary / Open Recent (disabled while an open runs) and Close Program. */
 export interface MenuState {
@@ -24,6 +24,8 @@ export interface MenuState {
 export interface Host {
   getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null; only?: string | null; flow: string | null; decompileTimeout: number | null; expect: unknown }>;
   pickFile(): Promise<string | null>;
+  /** Native save dialog for an export, suggesting `name` (a bare file name); null = cancelled. */
+  pickSavePath(name: string): Promise<string | null>;
   autotestDone(result: unknown): Promise<void>;
   /** Subscribe to menu commands; returns the unsubscribe function. */
   onMenu(cb: (cmd: MenuCommand) => void): () => void;
@@ -43,6 +45,7 @@ export interface Host {
 const host: Host = {
   getConfig: () => ipcRenderer.invoke("get-config"),
   pickFile: () => ipcRenderer.invoke("pick-file"),
+  pickSavePath: (name) => ipcRenderer.invoke("pick-save-path", name),
   autotestDone: (result) => ipcRenderer.invoke("autotest-done", result),
   onMenu: (cb) => {
     const h = (_e: unknown, cmd: MenuCommand) => cb(cmd);
