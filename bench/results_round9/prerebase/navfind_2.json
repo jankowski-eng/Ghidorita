@@ -1,0 +1,188 @@
+{
+ "binary": "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis",
+ "quiet": {
+  "load1_at_start": 1.91,
+  "waited_s": 40
+ },
+ "others_running_at_start": [],
+ "rss_after_open_mb": 401.8,
+ "total_bytes": 66696320,
+ "listing_baseline": {
+  "n": 300,
+  "median_ms": 5.41,
+  "p95_ms": 12.92,
+  "max_ms": 164.07
+ },
+ "symbols": {
+  "default_first_page_cold_ms": 174.9,
+  "total": 128601,
+  "default_second_page_ms": 3.9,
+  "default_page_again_ms": 2.7,
+  "default_deep_page_cold_ms": 591.7,
+  "default_deep_page_again_ms": 4.9,
+  "filter_typing_cold": [
+   {
+    "query": "s",
+    "ms": 383.1,
+    "total": 103842
+   },
+   {
+    "query": "st",
+    "ms": 256.6,
+    "total": 56280
+   },
+   {
+    "query": "std",
+    "ms": 235.1,
+    "total": 3986
+   },
+   {
+    "query": "std::",
+    "ms": 241.6,
+    "total": 3548
+   },
+   {
+    "query": "std::vector",
+    "ms": 232.6,
+    "total": 208
+   }
+  ],
+  "filter_repeat_ms": 4.0,
+  "filter_page2_ms": 4.1,
+  "filter_rare_cold": {
+   "ms": 225.3,
+   "total": 1383
+  },
+  "kind_function_cold": {
+   "ms": 139.0,
+   "total": 49281
+  },
+  "kind_external_cold": {
+   "ms": 159.7,
+   "total": 38
+  },
+  "kind_label_cold": {
+   "ms": 133.6,
+   "total": 52636
+  },
+  "sort_name_cold_ms": 269.9,
+  "sort_name_page2_ms": 4.8,
+  "sort_kind_cold_ms": 297.0,
+  "sort_kind_page2_ms": 4.8,
+  "sort_namespace_cold_ms": 260.1,
+  "sort_namespace_page2_ms": 4.7,
+  "sort_source_cold_ms": 220.3,
+  "sort_source_page2_ms": 3.9,
+  "sort_address_desc_cold_ms": 132.7,
+  "search_symbols_ms": 209.9,
+  "search_symbols_hits": 85
+ },
+ "strings": {
+  "first_page_cold_ms": 7325.6,
+  "total": 164306,
+  "second_page_ms": 1.0,
+  "deep_page_ms": 0.7,
+  "query_cold": {
+   "ms": 30.6,
+   "total": 1612
+  },
+  "query_repeat_ms": 0.9,
+  "minlength12_cold": {
+   "ms": 6941.0,
+   "total": 141431
+  },
+  "minlength12_page2_ms": 0.8
+ },
+ "memsearch": {
+  "exact_4_rare": {
+   "pattern": "de ad be ef",
+   "total_ms": 213,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 213
+  },
+  "exact_4_rare_again": {
+   "pattern": "de ad be ef",
+   "total_ms": 282,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 282
+  },
+  "exact_4_wildcard": {
+   "pattern": "48 8b ?? 24",
+   "total_ms": 240,
+   "matches": 3,
+   "pages": 1,
+   "slowest_page_ms": 240
+  },
+  "exact_4_arm64_common": {
+   "pattern": "fd 7b bf a9",
+   "total_ms": 1061,
+   "matches": 1904,
+   "pages": 1,
+   "slowest_page_ms": 1061
+  },
+  "exact_4_zero": {
+   "pattern": "00 00 00 00",
+   "total_ms": 186366,
+   "matches": 5730229,
+   "pages": 574,
+   "slowest_page_ms": 365
+  },
+  "text_ascii": {
+   "pattern": "std::",
+   "total_ms": 286,
+   "matches": 7,
+   "pages": 1,
+   "slowest_page_ms": 286
+  },
+  "text_utf16": {
+   "pattern": "std",
+   "total_ms": 284,
+   "matches": 0,
+   "pages": 1,
+   "slowest_page_ms": 284
+  },
+  "text_ascii_nocase": {
+   "pattern": "ERROR",
+   "total_ms": 369,
+   "matches": 2290,
+   "pages": 3,
+   "slowest_page_ms": 309
+  }
+ },
+ "listing_during": {
+  "byte_search_rare_x1": {
+   "n": 10,
+   "median_ms": 10.61,
+   "p95_ms": 21.97,
+   "max_ms": 21.97,
+   "scan_ms": 290
+  },
+  "byte_search_rare_x3": {
+   "n": 30,
+   "median_ms": 10.6,
+   "p95_ms": 19.9,
+   "max_ms": 22.24,
+   "scan_ms": 867
+  },
+  "strings_first_scan_minlength7": {
+   "n": 285,
+   "median_ms": 7.7,
+   "p95_ms": 17.92,
+   "max_ms": 54.82,
+   "scan_ms": 7745
+  },
+  "symbol_sort_snapshots": {
+   "n": 1,
+   "median_ms": 13.07,
+   "p95_ms": 13.07,
+   "max_ms": 13.07,
+   "scan_ms": 18
+  }
+ },
+ "rss_end_mb": 1251.7,
+ "others_running_at_end": [
+  "24128 /Users/fjankowski/Projekte/floss/ghidra-desktop-spike/.claude/worktrees/ghidrette-spike-stabilization-eb0907/bench/../sidecar/.venv/bin/python /Users/fjan"
+ ]
+}

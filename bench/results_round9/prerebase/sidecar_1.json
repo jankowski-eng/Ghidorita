@@ -1,0 +1,83 @@
+{
+ "binary": "/opt/homebrew/Cellar/llvm/23.1.3_2/bin/llvm-exegesis",
+ "size_mb": 66.7,
+ "first_open": {
+  "quiet": {
+   "load1_at_start": 1.74,
+   "waited_s": 161
+  },
+  "jvm_start_s": 2.23,
+  "open_binary_s": 1.39,
+  "persisted": true,
+  "rss_after_open_mb": [
+   419.7,
+   0
+  ],
+  "functions": 48833,
+  "total_bytes": 66696320,
+  "ranges": 2,
+  "listing_100_rows_random_300": {
+   "n": 300,
+   "median_ms": 4.04,
+   "p95_ms": 9.64,
+   "max_ms": 41.56
+  },
+  "listing_100_rows_backward_100": {
+   "n": 100,
+   "median_ms": 3.99,
+   "p95_ms": 8.53,
+   "max_ms": 10.24
+  },
+  "decompile_50_cold_while_listing": {
+   "n": 50,
+   "median_ms": 10.52,
+   "p95_ms": 238.82,
+   "max_ms": 8690.4,
+   "errors": 0,
+   "total_s": 10.1
+  },
+  "listing_during_decompile": {
+   "n": 419,
+   "median_ms": 4.28,
+   "p95_ms": 15.62,
+   "max_ms": 96.97
+  },
+  "sample_function_bytes_median": 172.0,
+  "decompile_50_largest_while_listing": {
+   "n": 50,
+   "median_ms": 9745.91,
+   "p95_ms": 30237.76,
+   "max_ms": 31453.45,
+   "errors": 7,
+   "largest_function_bytes": 100740,
+   "50th_bytes": 29540
+  },
+  "listing_during_largest_decompile": {
+   "n": 29768,
+   "median_ms": 4.18,
+   "p95_ms": 10.67,
+   "max_ms": 498.32
+  },
+  "rss_after_workload_mb": [
+   1524.8,
+   1381.8
+  ],
+  "exit_after_stdin_close_s": 0.32,
+  "total_spawn_to_ready_s": 3.62
+ },
+ "reopen": {
+  "quiet": {
+   "load1_at_start": 1.74,
+   "waited_s": 161
+  },
+  "jvm_start_s": 2.21,
+  "open_binary_s": 1.33,
+  "persisted": true,
+  "rss_after_open_mb": [
+   395.7,
+   0
+  ],
+  "exit_after_stdin_close_s": 0.08,
+  "total_spawn_to_ready_s": 3.54
+ }
+}
