@@ -11,3 +11,4 @@ ghidra-install/
 
 # Apple binary slice used by benches; do not publish
 bench/ls_arm64e
+app/bundle/
