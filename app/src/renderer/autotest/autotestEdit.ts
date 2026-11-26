@@ -169,7 +169,7 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
     }
   }
   if (x.bookmark) { // the bookmark from the quick-wins flow survived save + quit + relaunch
-    const b = await c.program().bookmarks.list({ type: "Note" });
+    const b = await c.program().bookmarks.list({ type: "Note" }).result;
     result.phase2.bookmark = b.items.find((i) => i.address === x.bookmark!.address) ?? null;
     typesOk = typesOk && result.phase2.bookmark?.comment === x.bookmark.comment;
   }

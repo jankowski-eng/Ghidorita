@@ -200,33 +200,11 @@ import contextlib, threading
 
 import pytest
 
-from ghidrette.app import App
 from ghidrette.core.errors import RpcError
-from ghidrette.core.rpc import Dispatcher
 from ghidrette.domains import analysis as analysis_mod, highvars
-from testlib import BASE, CANCELLED, X86
+from testlib import BASE, CANCELLED, X86, inproc
 
 STALE = -32007
-
-
-@contextlib.asynccontextmanager
-async def inproc(tmp_path, monkeypatch):
-    """An App on this JVM with its own projects dir; yields (ctx, call). call(method, sid=None, **params): sid = a protocol-v1 request."""
-    monkeypatch.setenv("SIDECAR_PROJECTS_DIR", str(tmp_path / "projects"))
-    app = App(start=False)
-    ctx = app.ctx
-    ctx.loop = asyncio.get_running_loop()
-    ctx.lanes.start()
-    dispatcher, rid = Dispatcher(ctx, app.registry), [100]
-
-    async def call(method, sid=None, **params):
-        rid[0] += 1
-        return await dispatcher._call(rid[0], method, params, sid, sid is not None)
-    try:
-        yield ctx, call
-    finally:
-        for hook in ctx.shutdown_hooks:
-            await asyncio.to_thread(ctx.lanes.on_r, hook)
 
 
 async def wait_done(call, sid=None, timeout=300):

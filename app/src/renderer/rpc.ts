@@ -206,7 +206,7 @@ export class WebSocketBackend implements ApplicationBackend {
         editEnum: (p) => edit("typeEditing", "editEnum", "edit_enum", p),
       },
       bookmarks: {
-        list: (p) => read("list_bookmarks", p, "bookmarks"),
+        list: (p) => job("bookmarks", "list_bookmarks", p, "cancel_search"),
         set: (p) => edit("bookmarks", "setBookmark", "set_bookmark", p),
         remove: (p) => edit("bookmarks", "removeBookmark", "remove_bookmark", p),
       },

@@ -187,10 +187,10 @@ export interface Methods {
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   // Callers and callees of one function (Ghidra's getCallingFunctions / getCalledFunctions). Scan lane, cancellable with cancel_search. Capability "calls".
   function_calls: { params: { entry: Address }; result: FunctionCalls };
-  // Bookmarks (Ghidra's BookmarkManager). Reads on lane R; set/remove are edits (one undo step each) that announce program_changed kind "bookmark" with the address. Capability "bookmarks".
+  // Bookmarks (Ghidra's BookmarkManager). list_bookmarks on the scan lane (cancel_search); set/remove are edits on R (one undo step each) that announce program_changed kind "bookmark" with the address. Capability "bookmarks".
   list_bookmarks: { params: ListBookmarksParams; result: { total: number; types: { type: string; count: number }[]; items: BookmarkItem[] } };
   set_bookmark: { params: { address: Address; category: string; comment: string }; result: {} };
-  remove_bookmark: { params: { address: Address; type: string }; result: {} };
+  remove_bookmark: { params: { address: Address; type: string; category?: string }; result: {} }; // category omitted = every category of that type at the address (explicit "remove all here"; a row passes its own)
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
   // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.

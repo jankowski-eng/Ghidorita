@@ -756,9 +756,10 @@ const handlers = {
     if (typeof category !== "string" || typeof comment !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("category/comment/address");
     return edit("Set bookmark", notify, [{ start: hex(n), end: hex(n) }], ["bookmark"], () => { S.bookmarks.set(`${n}|${category}`, { n, category, comment }); });
   },
-  remove_bookmark({ address, type }, notify) {
+  remove_bookmark({ address, type, category }, notify) {
     const n = parseAddr(address);
-    const keys = type === "Note" ? [...S.bookmarks].filter(([, b]) => b.n === n).map(([k]) => k) : [];
+    if (category !== undefined && typeof category !== "string") bad("category");
+    const keys = type === "Note" ? [...S.bookmarks].filter(([, b]) => b.n === n && (category === undefined || b.category === category)).map(([k]) => k) : []; // omitted category = all of them
     if (!keys.length) nf();
     return edit("Remove bookmark", notify, [{ start: hex(n), end: hex(n) }], ["bookmark"], () => { for (const k of keys) S.bookmarks.delete(k); });
   },

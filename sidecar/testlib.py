@@ -142,3 +142,31 @@ async def find_call_pair(c, fns):
             if k.get("targetFunction") and k["targetFunction"] != f["entry"]:
                 return f, k["targetFunction"], r["result"]
     raise AssertionError("no call pair")
+
+
+# ---- in-process sidecar on the `sc` fixture's JVM (no WebSocket): methods go through the real Dispatcher ----
+import contextlib
+
+
+@contextlib.asynccontextmanager
+async def inproc(tmp_path, monkeypatch):
+    """An App with its own projects dir; yields (ctx, call). call(method, sid=None, rid=None, **params): sid given = a protocol-v1 request."""
+    from ghidrette.app import App
+    from ghidrette.core.rpc import Dispatcher
+    monkeypatch.setenv("SIDECAR_PROJECTS_DIR", str(tmp_path / "projects"))
+    app = App(start=False)
+    ctx = app.ctx
+    ctx.loop = asyncio.get_running_loop()
+    ctx.lanes.start()
+    dispatcher, n = Dispatcher(ctx, app.registry), [100]
+
+    async def call(method, sid=None, rid=None, **params):
+        if rid is None:
+            n[0] += 1
+            rid = n[0]
+        return await dispatcher._call(rid, method, params, sid, sid is not None)
+    try:
+        yield ctx, call
+    finally:
+        for hook in ctx.shutdown_hooks:
+            await asyncio.to_thread(ctx.lanes.on_r, hook)

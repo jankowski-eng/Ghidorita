@@ -92,7 +92,7 @@ async function bookmarkStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string
   const row = mainRow(3), addr = rowAddr(row);
   const rowNow = () => [...document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")].find((r) => rowAddr(r) === addr);
   row.click(); document.querySelector<HTMLElement>(".lbox")!.focus(); await sleep(100);
-  const notes = async () => (await c.program().bookmarks.list({ type: "Note" })).total;
+  const notes = async () => (await c.program().bookmarks.list({ type: "Note" }).result).total;
   const n0 = await notes();
   c.command({ type: "edit", action: "bookmark" });
   const dlg = await waitFor(() => byLabel("dialog", "Add bookmark"), 5000, "add bookmark dialog");

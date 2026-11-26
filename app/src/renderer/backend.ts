@@ -84,10 +84,12 @@ export interface TypeEdits {
 }
 
 export interface Bookmarks {
-  list(params: ListBookmarksParams): Promise<{ total: number; types: { type: string; count: number }[]; items: BookmarkItem[] }>;
+  /** a scan: cancel it when the query changes (cancel_search) */
+  list(params: ListBookmarksParams): Job<{ total: number; types: { type: string; count: number }[]; items: BookmarkItem[] }>;
   /** a Note bookmark; one undo step */
   set(params: { address: Address; category: string; comment: string }): Promise<{}>;
-  remove(params: { address: Address; type: string }): Promise<{}>;
+  /** category omitted = every category of that type at the address; a row always passes its own (one undo step) */
+  remove(params: { address: Address; type: string; category?: string }): Promise<{}>;
 }
 
 export interface ProgramEdits {

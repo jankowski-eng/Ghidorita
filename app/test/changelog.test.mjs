@@ -40,3 +40,31 @@ test("a save freezes earlier entries: undo skips them; open clears", () => {
   l.clear();
   assert.equal(l.items.length, 0);
 });
+
+test("rename -> set bookmark -> undo -> redo: undo marks the bookmark, not the rename", () => {
+  const l = new ChangeLog();
+  l.record("renameSymbol", { address: "0x1", newName: "a" }, {});
+  l.record("setBookmark", { address: "0x1", category: "triage", comment: "x" }, {});
+  assert.deepEqual(live(l), ["Rename to a", "Bookmark triage"]);
+  l.record("undo", {}, {});
+  assert.deepEqual(live(l), ["Rename to a"]);
+  assert.equal(l.items[1].undone, true);
+  l.record("redo", {}, {});
+  assert.deepEqual(live(l), ["Rename to a", "Bookmark triage"]);
+  l.record("removeBookmark", { address: "0x1", type: "Note", category: "triage" }, {});
+  l.record("undo", {}, {});
+  assert.deepEqual(live(l), ["Rename to a", "Bookmark triage"]);
+});
+
+test("every edit the rpc adapter logs is a change-log entry (an unknown name would let undo mark the wrong entry)", () => {
+  const src = readFileSync(new URL("../src/renderer/rpc.ts", import.meta.url), "utf8");
+  const names = [...src.matchAll(/\bedit\(\s*"[A-Za-z]+",\s*"([A-Za-z]+)"/g)].map((m) => m[1]);
+  assert.ok(names.length > 20, "found the adapter's edit() calls");
+  const l = new ChangeLog();
+  for (const n of names) {
+    if (n === "undo" || n === "redo" || n === "save") continue; // record() handles those itself
+    const before = l.items.length;
+    l.record(n, {}, {});
+    assert.equal(l.items.length, before + 1, `${n} is logged by rpc.ts but unknown to changeLog.ts`);
+  }
+});
