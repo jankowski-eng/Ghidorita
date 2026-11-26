@@ -4,7 +4,7 @@
 Threads: the asyncio loop (dispatch, cancel_*), R (all program reads and ALL writes), O (one open_binary at a time:
 import + analysis + save), and N decompiler workers sharing one queue, each owning a DecompInterface.
 """
-import asyncio, concurrent.futures, hashlib, json, os, queue, signal, sys, threading, time
+import asyncio, concurrent.futures, datetime, hashlib, json, os, queue, re, signal, sys, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -20,8 +20,11 @@ KIND_PREFIX = [("SYMBOL_", "symbol"), ("EXTERNAL_", "symbol"), ("REFERENCE_", "s
                ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code"}
+RAW = "Raw Binary"  # BinaryLoader.BINARY_NAME: the only stock loader with a base address option ("-loader-baseAddr")
+KEY_RE = re.compile(r"^[0-9a-f]{64}(-[0-9a-f]{12})?$")
 INVALID_JAVA = {"InvalidInputException", "DuplicateNameException", "ParseException", "InvalidDataTypeException",
-                "IllegalArgumentException", "CancelledException", "UsrException", "AddressOutOfBoundsException"}
+                "IllegalArgumentException", "CancelledException", "UsrException", "AddressOutOfBoundsException",
+                "LoadException", "LanguageNotFoundException", "CompilerSpecNotFoundException"}
 
 
 def log(*a):
@@ -109,7 +112,9 @@ class Sidecar:
         self.mon_lock = threading.Lock()
         self.opening = None          # Opening, loop thread only
         self.proj = None
-        self.undo_snap = {"canUndo": False, "canRedo": False}
+        self.proj_lock = threading.Lock()  # held by thread O for a whole open, briefly by R for list/delete/candidates: never concurrent
+        self.program_id = None
+        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
         self.strings = None          # list_strings scan cache, reset on any program change
         self.pending = {"ranges": [], "kinds": set(), "broad": False, "armed": False}
         self.plock = threading.Lock()
@@ -210,19 +215,152 @@ class Sidecar:
         except Exception:
             raise RpcError(INVALID, "bad address %r" % (s,))
 
+    @staticmethod
+    def _projects_dir():
+        return os.environ.get("SIDECAR_PROJECTS_DIR") or os.path.expanduser("~/Library/Application Support/ghidra-desktop-spike/projects")
+
     def _project(self):
-        """One Ghidra project for all programs, programs named by file sha256. Thread O only.
+        """One Ghidra project for all programs, programs named by their programId. Only with proj_lock held (thread O
+        during an open, thread R for list/delete).
         shortcut: a second sidecar on the same projects dir fails on the project lock; one process per dir."""
         if self.proj is None:
             from ghidra.base.project import GhidraProject
             from ghidra.framework.model import ProjectLocator
-            d = os.environ.get("SIDECAR_PROJECTS_DIR") or os.path.expanduser("~/Library/Application Support/ghidra-desktop-spike/projects")
+            d = self._projects_dir()
             os.makedirs(d, exist_ok=True)
             # GhidraProject, not pyghidra.open_project: that one builds a GUI-oriented DefaultProjectManager which hangs headless here
             gp = (GhidraProject.openProject(d, "spike", True) if ProjectLocator(d, "spike").exists()
                   else GhidraProject.createProject(d, "spike", False))
             self.proj = gp.getProject()
         return self.proj
+
+    # ---- program browser metadata ----
+    # list_programs needs sourcePath/sizeBytes/options/lastOpened/analyzed. They live in programs.json next to the project
+    # (not as Program properties: writing those would leave the freshly opened program dirty). Written atomically; a
+    # program without an entry (project from before this file) is listed with name = id, sizeBytes 0, analyzed true.
+    def _meta_path(self):
+        return os.path.join(self._projects_dir(), "programs.json")
+
+    def _meta_load(self):
+        try:
+            with open(self._meta_path()) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _meta_save(self, meta):
+        p = self._meta_path()
+        with open(p + ".tmp", "w") as f:
+            json.dump(meta, f)
+        os.replace(p + ".tmp", p)
+
+    def _meta_touch(self, key, **fields):
+        meta = self._meta_load()
+        e = meta.setdefault(key, {})
+        e.update(fields, lastOpened=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        self._meta_save(meta)
+
+    class _ProjGuard:
+        """Non-blocking proj_lock for R-side project users: Busy while an open runs."""
+        def __init__(self, sc):
+            self.sc = sc
+
+        def __enter__(self):
+            if self.sc.opening is not None or not self.sc.proj_lock.acquire(blocking=False):
+                raise RpcError(BUSY, "open_binary in progress")
+
+        def __exit__(self, *a):
+            self.sc.proj_lock.release()
+
+    # ---- import options / program browser (thread R, Busy during an open) ----
+    def list_languages(self):
+        from ghidra.program.util import DefaultLanguageService
+        out = []
+        for d in DefaultLanguageService.getLanguageService().getLanguageDescriptions(False):
+            out.append({"id": str(d.getLanguageID()), "description": str(d.getDescription()),
+                        "compilerSpecs": [{"id": str(c.getCompilerSpecID()), "name": str(c.getCompilerSpecName())}
+                                          for c in d.getCompatibleCompilerSpecDescriptions()]})
+        out.sort(key=lambda o: o["id"])
+        return out
+
+    def import_candidates(self, path):
+        from java.io import File
+        from ghidra.app.util.importer import LoadSpecChooser
+        from ghidra.app.util.opinion import LoaderService
+        from ghidra.formats.gfilesystem import FileSystemService
+        from ghidra.util.task import TaskMonitor
+        text_arg(path, "path")
+        if not os.path.isfile(path):
+            raise RpcError(NOT_FOUND, "no such file: %s" % path)
+        with self._ProjGuard(self):
+            fs = FileSystemService.getInstance()
+            p = fs.getByteProvider(fs.getLocalFSRL(File(path)), True, TaskMonitor.DUMMY)
+            try:
+                lm = LoaderService.getAllSupportedLoadSpecs(p, TaskMonitor.DUMMY)
+                chosen = LoadSpecChooser.CHOOSE_THE_FIRST_PREFERRED.choose(lm)
+                if chosen is None:  # only Raw Binary (always offered, needs a language) applies: "nothing recognises the file"
+                    return {"candidates": []}
+                out = []
+                for e in lm.entrySet():
+                    loader = str(e.getKey().getName())
+                    if loader == RAW:  # one spec per installed language: collapse to a single "pick a language" entry
+                        out.append({"loader": loader, "language": None, "compilerSpec": None, "preferred": False, "acceptsBaseAddress": True})
+                        continue
+                    for spec in e.getValue():
+                        lcs = spec.getLanguageCompilerSpec()
+                        out.append({"loader": loader,
+                                    "language": str(lcs.languageID) if lcs is not None else None,
+                                    "compilerSpec": str(lcs.compilerSpecID) if lcs is not None else None,
+                                    "preferred": spec == chosen,
+                                    "acceptsBaseAddress": loader == RAW})
+                return {"candidates": out}
+            finally:
+                p.close()
+
+    def list_programs(self):
+        with self._ProjGuard(self):
+            meta, out = self._meta_load(), []
+            for f in self._project().getProjectData().getRootFolder().getFiles():
+                key = str(f.getName())
+                m = meta.get(key, {})
+                e = {"programId": key, "name": m.get("name", key), "sizeBytes": m.get("sizeBytes", 0),
+                     "analyzed": m.get("analyzed", True), "options": m.get("options", {})}
+                for k in ("sourcePath", "lastOpened"):
+                    if k in m:
+                        e[k] = m[k]
+                out.append(e)
+            out.sort(key=lambda e: e.get("lastOpened", ""), reverse=True)
+            return out
+
+    def delete_program(self, programId):
+        text_arg(programId, "programId")
+        with self._ProjGuard(self):
+            if programId == self.program_id:
+                raise RpcError(BUSY, "program is open")
+            f = self._project().getProjectData().getFile("/" + programId) if KEY_RE.match(programId) else None
+            if f is None:
+                raise RpcError(NOT_FOUND, "no such program: %s" % programId)
+            f.delete()
+            meta = self._meta_load()
+            if meta.pop(programId, None) is not None:
+                self._meta_save(meta)
+        return {}
+
+    def close_program(self):
+        if self.opening is not None:
+            raise RpcError(BUSY, "open_binary in progress")
+        self._close()
+        return {}
+
+    def save(self):
+        from ghidra.util.task import TaskMonitor
+        prog = self.need()
+        if prog.isChanged():
+            prog.getDomainFile().save(TaskMonitor.DUMMY)
+        prog.flushEvents()
+        self.undo_snap = self.undo_state(prog)
+        self.notify("program_changed", {"ranges": [], "kinds": [], "undo": self.undo_snap})
+        return {}
 
     # ---- program lifecycle ----
     def _close(self):
@@ -259,9 +397,10 @@ class Sidecar:
                 res.close()
             elif prog is not None:
                 prog.release(consumer)
-        self.undo_snap = {"canUndo": False, "canRedo": False}
+        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}
+        self.program_id = None
 
-    def _publish(self, prog, res, consumer, op):
+    def _publish(self, prog, res, consumer, op, key):
         from ghidra.app.plugin.core.analysis import AutoAnalysisManager
         with op.lock:  # commit point: after this cancel_open answers false, before it the open still fails with Cancelled
             if op.cancelled:
@@ -273,23 +412,74 @@ class Sidecar:
         lst = self._make_listener(prog)
         prog.addListener(lst)  # only now: progress covers the initial analysis
         self.listener, self.results, self.consumer = lst, res, consumer
-        self.undo_snap = {"canUndo": False, "canRedo": False}  # just cleared; no Program read on thread O
+        self.undo_snap = {"canUndo": False, "canRedo": False, "dirty": False}  # just cleared and saved; no Program read on thread O
+        self.program_id = key
         with self.pool_lock:
             self.epoch += 1
             self.program = prog
 
-    async def open_binary(self, path):
+    @staticmethod
+    def _check_options(loader, language, compilerSpec, baseAddress):
+        """Validate and normalise import options; returns the options dict (present fields only, baseAddress as 0x<hex>)."""
+        from ghidra.app.util.opinion import LoaderService
+        from ghidra.program.model.lang import CompilerSpecID, LanguageID
+        from ghidra.program.util import DefaultLanguageService
+        for v, what in ((loader, "loader"), (language, "language"), (compilerSpec, "compilerSpec"), (baseAddress, "baseAddress")):
+            if v is not None:
+                text_arg(v, what)
+        opts = {}
+        if loader is not None:
+            if loader not in {str(n) for n in LoaderService.getAllLoaderNames()}:
+                raise RpcError(INVALID, "unknown loader %r" % loader)
+            opts["loader"] = loader
+        lang = None
+        if language is not None:
+            try:
+                lang = DefaultLanguageService.getLanguageService().getLanguage(LanguageID(language))
+            except Exception:
+                raise RpcError(INVALID, "unknown language %r" % language)
+            opts["language"] = language
+        if compilerSpec is not None:
+            if lang is not None:
+                try:
+                    lang.getCompilerSpecByID(CompilerSpecID(compilerSpec))
+                except Exception:
+                    raise RpcError(INVALID, "unknown compiler spec %r for %s" % (compilerSpec, language))
+            opts["compilerSpec"] = compilerSpec
+        if baseAddress is not None:
+            if not re.fullmatch(r"0[xX][0-9a-fA-F]+", baseAddress):
+                raise RpcError(INVALID, "bad baseAddress %r" % baseAddress)
+            v = int(baseAddress, 16)
+            # getOffset is a signed long: mask to unsigned
+            limit = (lang.getAddressFactory().getDefaultAddressSpace().getMaxAddress().getOffset() & ((1 << 64) - 1)) if lang is not None else (1 << 64) - 1
+            if v > limit:
+                raise RpcError(INVALID, "baseAddress %s outside the address space" % baseAddress)
+            if loader != RAW:
+                raise RpcError(INVALID, "baseAddress needs loader %r" % RAW)
+            opts["baseAddress"] = hx(v)
+        return opts
+
+    @staticmethod
+    def _program_key(sha, opts):
+        """protocol.md "Persistence key"."""
+        if not opts:
+            return sha
+        canon = json.dumps({k: opts.get(k) for k in ("loader", "language", "compilerSpec", "baseAddress")}, separators=(",", ":"))
+        return sha + "-" + hashlib.sha256(canon.encode()).hexdigest()[:12]
+
+    async def open_binary(self, path, loader=None, language=None, compilerSpec=None, baseAddress=None):
         text_arg(path, "path")
         if self.opening is not None:
             raise RpcError(BUSY, "open_binary already in progress")
         if not os.path.isfile(path):
             raise RpcError(NOT_FOUND, "no such file: %s" % path)
+        opts = self._check_options(loader, language, compilerSpec, baseAddress)
         op = self.opening = Opening()
         fut = self.loop.create_future()
 
         def body():
             try:
-                res, exc = self._do_open(path, op), None
+                res, exc = self._do_open(path, op, opts), None
             except BaseException as e:  # noqa
                 res, exc = None, e
             self.loop.call_soon_threadsafe(self._settle, fut, res, exc)
@@ -299,10 +489,11 @@ class Sidecar:
         finally:
             self.opening = None
 
-    def _do_open(self, path, op):
+    def _do_open(self, path, op, opts):
         """Thread O. On cancel or any error: nothing is saved, the program is released, the project stays usable."""
         import pyghidra
         res = prog = None
+        self.proj_lock.acquire()  # waits for an R-side list/delete that slipped in just before this open started
         try:
             self.on_r(self._close)  # old program goes first (listener removed, cache cleared, interfaces disposed)
             op.check()
@@ -313,7 +504,7 @@ class Sidecar:
                     h.update(chunk)
                     done += len(chunk)
                     self.progress("import", min(10, done * 10 // size), "hashing")
-            key = h.hexdigest()
+            key = self._program_key(h.hexdigest(), opts)
             proj = self._project()
             t0 = time.monotonic()
             persisted = proj.getProjectData().getFile("/" + key) is not None
@@ -321,13 +512,16 @@ class Sidecar:
                 self.progress("import", 100, "loading persisted analysis")
                 prog, consumer = pyghidra.consume_program(proj, "/" + key)
                 op.check()
+                self._meta_touch(key)
                 log("reopened persisted program in %.2fs" % (time.monotonic() - t0))
             else:
-                res, prog, consumer = self._import_and_analyze(path, key, proj, op), None, None
+                res, prog, consumer = self._import_and_analyze(path, key, proj, op, opts), None, None
                 prog = res.getPrimaryDomainObject()
                 self._save(res, op)
+                self._meta_touch(key, name=os.path.basename(path), sourcePath=os.path.abspath(path), sizeBytes=os.path.getsize(path),
+                                 analyzed=True, options=opts)
             try:
-                self._publish(prog, res, consumer, op)
+                self._publish(prog, res, consumer, op, key)
             except BaseException:
                 if self.listener is not None:
                     prog.removeListener(self.listener)
@@ -353,10 +547,15 @@ class Sidecar:
                 raise
             if op.cancelled:
                 raise RpcError(CANCELLED, "open cancelled")
+            import jpype
+            if isinstance(e, jpype.JException) and str(e.getClass().getSimpleName()) in INVALID_JAVA:  # e.g. LoadException: options don't fit the file
+                raise RpcError(INVALID, str(e.getMessage() or e.getClass().getSimpleName()))
             log("open failed", repr(e))
             raise RpcError(INTERNAL, "open failed: %s" % e)
+        finally:
+            self.proj_lock.release()
 
-    def _import_and_analyze(self, path, key, proj, op):
+    def _import_and_analyze(self, path, key, proj, op, opts):
         from ghidra.app.util.importer import ProgramLoader
         self.progress("import", 10, "importing")
         last = [0.0]
@@ -366,8 +565,16 @@ class Sidecar:
             if now - last[0] >= 0.2:
                 last[0] = now
                 self.progress("import", 10 + int(prog * 90 / mx) if mx and mx > 0 else -1, str(msg or "importing"))
-        res = (ProgramLoader.builder().source(path).project(proj).projectFolderPath("/").name(key)
-               .monitor(op.monitor(imp_cb)).load())
+        b = ProgramLoader.builder().source(path).project(proj).projectFolderPath("/").name(key).monitor(op.monitor(imp_cb))
+        if "loader" in opts:
+            b = b.loaders(lambda l: str(l.getName()) == opts["loader"])
+        if "language" in opts:
+            b = b.language(opts["language"])
+        if "compilerSpec" in opts:
+            b = b.compiler(opts["compilerSpec"])
+        if "baseAddress" in opts:
+            b = b.addLoaderArg("-loader-baseAddr", opts["baseAddress"])
+        res = b.load()
         op.check()
         try:
             self._analyze(res.getPrimaryDomainObject(), op)
@@ -637,7 +844,7 @@ class Sidecar:
 
     def undo_state(self, prog=None):
         prog = prog or self.need()
-        o = {"canUndo": bool(prog.canUndo()), "canRedo": bool(prog.canRedo())}
+        o = {"canUndo": bool(prog.canUndo()), "canRedo": bool(prog.canRedo()), "dirty": bool(prog.isChanged())}
         if o["canUndo"]:
             o["undoName"] = str(prog.getUndoName())
         if o["canRedo"]:
@@ -904,9 +1111,9 @@ class Sidecar:
         with self.pool_lock:
             prog, epoch = self.program, self.epoch
             if prog is None:
-                raise RpcError(NO_PROGRAM, "no program open")
-            if job.cancelled or job.epoch != epoch:  # cancelled while queued, or the program was swapped meanwhile
+            if job.cancelled or job.epoch != epoch:  # cancelled while queued, or the program was closed/swapped meanwhile
                 raise RpcError(CANCELLED, "decompile cancelled")
+                raise RpcError(NO_PROGRAM, "no program open")
             w.busy = True
             self.running.add(job)
         try:
@@ -1007,7 +1214,9 @@ class Sidecar:
 
     R_METHODS = ("list_functions", "listing_info", "listing_rows", "get_function_at", "search_symbols", "xrefs_to",
                  "xrefs_from", "list_strings", "list_data_types", "undo_state", "rename_symbol", "set_comment",
-                 "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo")
+                 "create_function", "set_function_signature", "rename_variable", "retype_variable", "undo", "redo", "save")
+    # run on R, but never behind/alongside an open: Busy instead of NoProgram
+    P_METHODS = ("close_program", "import_candidates", "list_languages", "list_programs", "delete_program")
 
     async def handle(self, ws, raw):
         try:
@@ -1025,6 +1234,11 @@ class Sidecar:
             elif method == "open_binary":
                 result = await self.open_binary(**params)
             elif method == "decompile" or method in self.R_METHODS:
+            elif method in self.P_METHODS:
+                if self.opening is not None and method != "list_languages":
+                    raise RpcError(BUSY, "open_binary in progress")
+                fn = getattr(self, method)
+                result = await self.run(lambda: fn(**params))
                 if self.opening is not None:  # fail fast: never queue behind an open
                     raise RpcError(NO_PROGRAM, "open_binary in progress")
                 if method == "decompile":
@@ -1106,6 +1320,9 @@ def main():
     import pyghidra
     from pyghidra.launcher import HeadlessPyGhidraLauncher
     launcher = HeadlessPyGhidraLauncher(install_dir=pathlib.Path(os.environ["GHIDRA_INSTALL_DIR"]))
+    if not os.environ.get("SIDECAR_TOKEN") and os.environ.get("SIDECAR_ALLOW_NO_AUTH") != "1":
+        print("SIDECAR_TOKEN is not set: refusing to start without auth (SIDECAR_ALLOW_NO_AUTH=1 is the test-only escape)", file=sys.stderr)
+        sys.exit(2)
     if os.environ.get("JAVA_HOME"):  # skip LaunchSupport JDK probing (it shells out to `java` on PATH)
         launcher.java_home = pathlib.Path(os.environ["JAVA_HOME"])
     launcher.add_vmargs("-Djava.awt.headless=true")  # else project code initialises AppKit from a non-main thread and hangs
@@ -1116,7 +1333,7 @@ def main():
 
     async def serve():
         sc.loop = asyncio.get_running_loop()
-        token = os.environ.get("SIDECAR_TOKEN")  # shortcut: no token => no auth (tests only), make mandatory before shipping
+        token = os.environ.get("SIDECAR_TOKEN")  # empty only with SIDECAR_ALLOW_NO_AUTH=1 (checked in main)
 
         def guard(conn, request):  # a web page can reach 127.0.0.1; require the secret URL path set by Electron main
             if token and request.path != "/" + token:
