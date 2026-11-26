@@ -27,9 +27,9 @@ sidecar/
       program.py       provider_info, active_session, open_binary and open_program (by stored programId, no file read; import, save, publish; blocking mode analyzes first; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
       analysis.py      the analysis of the open program on its own thread: start_analysis, cancel_analysis, analysis_status; execute()/Poller/new_monitor shared with blocking opens
       listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments, load_coverage
-      decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), `warnings` (WARNING comment lines moved out of the C, plus a completed result's error message), cancel_decompile, decompile_for_edit()
-      edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
-      highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference)
+      decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals; constValue/constSize, union/unionAt, split for the decompiler edits), `warnings` (WARNING comment lines moved out of the C, plus a completed result's error message), cancel_decompile, decompile_for_edit()
+      edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, set_equate (one operand's scalar), set_function_no_return, define_data, clear_code
+      highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference), split_variable (HighFunction.splitOutMergeGroup), force_union_field (DynamicHash + HighFunctionDBUtil.writeUnionFacet); the `decompilerEdits` capability covers these two and edits.py's set_equate / set_function_no_return
       search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidoritaScans)
       exports.py       export_symbols (JSON symbol map), export_header (C header), export_gzf (Ghidra archive, lane R)
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
@@ -97,7 +97,7 @@ attached with `events.attach(prog)` after the initial analysis and removed with 
 
 Everything a domain shares goes through `ctx`. The only direct calls between domain modules:
 
-1. `highvars` -> `decompile.decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False)`: a context manager that decompiles on the calling scan worker
+1. `highvars` -> `decompile.union_of(token)` (the union a token stands for; Force Field uses the same test the tokens' `union` member does) and `decompile.decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False)`: a context manager that decompiles on the calling scan worker
    and yields the `HighFunction`, short-lived `DecompInterface`, and task monitor. Structure inference reuses the interface and timed monitor.
    R commits only if the write revision and program still match.
 2. `program` -> `analysis`: `analysis.execute/Poller/new_monitor` (the blocking open uses the same engine), `ctx.analysis.start/stop/state/reset`.

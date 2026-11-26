@@ -102,6 +102,13 @@ export interface ProgramEdits {
   setFunctionSignature(params: { entry: Address; signature: string }): Promise<{}>;
   renameVariable(params: { entry: Address; name: string; newName: string; timeoutSecs?: number }): Promise<{}>;
   retypeVariable(params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }): Promise<{}>;
+  /** decompilerEdits: one operand's equate; value/size are the const token's constValue/constSize, address its address */
+  setEquate(params: { address: Address; value: string; size: number; name: string; enum?: string }): Promise<{}>;
+  /** the callers' decompile caches are dropped by the provider */
+  setFunctionNoReturn(params: { entry: Address; noReturn?: boolean }): Promise<{}>;
+  splitVariable(params: { entry: Address; name: string; address: Address; newName: string; timeoutSecs?: number }): Promise<{}>;
+  /** union tokens carry `union` and `unionAt`; field null = no field */
+  forceUnionField(params: { entry: Address; address: Address; text: string; field: string | null; occurrence?: number; timeoutSecs?: number }): Promise<{}>;
   defineData(params: { address: Address; dataType: string }): Promise<{}>;
   clearCode(params: { address: Address; length?: number }): Promise<{}>;
   createStructFromData(params: { address: Address; length: number; name: string; category?: string; apply?: boolean }): Promise<{ path: string }>;

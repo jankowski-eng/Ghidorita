@@ -211,7 +211,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -850,6 +850,26 @@ const handlers = {
     if (!d || d.size < 0) bad("dataType");
     return edit("Retype variable", notify, [fnRange(i)], ["function"], () => { S.types.set(`${i}|${o}`, d.name); });
   },
+  // decompilerEdits: the mock's decompiler has no numbers or unions to point at, so these only validate and record an undo step
+  set_equate({ address, value, size, name }, notify) {
+    const n = parseAddr(address);
+    if (!/^-?\d+$/.test(String(value)) || ![1, 2, 4, 8].includes(size)) bad("value/size");
+    validName(name);
+    return edit("Set equate " + name, notify, [{ start: hex(n), end: hex(n) }], ["symbol"], () => {});
+  },
+  set_function_no_return({ entry, noReturn }, notify) {
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0) nf();
+    if (noReturn !== undefined && typeof noReturn !== "boolean") bad("noReturn");
+    return edit("Mark no return", notify, [fnRange(i)], ["function"], () => {});
+  },
+  split_variable({ entry, name, address, newName }, notify) {
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0 || !Object.keys(VARS).some((o) => v(i, o) === name)) nf();
+    validName(newName); parseAddr(address);
+    bad("nothing to split: the mock's variables are one use only");
+  },
+  force_union_field() { bad("the mock has no unions"); },
   define_data({ address, dataType }, notify) {
     const n = parseAddr(address);
     if (typeof dataType !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("dataType/address");

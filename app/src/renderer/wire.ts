@@ -70,6 +70,7 @@ export const results = {
   decompile: shape({ text: str, cached: bool, warnings: optional(array(str)), tokens: array(shape({
     line: count, colStart: count, colEnd: count, kind: oneOf("keyword", "type", "function", "variable", "param", "const", "comment", "label", "field", "default"),
     address: optional(address), varAddress: optional(address), varName: optional(str), targetFunction: optional(address),
+    constValue: optional(str), constSize: optional(positive), union: optional(str), unionAt: optional(address), split: optional(bool),
   })) }),
   xrefs_to: xrefTo,
   xrefs_from: array(shape({ to: nullable(address), type: str, kind, target: oneOf("memory", "stack", "register", "external"), label: optional(str) })),
@@ -103,6 +104,10 @@ export const results = {
   set_function_signature: object,
   rename_variable: object,
   retype_variable: object,
+  set_equate: object,
+  set_function_no_return: object,
+  split_variable: object,
+  force_union_field: object,
   define_data: object,
   clear_code: object,
   create_struct_from_data: shape({ path: str }),

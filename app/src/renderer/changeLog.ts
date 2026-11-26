@@ -12,6 +12,10 @@ export function describe(method: string, p: any): { label: string; address?: Add
     case "setFunctionSignature": return { label: `Signature ${p.signature}`, address: p.entry };
     case "renameVariable": return { label: `Rename ${p.name} to ${p.newName}`, address: p.entry };
     case "retypeVariable": return { label: `Retype ${p.name} as ${p.dataType}`, address: p.entry };
+    case "setEquate": return { label: `Equate ${p.name}`, address: p.address };
+    case "setFunctionNoReturn": return { label: p.noReturn === false ? "Clear no return" : "Mark no return", address: p.entry };
+    case "splitVariable": return { label: `Split out ${p.name} as ${p.newName}`, address: p.entry };
+    case "forceUnionField": return { label: `Force field ${p.field ?? "(none)"}`, address: p.entry };
     case "defineData": return { label: `Define ${p.dataType}`, address: p.address };
     case "clearCode": return { label: "Clear code", address: p.address };
     case "createStructFromData": return { label: `Structure ${p.name} from data`, address: p.address };

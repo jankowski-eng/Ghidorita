@@ -60,6 +60,11 @@ export interface Token {
   varAddress?: Address;     // variable/param tokens only: the memory address of a global variable (xrefs_to this address finds its references); absent for locals and temporaries
   varName?: string;
   targetFunction?: Address; // set on function-name tokens of calls to a known function
+  constValue?: string;      // const tokens holding a number (<= 8 bytes): its value as an unsigned decimal string, and its size in bytes; `set_equate` takes both
+  constSize?: number;
+  union?: string;           // field and variable tokens whose type is a union (or a pointer to or part of one): the union's data type path (get_data_type); `force_union_field` applies
+  split?: boolean;          // variable tokens of a local the decompiler merged from several uses (Split Out As New Variable applies)
+  unionAt?: Address;        // with `union`: the instruction of the access (a field token has no `address` of its own)
 }
 
 export interface DecompileResult {
@@ -134,7 +139,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -234,6 +239,15 @@ export interface Methods {
   // rename/retype_variable decompile first (thread R): Timeout after timeoutSecs (default 30), cancellable with cancel_decompile {id}
   rename_variable: { params: { entry: Address; name: string; newName: string; timeoutSecs?: number }; result: {} };
   retype_variable: { params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }; result: {} };
+  // ---- decompiler edits on a token (capability "decompilerEdits"; protocol.md "Decompiler edits") ----
+  // Ghidra's Set Equate on ONE operand: `value`/`size` are the Token's constValue/constSize, `address` its address. name = an equate (existing or new) or, with `enum` (a program enum's path), one of its members. Lane R.
+  set_equate: { params: { address: Address; value: string; size: number; name: string; enum?: string }; result: {} };
+  // Edit Function Signature's No Return flag. The decompile cache of every caller is dropped (the whole cache is). Lane R.
+  set_function_no_return: { params: { entry: Address; noReturn?: boolean }; result: {} }; // noReturn default true
+  // Split Out As New Variable: the use of `name` at `address` (the token's) becomes its own variable `newName`. Edit lane (cancel_decompile), as rename_variable.
+  split_variable: { params: { entry: Address; name: string; address: Address; newName: string; timeoutSecs?: number }; result: {} };
+  // Force Field: the union access shown by the token `text` (Token.union set) at `address` (its unionAt) is shown as `field` (null = no field); occurrence = index among the union tokens with that text and unionAt. Edit lane.
+  force_union_field: { params: { entry: Address; address: Address; text: string; field: string | null; occurrence?: number; timeoutSecs?: number }; result: {} };
   undo: { params: {}; result: UndoState };
   redo: { params: {}; result: UndoState };
   // define_data: Ghidra's CreateDataCmd (clears conflicting code/data at the target); dataType is a name or path ("int", "char[4]", "/dword"). InvalidArgument for unknown/dynamic types or no room.

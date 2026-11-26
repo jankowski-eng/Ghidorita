@@ -20,6 +20,26 @@ WARNINGS_MAX = 50
 GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 
+def union_of(tok):
+    """The union data type a decompiler token stands for (Ghidra's ForceUnionAction.findUnion), else None: a field token of a union, or a token
+    whose variable is a union, a pointer to one or a part of one (typedefs looked through)."""
+    from ghidra.app.decompiler import ClangFieldToken
+    from ghidra.program.model.data import Pointer, TypeDef, Union
+    from ghidra.program.model.pcode import PartialUnion
+    base = lambda dt: dt.getBaseDataType() if isinstance(dt, TypeDef) else dt
+    if isinstance(tok, ClangFieldToken):
+        dt = tok.getDataType()
+        if dt is not None and isinstance(base(dt), Union):
+            return base(dt)
+    vn = tok.getVarnode()
+    high = vn.getHigh() if vn is not None else None  # a volatile load never gets a high variable
+    if high is None:
+        return None
+    dt = base(high.getDataType())
+    dt = base(dt.getDataType()) if isinstance(dt, Pointer) else base(dt.getParent()) if isinstance(dt, PartialUnion) else dt
+    return dt if isinstance(dt, Union) else None
+
+
 @contextlib.contextmanager
 def decompile_for_edit(ctx, prog, func, timeoutSecs, job, timed=False):
     """Yield the high function, decompiler and monitor on the scan worker. A timed monitor
@@ -238,11 +258,11 @@ class Decompile:
         return out
 
     def _tokens(self, prog, res):
-        from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
+        from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken, ClangVariableToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
         fm, fa, hf = prog.getFunctionManager(), self.ses.fmtr(prog), res.getHighFunction()
-        lines_out, tokens, warnings = [], [], []
+        lines_out, tokens, warnings, split_memo = [], [], [], {}
         # a non-fatal message of a completed decompile (empty when everything is fine), then the decompiler's own WARNING comments
         msg = str(res.getErrorMessage() or "").strip()
         if msg:
@@ -268,8 +288,19 @@ class Decompile:
                 ma = t.getMinAddress()
                 if ma is not None:
                     tok["address"] = fa(ma)
+                if kind in ("field", "variable", "param"):
+                    u = union_of(t)
+                    op = t.getPcodeOp()
+                    if u is not None and op is not None:  # a field token has no address of its own: the access is named by its p-code op's instruction
+                        tok["union"], tok["unionAt"] = str(u.getPathName()), fa(op.getSeqnum().getTarget())
+                if kind == "const" and isinstance(t, ClangVariableToken):
+                    vn = t.getVarnode()
+                    if vn is not None and vn.isConstant() and 0 < vn.getSize() <= 8:  # an operand's scalar: Set Equate needs it
+                        tok["constValue"], tok["constSize"] = str(vn.getOffset() & MASK64), int(vn.getSize())
                 if kind in ("variable", "param"):
                     tok["varName"] = s
+                    if self._splittable(t, split_memo):
+                        tok["split"] = True
                     ga = self._global_addr(t, hf, fa)
                     if ga is not None:
                         tok["varAddress"] = ga
@@ -291,6 +322,18 @@ class Decompile:
         if warnings:
             out["warnings"] = warnings[:WARNINGS_MAX]
         return out
+
+    @staticmethod
+    def _splittable(t, memo):
+        """IsolateVariableAction's test: a local whose uses the decompiler merged from more than one merge group and that is not isolated yet."""
+        from ghidra.program.model.pcode import HighLocal
+        hv = t.getHighVariable()
+        if not isinstance(hv, HighLocal) or hv.getSymbol() is None:
+            return False
+        key = str(hv.getSymbol().getName())
+        if key not in memo:
+            memo[key] = not hv.getSymbol().isIsolated() and len({v.getMergeGroup() for v in hv.getInstances()}) > 1
+        return memo[key]
 
     @staticmethod
     def _global_addr(t, hf, fa):

@@ -1,7 +1,7 @@
 import type { Address, ListingRow, Token } from "../../../protocol";
 import { parseAddr } from "./address";
 
-export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save";
+export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "setEquate" | "noReturn" | "splitVariable" | "forceField" | "clear" | "signature" | "undo" | "redo" | "save";
 export type Focus = "listing" | "decompiler" | "input" | "other";
 export interface KeyLike { key: string; code?: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
 
@@ -15,7 +15,7 @@ export function listingKey(e: KeyLike): EditAction | null {
   const mod = !!(e.meta || e.ctrl), k = e.key.toLowerCase();
   if (mod) return k === "l" && !e.shift ? "retype" : null;
   if (e.shift) return e.code === "BracketLeft" ? "createStruct" : null; // Shift+[
-  return ({ l: "rename", ";": "comment", f: "createFunction", t: "defineData", "[": "defineArray", p: "definePointer", y: "repeatData", c: "clear" } as Record<string, EditAction>)[k] ?? null;
+  return ({ l: "rename", ";": "comment", f: "createFunction", t: "defineData", e: "setEquate", "[": "defineArray", p: "definePointer", y: "repeatData", c: "clear" } as Record<string, EditAction>)[k] ?? null;
 }
 
 /** Cmd+Z in a text input is the input's own undo; anywhere else it is the program's. */
@@ -43,6 +43,22 @@ export const retypeTarget = (tok: Token | undefined): string | null =>
 /** Edit Signature applies on the function's own name token (not on a call). */
 export const isOwnName = (tok: Token | undefined, text: string, fn: { name: string } | null) =>
   !!tok && !!fn && tok.kind === "function" && !tok.targetFunction && text === fn.name;
+
+/** Set Equate (E): a number token; value/size are the decompiler's own (constValue/constSize), the address the instruction that uses it. */
+export const equateTarget = (tok: Token | undefined) =>
+  tok?.kind === "const" && tok.constValue && tok.constSize && tok.address ? { address: tok.address, value: tok.constValue, size: tok.constSize } : null;
+/** Mark as No Return: a function name token, a call target or the function's own name. */
+export const noReturnTarget = (tok: Token | undefined, text: string, fn: { entry: Address; name: string } | null): { entry: Address; name: string } | null =>
+  tok?.kind !== "function" ? null : tok.targetFunction ? { entry: tok.targetFunction, name: text } : fn && text === fn.name ? fn : null;
+/** Split Out As New Variable: a local the decompiler merged from several uses (the provider marks the token `split`). */
+export const splitTarget = (tok: Token | undefined) =>
+  tok && (tok.kind === "variable" || tok.kind === "param") && tok.split && tok.varName && tok.address ? { name: tok.varName, address: tok.address } : null;
+/** Force Field: a token whose type is a union. occurrence = its index among the union tokens of the same access with the same text (the provider counts the same way). */
+export function fieldTarget(tokens: Token[], tok: Token | undefined, textOf: (t: Token) => string): { union: string; address: Address; text: string; occurrence: number } | null {
+  if (!tok?.union || !tok.unionAt) return null;
+  const text = textOf(tok);
+  return { union: tok.union, address: tok.unionAt, text, occurrence: tokens.filter((t) => t.union && t.unionAt === tok.unionAt && textOf(t) === text).indexOf(tok) };
+}
 
 /** What "show references" targets: an address, or a program variable of a function (found by the name the decompiler shows). */
 export type XrefTarget = { type: "address"; address: Address; label: string } | { type: "variable"; entry: Address; name: string; label: string };

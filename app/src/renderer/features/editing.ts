@@ -1,11 +1,22 @@
 import { useRef } from "react";
 import type { Address, CommentKind } from "../../../../protocol";
 import { allowsEdit } from "../../capabilities";
-import { arrayPlan, arrayType, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
+import { arrayPlan, arrayType, equateTarget, fieldTarget, noReturnTarget, splitTarget, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
 import type { EditSpec } from "../EditDialog";
 import type { Program } from "../store/program";
 import { useSession } from "../store/session";
 import type { TabsApi } from "../useTabs";
+
+const NO_FIELD = "(no field)";
+/** Enum members whose value is `value` (suggestions for Set Equate; best effort: the program's enums among the first 1000 matches of list_data_types). */
+async function enumMembers(ops: Program["api"], value: string): Promise<{ label: string; name: string; enum: string }[]> {
+  try {
+    const enums = (await ops.types.listDataTypes({ query: "", limit: 1000 }).result).filter((t) => t.kind === "enum" && t.source === "program").slice(0, 20);
+    const out: { label: string; name: string; enum: string }[] = [];
+    for (const e of enums) for (const m of (await ops.types.getDataType({ path: e.path })).values ?? []) if (m.value === value) out.push({ label: `${e.name}.${m.name}`, name: m.name, enum: e.path });
+    return out;
+  } catch { return []; }
+}
 
 export const focusKind = (el: Element | null): Focus => {
   if (!el) return "other";
@@ -72,6 +83,7 @@ export function useEditing(tabs: TabsApi) {
       go: async (v) => { await ops.edits.createStructFromData({ address: at, length: Number(v.length), name: v.name.trim() }); } } } });
     else if (a === "signature") { const f = await current.lookup.containing(at); if (f) await editSignature(current, f.entry); else session.flash("No function here."); }
     else if (a === "retype") session.flash("Retype works on a variable in the decompiler.");
+    else if (a === "setEquate" || a === "noReturn" || a === "splitVariable" || a === "forceField") session.flash("This edit works on a token in the decompiler.");
   };
   const decompEdit = async (current: Program, a: EditAction) => {
     const ops = current.api;
@@ -98,6 +110,27 @@ export function useEditing(tabs: TabsApi) {
       if (!name) return session.flash("Put the cursor on a variable to auto create a structure for it.");
       views.dispatch({ type: "set", patch: { formDlg: { title: "Auto create structure", submit: "Create", fields: [{ key: "name", label: "Structure name (empty = automatic)" }],
         go: async (v) => { await ops.edits.autoCreateStructure({ entry, name, structName: v.name.trim() || undefined }); } } } });
+    } else if (a === "setEquate") {
+      const t = equateTarget(tok);
+      if (!t) return session.flash("Put the cursor on a number to set an equate on it.");
+      const names = await enumMembers(ops, t.value);
+      views.dispatch({ type: "set", patch: { formDlg: { title: "Set equate", submit: "Set", fields: [{ key: "name", label: "Equate name or enum member", initial: names[0]?.label ?? "", choices: names.map((n) => n.label) }],
+        go: async (v) => { const typed = v.name.trim(), pick = names.find((n) => n.label === typed); await ops.edits.setEquate({ ...t, name: pick?.name ?? typed, enum: pick?.enum }); } } } });
+    } else if (a === "noReturn") {
+      const t = noReturnTarget(tok, text, { entry, name: fnName });
+      if (!t) return session.flash("Put the cursor on a function name to mark it as never returning.");
+      await ops.edits.setFunctionNoReturn({ entry: t.entry });
+    } else if (a === "splitVariable") {
+      const t = splitTarget(tok);
+      if (!t) return session.flash("Nothing to split out here: the variable is one use only.");
+      views.dispatch({ type: "set", patch: { formDlg: { title: "Split out as new variable", submit: "Split", fields: [{ key: "name", label: "New variable name" }],
+        go: async (v) => { await ops.edits.splitVariable({ entry, name: t.name, address: t.address, newName: v.name.trim() }); } } } });
+    } else if (a === "forceField") {
+      const t = fieldTarget(d.tokens, tok, (x) => (d.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd));
+      if (!t) return session.flash("Force Field works on a union access.");
+      const members = (await ops.types.getDataType({ path: t.union })).components?.filter((c) => !c.undefined).map((c) => c.name ?? c.defaultName) ?? [];
+      views.dispatch({ type: "set", patch: { formDlg: { title: "Force field", submit: "Force", fields: [{ key: "field", label: "Field", initial: members.includes(t.text) ? t.text : "", choices: [...members, NO_FIELD] }],
+        go: async (v) => { const f = v.field.trim(); await ops.edits.forceUnionField({ entry, address: t.address, text: t.text, occurrence: t.occurrence, field: f === NO_FIELD ? null : f }); } } } });
     } else if (a === "bookmark") {
       const at = d.tokens.find((t) => t.line === (pos?.lineNumber ?? 1) - 1 && t.address)?.address;
       if (!at) return session.flash("No address on this line.");
@@ -151,7 +184,9 @@ export function useEditing(tabs: TabsApi) {
     const text = tok && d ? (d.text.split("\n")[tok.line] ?? "").slice(tok.colStart, tok.colEnd) : "";
     const fn = tab ? { entry: tab.entry, name: fnNames().get(tab.entry) ?? "" } : null;
     const reference = xrefTargetOf(tok, text, fn);
-    return { rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
+    const textOf = (x: typeof tok & {}) => (d?.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd);
+    return { equate: !!equateTarget(tok), noReturn: !!noReturnTarget(tok, text, fn), split: !!splitTarget(tok), field: !!(d && fieldTarget(d.tokens, tok, textOf)),
+      rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
   };
   return { edit, showXrefs, canAt };
 }

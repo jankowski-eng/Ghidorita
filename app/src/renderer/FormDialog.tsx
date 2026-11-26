@@ -5,7 +5,7 @@ import { scanner } from "./scan";
 import { latest } from "./latest";
 import { useDebounced, useRestoreFocus, trapTab } from "./hooks";
 
-export interface FormField { key: string; label: string; initial?: string; kind?: "text" | "datatype" }
+export interface FormField { key: string; label: string; initial?: string; kind?: "text" | "datatype"; choices?: string[] } // choices: suggestions for a text field (a datalist; any text is still accepted)
 
 /** A data type input with autocomplete from list_data_types (latest reply wins). Arrow keys pick, Enter/Tab accept a pick. */
 function TypeInput({ typeSearch, label, value, onChange, disabled, autoFocus }: { typeSearch: TypeReads["listDataTypes"]; label: string; value: string; onChange: (v: string) => void; disabled: boolean; autoFocus: boolean }) {
@@ -71,8 +71,9 @@ export function FormDialog({ typeSearch, title, fields, submit, onSubmit, onClos
         <label key={f.key}>{f.label}
           {typeSearch && f.kind === "datatype"
             ? <TypeInput typeSearch={typeSearch} label={f.label} value={vals[f.key]} disabled={busy} autoFocus={i === 0} onChange={(v) => { setVals((x) => ({ ...x, [f.key]: v })); setError(""); }} />
-            : <input aria-label={f.label} value={vals[f.key]} disabled={busy} autoFocus={i === 0} autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()}
-                onChange={(e) => { setVals((x) => ({ ...x, [f.key]: e.target.value })); setError(""); }} />}
+            : <><input aria-label={f.label} value={vals[f.key]} disabled={busy} autoFocus={i === 0} autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} list={f.choices?.length ? "choices-" + f.key : undefined}
+                onChange={(e) => { setVals((x) => ({ ...x, [f.key]: e.target.value })); setError(""); }} />
+              {f.choices?.length ? <datalist id={"choices-" + f.key}>{f.choices.map((c) => <option key={c} value={c} />)}</datalist> : null}</>}
         </label>
       ))}
       <div className="err" role="alert">{error}</div>

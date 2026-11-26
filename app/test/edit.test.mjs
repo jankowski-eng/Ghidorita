@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const r = await build({ entryPoints: [new URL("../src/renderer/editActions.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false });
-const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf, arrayPlan, arrayType } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
+const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf, arrayPlan, arrayType, equateTarget, noReturnTarget, splitTarget, fieldTarget } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 
 test("listing keys", () => {
   assert.equal(listingKey({ key: "l" }), "rename"); assert.equal(listingKey({ key: "L" }), "rename");
@@ -72,6 +72,22 @@ test("Define Array: element type and default count", () => {
   assert.equal(arrayPlan([u("0x10", { label: "start" }), u("0x11")]).count, 2); // the cursor row's own label does not stop it
   assert.equal(arrayPlan([{ address: "0x10", length: 2, bytes: "90 90", mnemonic: "NOP", operands: "" }]), null); // code
   assert.equal(arrayPlan([]), null);
+});
+
+test("decompiler edits: which token offers what", () => {
+  assert.equal(listingKey({ key: "e" }), "setEquate"); assert.equal(listingKey({ key: "e", meta: true }), null);
+  assert.deepEqual(equateTarget({ kind: "const", constValue: "42", constSize: 4, address: "0x10" }), { address: "0x10", value: "42", size: 4 });
+  assert.equal(equateTarget({ kind: "const", address: "0x10" }), null, "a number the provider did not describe"); assert.equal(equateTarget({ kind: "variable", constValue: "1", constSize: 4, address: "0x1" }), null);
+  assert.deepEqual(noReturnTarget({ kind: "function", targetFunction: "0x2000" }, "die", fn), { entry: "0x2000", name: "die" });
+  assert.deepEqual(noReturnTarget({ kind: "function" }, "main", fn), fn); assert.equal(noReturnTarget({ kind: "function" }, "other", fn), null); assert.equal(noReturnTarget({ kind: "variable" }, "main", fn), null);
+  assert.deepEqual(splitTarget({ kind: "variable", varName: "uVar1", address: "0x20", split: true }), { name: "uVar1", address: "0x20"});
+  assert.equal(splitTarget({ kind: "variable", varName: "uVar1", address: "0x20" }), null, "one use only"); assert.equal(splitTarget({ kind: "function", split: true }), null);
+});
+test("force field: the occurrence counts union tokens of the same access with the same text", () => {
+  const a = { line: 1, colStart: 0, colEnd: 1, kind: "field", union: "/U", unionAt: "0x10" }, b = { ...a, line: 2 }, other = { ...a, unionAt: "0x20" }, p = { ...a, kind: "param", line: 3 };
+  const text = (t) => (t === p ? "p" : "i"), all = [a, other, b, p];
+  assert.deepEqual(fieldTarget(all, b, text), { union: "/U", address: "0x10", text: "i", occurrence: 1 });
+  assert.equal(fieldTarget(all, p, text).occurrence, 0); assert.equal(fieldTarget(all, { kind: "field" }, text), null);
 });
 
 test("Define Array wraps an array-valued row: the new dimension goes first", () => {

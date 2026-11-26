@@ -3,10 +3,10 @@ Cross-domain edge: decompile.decompile_for_edit (see ARCHITECTURE.md)."""
 import time
 
 from ..core.args import lim, name_arg, text_arg
-from ..core.errors import CANCELLED, INVALID, NOT_FOUND, TIMEOUT, RpcError
+from ..core.errors import CANCELLED, INTERNAL, INVALID, NOT_FOUND, TIMEOUT, RpcError
 from ..core.jscans import scans
 from ..core.rpc import rpc
-from .decompile import decompile_for_edit
+from .decompile import decompile_for_edit, union_of
 
 
 class HighVars:
@@ -15,7 +15,8 @@ class HighVars:
 
     def _high_edit(self, tx_name, entry, name, fn, timeoutSecs, job, prepare=None):
         """Prepare on a scan worker, then commit on R only if the program and revision still match."""
-        text_arg(name, "name")
+        if name is not None:  # None: an edit that finds its own target in `prepare` (force_union_field)
+            text_arg(name, "name")
         timeoutSecs = lim(timeoutSecs, 30)
         deadline = None
         with self.ctx.lanes.scanning(job) as prog:
@@ -29,8 +30,8 @@ class HighVars:
                 timeoutSecs = timeoutSecs or 30
                 deadline = time.monotonic() + timeoutSecs
             with decompile_for_edit(self.ctx, prog, func, timeoutSecs, job, prepare is not None) as (hf, d, mon):
-                sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None)
-                if sym is None:
+                sym = next((s for s in hf.getLocalSymbolMap().getSymbols() if str(s.getName()) == name), None) if name is not None else None
+                if sym is None and name is not None:
                     raise RpcError(NOT_FOUND, "no variable %r in function at %s" % (name, entry))
                 if prepare is not None:
                     fn = prepare(prog, sym, d, mon)
@@ -148,3 +149,161 @@ class HighVars:
             return commit
 
         return self._high_edit("Auto create structure in %s", entry, name, None, timeoutSecs, job, prepare=prepare)
+
+    @rpc(lane="edit")
+    def split_variable(self, entry, name, address, newName, timeoutSecs=30, job=None):
+        """Ghidra's Split Out As New Variable: the use of `name` at the instruction `address` (the token's own) leaves the variable the
+        decompiler merged it into and becomes `newName`, typelocked (an undefined type becomes the unsigned integer of that size, as Ghidra does:
+        an undefined type would not lock). InvalidArgument if the variable has one merge group only (nothing to split), is already isolated,
+        or `address` does not single out one group."""
+        from ghidra.program.model.data import AbstractIntegerDataType, Undefined
+        from ghidra.program.model.pcode import HighFunctionDBUtil, HighLocal
+        from ghidra.program.model.symbol import SourceType
+        name_arg(newName, "newName")
+        text_arg(address, "address")
+
+        def go(prog, func, hf, sym):
+            hv, at = sym.getHighVariable(), self.ses.addr(address, prog)
+            if not isinstance(hv, HighLocal) or sym.isIsolated() or len({v.getMergeGroup() for v in hv.getInstances()}) < 2:
+                raise RpcError(INVALID, "%r is one use only, or already split out: nothing to split" % name)
+            groups = {v.getMergeGroup() for v in hv.getInstances()
+                      if (v.getDef() is not None and v.getDef().getSeqnum().getTarget().equals(at))
+                      or any(op.getSeqnum().getTarget().equals(at) for op in v.getDescendants())}
+            if len(groups) != 1:
+                raise RpcError(INVALID, "%r is not read or written at %s (or at several of its merged uses)" % (name, address))
+            if prog.getSymbolTable().getSymbols(newName, func):
+                raise RpcError(INVALID, "name %r already used in this function" % newName)
+            vn = next(v for v in hv.getInstances() if v.getMergeGroup() in groups)
+            ns = hf.splitOutMergeGroup(hv, vn).getSymbol()
+            dt = ns.getDataType()
+            if Undefined.isUndefined(dt):
+                dt = AbstractIntegerDataType.getUnsignedDataType(dt.getLength(), prog.getDataTypeManager())
+            HighFunctionDBUtil.updateDBVariable(ns, newName, dt, SourceType.USER_DEFINED)
+        return self._high_edit("Split out variable in %s", entry, name, go, timeoutSecs, job)
+
+    @staticmethod
+    def _union_facet(tok, union):
+        """ForceUnionAction.determineFacet: (op, slot, varnode, parent data type) of the access the token belongs to, else None."""
+        from ghidra.program.model.data import Pointer, TypeDef
+        from ghidra.program.model.pcode import PartialUnion, PcodeOp
+
+        def related(vn):
+            high = vn.getHigh() if vn is not None else None
+            if high is None:
+                return None
+            dt = high.getDataType()
+            dt = dt.getBaseDataType() if isinstance(dt, TypeDef) else dt
+            inner = dt.getDataType() if isinstance(dt, Pointer) else dt.getParent() if isinstance(dt, PartialUnion) else dt
+            inner = inner.getBaseDataType() if isinstance(dt, PartialUnion) and isinstance(inner, TypeDef) else inner
+            if inner == union:
+                return dt
+            sym = high.getSymbol()
+            if sym is None:
+                return None
+            dt = sym.getDataType()
+            dt = dt.getBaseDataType() if isinstance(dt, TypeDef) else dt
+            return dt if dt == union else None
+
+        op = tok.getPcodeOp()
+        if op is None:
+            return None
+        if op.getOpcode() == PcodeOp.PTRSUB:
+            parent = related(op.getInput(0))
+            if parent is not None:
+                vn, slot = op.getInput(0), 0
+                if op.getInput(1).getOffset() == 0:  # artificial op: the access is further down
+                    while True:
+                        tmp = op.getOutput()
+                        nxt = tmp.getLoneDescend()
+                        if nxt is None:
+                            break
+                        op, vn, slot = nxt, tmp, nxt.getSlot(tmp)
+                        if not (op.getOpcode() == PcodeOp.PTRSUB and op.getInput(1).getOffset() == 0):
+                            break
+                return op, slot, vn, parent
+            parent = related(op.getOutput())  # the PTRSUB's output may be the union
+            if parent is None:
+                return None
+            vn, slot = op.getOutput(), -1
+            read = vn.getLoneDescend()
+            if read is not None and read.getOpcode() not in (PcodeOp.MULTIEQUAL, PcodeOp.INDIRECT):
+                op, slot = read, read.getSlot(vn)
+            return op, slot, vn, parent
+        for slot in range(op.getNumInputs()):
+            vn = op.getInput(slot)
+            parent = related(vn)
+            if parent is not None:
+                if op.getOpcode() == PcodeOp.SUBPIECE and slot == 0 and not isinstance(parent, Pointer):
+                    slot, vn = -1, op.getOutput()  # SUBPIECE is itself the resolution: choose by its output
+                return op, slot, vn, parent
+        vn = op.getOutput()
+        parent = related(vn) if vn is not None else None
+        return (op, -1, vn, parent) if parent is not None else None
+
+    @staticmethod
+    def _union_choices(union, vn, parent):
+        """ForceUnionAction.buildFieldOptions: (field number, name) of the fields that fit the varnode, in union order."""
+        from ghidra.program.model.data import Pointer
+        from ghidra.program.model.pcode import PartialUnion
+        size, start, exact = (0 if isinstance(parent, Pointer) else vn.getSize()), 0, True
+        if isinstance(parent, PartialUnion):
+            start, exact = parent.getOffset(), False
+        out = []
+        for n, c in enumerate(union.getDefinedComponents()):
+            end = start + size
+            if size == 0 or (exact and start == c.getOffset() and end == c.getOffset() + c.getLength()) or \
+               (not exact and start >= c.getOffset() and end <= c.getOffset() + c.getLength()):
+                out.append((n, str(c.getFieldName() or c.getDefaultFieldName())))
+        return out
+
+    @rpc(lane="edit")
+    def force_union_field(self, entry, address, text, field, occurrence=0, timeoutSecs=30, job=None):
+        """Ghidra's Force Field: this one use of a union (the decompiler token `text` of the access at `address` (the token's `unionAt`), the `occurrence`-th such union token there) is shown as `field` (a member name that fits the access, as Ghidra offers them) or, with null, as no field. Writes a union
+        facet symbol (HighFunctionDBUtil.writeUnionFacet). InvalidArgument if the token is not a union access or the field does not fit."""
+        from ghidra.app.decompiler.component import DecompilerUtils
+        from ghidra.program.model.address import Address
+        from ghidra.program.model.pcode import DynamicHash, HighFunctionDBUtil
+        from ghidra.program.model.symbol import SourceType
+        text_arg(address, "address")
+        text_arg(text, "text")
+        if field is not None:
+            text_arg(field, "field")
+        if not isinstance(occurrence, int) or isinstance(occurrence, bool) or occurrence < 0:
+            raise RpcError(INVALID, "occurrence must be a non-negative integer")
+
+        def prepare(prog, _sym, d, mon):
+            at = self.ses.addr(address, prog)
+            func = prog.getFunctionManager().getFunctionAt(self.ses.addr(entry, prog))
+            res = d.decompileFunction(func, timeoutSecs, mon)
+            mon.checkCancelled()
+            if not res.decompileCompleted():
+                raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
+            hf = res.getHighFunction()
+            same = [t for line in DecompilerUtils.toLines(res.getCCodeMarkup()) for t in line.getAllTokens()
+                    if str(t.getText()) == text and t.getPcodeOp() is not None and t.getPcodeOp().getSeqnum().getTarget().equals(at)
+                    and union_of(t) is not None]
+            if occurrence >= len(same):
+                raise RpcError(NOT_FOUND, "no token %r at %s" % (text, address))
+            tok = same[occurrence]
+            union = union_of(tok)
+            facet = self._union_facet(tok, union) if union is not None else None
+            if facet is None:
+                raise RpcError(INVALID, "%r is not an access of a union" % text)
+            op, slot, vn, parent = facet
+            choices = self._union_choices(union, vn, parent)
+            if field is None:
+                number = -1
+            else:
+                number = next((n for n, name in choices if name == field), None)
+                if number is None:
+                    raise RpcError(INVALID, "field %r does not fit this access; choices: %s" % (field, ", ".join(n for _, n in choices) or "(none)"))
+            dh = DynamicHash(op, slot, hf)
+            pc, h = dh.getAddress(), dh.getHash()
+            if pc.equals(Address.NO_ADDRESS):
+                raise RpcError(INVALID, "cannot find a unique hash for this access")
+
+            def commit(prog, func, _hf, _sym):
+                HighFunctionDBUtil.writeUnionFacet(func, parent, number, pc, h, True, SourceType.USER_DEFINED)
+            return commit
+
+        return self._high_edit("Force union field in %s", entry, None, None, timeoutSecs, job, prepare=prepare)

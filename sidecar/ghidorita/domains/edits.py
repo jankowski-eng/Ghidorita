@@ -189,3 +189,70 @@ class Edits:
             self.ses.cmd(cmd)(p)
         self.ses.edit("Edit signature of %s" % f.getName(), go)
         return {}
+
+    @rpc(lane="R")
+    def set_equate(self, address, value, size, name, enum=None):
+        """Ghidra's Set Equate on ONE instruction operand. `value` (decimal string) and `size` (bytes) are the constant the decompiler shows;
+        its operand is the one scalar holding exactly that value in the instruction at `address` or the up to 19 before it in the same
+        straight-line run (as Ghidra's decompiler action, which also accepts "near" values: shortcut, those are refused here).
+        InvalidArgument if no operand or several hold it. `name` is an equate (existing or new) or, with `enum` (a program enum's path), one of its members."""
+        from ghidra.app.cmd.equate import SetEquateCmd
+        from ghidra.program.database.symbol import EquateManager
+        from ghidra.program.model.data import Enum
+        from ghidra.program.model.scalar import Scalar
+        prog = self.ses.need()
+        name_arg(name)
+        try:
+            val, size = int(value), int(size)
+        except (TypeError, ValueError):
+            raise RpcError(INVALID, "value must be an integer string and size a byte count")
+        if size not in (1, 2, 4, 8):
+            raise RpcError(INVALID, "size must be 1, 2, 4 or 8")
+        mask = (1 << (8 * size)) - 1
+        listing, a = prog.getListing(), self.ses.addr(address)
+        cur = listing.getInstructionContaining(a)
+        if cur is None:
+            raise RpcError(NOT_FOUND, "no instruction at %s" % address)
+        hits, n = [], 0
+        while cur is not None and n < 20:
+            for i in range(cur.getNumOperands()):
+                hits += [(cur.getAddress(), i, o) for o in cur.getOpObjects(i) if isinstance(o, Scalar) and o.getValue() & mask == val & mask]
+            n += 1
+            prev = cur.getPrevious()
+            ft = prev.getFallThrough() if prev is not None else None
+            cur = prev if ft is not None and ft.equals(cur.getAddress()) else None
+        if len(hits) != 1:
+            raise RpcError(INVALID, "cannot place the equate on one operand: %s" % (
+                "no instruction operand near %s holds %s" % (address, value) if not hits else "%d operands hold %s" % (len(hits), value)))
+        at, op, scalar = hits[0]
+        eq_name = name
+        if enum is not None:
+            text_arg(enum, "enum")
+            dt = prog.getDataTypeManager().getDataType(enum)
+            if not isinstance(dt, Enum):
+                raise RpcError(NOT_FOUND, "no enum %s" % enum)
+            if not any(str(dt.getName(v)) == name and v & mask == val & mask for v in dt.getValues()):
+                raise RpcError(INVALID, "%s has no member %s = %s" % (enum, name, value))
+            eq_name = EquateManager.formatNameForEquate(dt.getUniversalID(), scalar.getValue())
+
+        def go(p):
+            table = p.getEquateTable()
+            old = table.getEquate(at, op, scalar.getValue())  # replace this operand's equate only, not the others that use it
+            if old is not None:
+                if old.getReferenceCount() <= 1:
+                    table.removeEquate(old.getName())
+                else:
+                    old.removeReference(at, op)
+            self.ses.cmd(SetEquateCmd(eq_name, at, op, scalar.getValue()))(p)
+        self.ses.edit("Set equate %s" % name, go)
+        return {}
+
+    @rpc(lane="R")
+    def set_function_no_return(self, entry, noReturn=True):
+        """The No Return flag of Edit Function Signature. Callers are re-decompiled without the dead code after it: the flag change is a function
+        event, which clears the whole decompile cache (decompile.py), so no caller keeps its old text."""
+        if not isinstance(noReturn, bool):
+            raise RpcError(INVALID, "noReturn must be a boolean")
+        prog, f = self.ses.function(entry)
+        self.ses.edit("%s %s" % ("Mark no return:" if noReturn else "Clear no return:", f.getName()), lambda p: f.setNoReturn(noReturn))
+        return {}
