@@ -51,3 +51,10 @@ test("qualified function entries (overlay, other spaces) and entries above 2^63 
   await onProgramChanged({ ranges: [{ start: "0xffffffff8000001f", end: "0xffffffff8000001f" }], kinds: ["comment"], undo }, d);
   assert.deepEqual(log, ["tab1"]);
 });
+
+test("coverage ignores qualified (overlay) rows instead of throwing", async () => {
+  const { Coverage } = await import("data:text/javascript," + encodeURIComponent((await build({ entryPoints: [new URL("../src/renderer/coverage.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false })).outputFiles[0].text));
+  const c = new Coverage([{ start: "0x1000", end: "0x1fff" }, { start: "0xffffffff80000000", end: "0xffffffff80000010" }]);
+  assert.equal(c.has("0x1004", 4), true); assert.equal(c.has("0xffffffff80000008", 4), true);
+  assert.equal(c.has("OVL1::1004", 4), false); assert.equal(c.has("code:1004", 1), false);
+});

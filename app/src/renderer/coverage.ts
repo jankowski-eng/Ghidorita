@@ -15,6 +15,7 @@ export class Coverage {
   }
   get size() { return this.lo.length; }
   has(address: Address, length: number): boolean {
+    if (!address.startsWith("0x")) return false; // shortcut: coverage files name default-space addresses only (load_coverage), other spaces are never covered; upgrade with qualified ranges
     const a = BigInt(address), z = a + BigInt(Math.max(length, 1)) - 1n;
     let i = 0, j = this.lo.length; // last range starting at or before z
     while (i < j) { const m = (i + j) >> 1; if (this.lo[m] <= z) i = m + 1; else j = m; }
