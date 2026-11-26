@@ -10,7 +10,7 @@ import { Listing } from "./Listing";
 import { Panes } from "./Layout";
 import { TabStrip } from "./TabStrip";
 import { XrefPanel } from "./XrefPanel";
-import { allowsEdit } from "../capabilities";
+import { allowsEdit, centreViews } from "../capabilities";
 import { canForce, type TabsApi } from "./useTabs";
 import type { Navigation } from "./features/navigation";
 import type { Editing } from "./features/editing";
@@ -37,6 +37,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
   const symbolSearch = caps.has("symbolSearch") ? ops.searches.searchSymbols : undefined;
   const { go, goTab, clickAt, fn } = nav;
+  const centre = centreViews(caps, callGraphOn), graphEntry = active?.entry ?? fn?.entry; // without a decompiler there are no tabs: the call graph follows the current function
   const rowMenu = () => [
     { label: "Copy Address", run: () => void copy.copy("address") },
     ...(caps.has("bytes") ? [{ label: "Copy Bytes (Hex)", run: () => void copy.copy("bytes") }, { label: "Copy Bytes (C Array)", run: () => void copy.copy("carray") }] : []),
@@ -56,7 +57,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
     </div>
   );
   return (
-    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && caps.has("decompile") }}>{{
+    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && (centre.decompiler || centre.callGraph) }}>{{
       functions: (
         <div className="funcs-col">
           <div className="funcs-row">
@@ -67,19 +68,20 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
         </div>
       ),
       listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} stmt={stmt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
-      decompiler: caps.has("decompile") && (
+      decompiler: (centre.decompiler || centre.callGraph) && (
         <div className="dec">
-          <TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
+          {centre.decompiler && <><TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
           {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
           {ad?.status === "loading" && <div className="empty">Decompiling…{ad.long && <button aria-label="Cancel decompile" onClick={() => tabs.cancel(active!.id)}>Cancel</button>}</div>}
           {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
             <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
           {ad?.status === "error" && <div className="empty err">{ad.error}{canForce(ad) && <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button>}</div>}
-          {graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
-          {callGraphOn && active && <CallGraphView source={ops.references.callGraph} entry={active.entry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
-          <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
+          </>}
+          {centre.decompiler && graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
+          {centre.callGraph && graphEntry && <CallGraphView source={ops.references.callGraph} entry={graphEntry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
+          {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
             <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} />
-          </div>
+          </div>}
         </div>
       ),
     }}</Panes>

@@ -1,4 +1,4 @@
-import type { FunctionInfo } from "../../../protocol";
+import type { Address, FunctionInfo } from "../../../protocol";
 import type { AddrMap } from "./addrmap";
 import { intersectSpans, subtractSpans } from "./coverage";
 
@@ -45,6 +45,9 @@ export function mapLayers(map: AddrMap, funcs: FunctionInfo[], on: { renamed: bo
   }
   return out;
 }
+
+/** Where a click or key at map position `pos` goes; null for an empty program (nothing is loaded, AddrMap.addr has no address to give). */
+export const goAddr = (map: AddrMap, pos: number): Address | null => (map.total ? map.addr(pos) : null);
 
 /** Tooltip text for map position `pos`: its address and the function containing it, else the loaded range. `sorted` = funcSpans-like entries by pos. shortcut: nested/overlapping bodies resolve to the last one starting before pos. */
 export function describeAt(map: AddrMap, funcs: FunctionInfo[], pos: number): string {

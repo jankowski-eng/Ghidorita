@@ -102,3 +102,15 @@ test("debug: calls need the capability, the state notification reaches the activ
   const bare = await setup([]); // a provider without the capability
   await assert.rejects(bare.backend.program(await open(bare.backend, bare.ws, "X")).debug.step(), { kind: "unsupported" });
 });
+
+test("projects.reopen opens by programId, never by path; without the projects capability it is refused", async () => {
+  const entry = { programId: "pid", name: "n", sourcePath: "/gone/n", sizeBytes: 1, analyzed: true, options: { loader: "L" } };
+  const { backend, ws } = await setup(["projects"]);
+  const job = backend.projects.reopen(entry, () => {});
+  assert.deepEqual({ ...ws.sent.at(-1), id: 0 }, { jsonrpc: "2.0", id: 0, method: "open_program", params: { programId: "pid" } });
+  ws.reply(ws.sent.at(-1), { sessionId: "S", programId: "pid", name: "n", persisted: true });
+  assert.equal((await job.result).sessionId, "S");
+  const bare = await setup([]);
+  await assert.rejects(bare.backend.projects.reopen(entry, () => {}).result, { kind: "unsupported" });
+  assert.equal(bare.ws.sent.length, 1);
+});

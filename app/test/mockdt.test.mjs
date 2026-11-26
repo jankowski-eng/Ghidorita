@@ -97,3 +97,12 @@ test("mock data types: struct editor, apply, undo/redo, enum, categories", async
   await ok("undo");
   await err("get_data_type", { path: "/FromData" }, -32004);
 });
+
+test("mock open_program opens the requested catalog entry, seeded or not", async () => {
+  const seeded = (await ok("list_programs")).find((e) => e.programId !== "mock:/x/prog" && e.sourcePath);
+  assert.ok(seeded, "the mock seeds catalog entries");
+  const r = await ok("open_program", { programId: seeded.programId });
+  assert.equal(r.programId, seeded.programId);
+  assert.equal(r.persisted, true);
+  await err("open_program", { programId: "nope" }, -32004);
+});

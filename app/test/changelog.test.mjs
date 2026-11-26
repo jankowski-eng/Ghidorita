@@ -68,3 +68,29 @@ test("every edit the rpc adapter logs is a change-log entry (an unknown name wou
     assert.equal(l.items.length, before + 1, `${n} is logged by rpc.ts but unknown to changeLog.ts`);
   }
 });
+
+test("reconcile: an analysis that saved clears the history, so earlier edits are saved and no longer undoable", () => {
+  const l = new ChangeLog();
+  l.record("renameSymbol", { address: "0x1", newName: "a" }, {});
+  l.reconcile({ canUndo: true, canRedo: false, dirty: true }); // an ordinary event changes nothing
+  assert.equal(l.items[0].saved, false);
+  l.reconcile({ canUndo: false, canRedo: false, dirty: false }); // the analysis saved
+  assert.equal(l.items[0].saved, true);
+  l.record("undo", {}, {}); // the provider has nothing to undo; the saved entry must not flip
+  assert.deepEqual(live(l), ["Rename to a"]);
+});
+
+test("reconcile: history cleared but the save failed keeps the edit unsaved and not undoable", () => {
+  const l = new ChangeLog();
+  l.record("renameSymbol", { address: "0x1", newName: "a" }, {});
+  l.record("renameSymbol", { address: "0x2", newName: "b" }, {});
+  l.record("undo", {}, {}); // "b" waits on the redo stack
+  l.reconcile({ canUndo: false, canRedo: false, dirty: true });
+  assert.deepEqual(live(l), ["Rename to a"]);
+  assert.equal(l.items.length, 1); // the redo entry is gone with the history
+  assert.deepEqual([l.items[0].saved, l.items[0].locked], [false, true]);
+  l.record("undo", {}, {});
+  assert.deepEqual(live(l), ["Rename to a"]);
+  l.reconcile({ canUndo: false, canRedo: false, dirty: false }); // a later analysis saves them
+  assert.deepEqual([l.items[0].saved, l.items[0].locked], [true, false]);
+});

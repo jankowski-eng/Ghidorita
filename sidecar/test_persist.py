@@ -323,6 +323,44 @@ def test_corrupt_persisted_item_is_preserved(projects, tmp_path):
     run(go())
 
 
+@pytest.mark.parametrize("damage", ["moved", "overwritten"])
+def test_open_program_by_id_ignores_the_source_file(tmp_path, damage):
+    """A saved edit survives the binary being moved or replaced: the stored program opens by its ID, nothing is re-imported."""
+    raw = blob(tmp_path)
+    opts = dict(path=raw, loader="Raw Binary", language=X86, baseAddress=BASE)
+
+    async def edit():
+        async with Client(proc.port) as c:
+            r = await c.ok("open_binary", **opts)
+            a = (await c.ok("list_functions"))[0]["entry"]
+            await c.ok("rename_symbol", address=a, newName="edited_by_user")
+            assert await c.ok("save") == {"saved": True}
+            return r["programId"], a
+    proc = Proc(tmp_path / "projects")
+    try:
+        pid, a = run(edit())
+    finally:
+        proc.stop()
+    if damage == "moved":
+        os.rename(raw, raw + ".moved")
+    else:
+        Path(raw).write_bytes(b"\x90" * 64)
+
+    async def reopen():
+        async with Client(proc.port) as c:
+            await c.err("open_program", NOT_FOUND, programId="no-such-program")
+            r = await c.ok("open_program", programId=pid)
+            assert r["programId"] == pid and r["persisted"] is True
+            assert await name_at(c, a) == "edited_by_user"
+            assert (await c.ok("undo_state"))["dirty"] is False
+            assert [e["programId"] for e in await c.ok("list_programs")] == [pid]  # nothing was imported
+    proc = Proc(tmp_path / "projects")
+    try:
+        run(reopen())
+    finally:
+        proc.stop()
+
+
 def test_save_without_program(tmp_path):
     proc = Proc(tmp_path / "p")
     try:

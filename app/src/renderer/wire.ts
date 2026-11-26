@@ -51,6 +51,7 @@ export const results = {
     recovery: optional(shape({ snapshotIntervalSeconds: (x) => typeof x === "number" && Number.isFinite(x) && x > 0 })) }),
   active_session: nullable(shape(sessionFields)),
   open_binary: shape({ ...sessionFields, persisted: bool, analysis: optional(analysisState) }),
+  open_program: shape({ ...sessionFields, persisted: bool, analysis: optional(analysisState) }),
   close_program: object,
   cancel_open: shape({ cancelled: bool }),
   analysis_status: analysisState,

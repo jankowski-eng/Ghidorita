@@ -234,15 +234,16 @@ class Analysis:
             if self.ses.program is prog:  # close() waits for this thread, so normally always true; saving needs edits to stay Busy
                 with self.ses.save_lock:
                     prog.getDomainFile().save(TaskMonitor.DUMMY)
-                self.ses.refresh_undo(prog)
         except Exception as e:  # noqa
             log("analysis save failed:", repr(e))
             err, completed = err or e, False  # unsaved: not done
         finally:  # whatever failed above, edits become possible again and stop() is released
             try:
+                if self.ses.program is prog:  # the history is gone either way; after a failed save the program is still dirty
+                    self.ses.refresh_undo(prog)
                 self.ctx.project.meta_update(key, analysis="done" if completed else "partial", analysisProfile=profile, analyzed=completed)
             except Exception as e:  # noqa
-                log("analysis meta update failed:", repr(e))
+                log("analysis meta/undo update failed:", repr(e))
             log("analysis %s in %.1fs" % ("done" if completed else "cancelled" if err is None else "failed", time.monotonic() - t0))
             with self.ses.lock:  # the run wrote (and cleared undo): a variable edit prepared before it must not commit (highvars.py)
                 self.ses.revision += 1

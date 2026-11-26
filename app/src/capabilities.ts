@@ -5,6 +5,9 @@ export const dockCapability = {
   symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger",
 } as const;
 
+/** What the centre pane hosts: the decompiler (tabs, editor, control-flow graph) needs `decompile`; the call graph is a view of its own and needs only `callGraph`. */
+export const centreViews = (caps: ReadonlySet<Capability>, callGraphOn: boolean) => ({ decompiler: caps.has("decompile"), callGraph: caps.has("callGraph") && callGraphOn });
+
 export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCommand, { type: "edit" }>["action"]): boolean {
   switch (action) {
     case "save": return caps.has("save");
