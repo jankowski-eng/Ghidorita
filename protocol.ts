@@ -100,6 +100,10 @@ export interface Methods {
   cancel_search: { params: { id: number }; result: { cancelled: boolean } };
   get_comments: { params: { address: Address }; result: Partial<Record<CommentKind, string>> }; // only kinds that are set; NotFound if no code unit
   list_data_types: { params: { query: string; limit?: number }; result: DataTypeHit[] };
+  // ---- data type manager (protocol.md "Data types") ----
+  dt_sources: { params: {}; result: DtSource[] };
+  dt_children: { params: { source?: string; path?: string }; result: { categories: { name: string; path: string }[]; types: DataTypeHit[] } };
+  get_data_type: { params: { path: string; source?: string }; result: DataTypeDetail };
   undo_state: { params: {}; result: UndoState };
   // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
   rename_symbol: { params: { address: Address; newName: string }; result: {} };
@@ -116,6 +120,14 @@ export interface Methods {
   define_data: { params: { address: Address; dataType: string }; result: {} };
   // clear_code: Ghidra's ClearCmd (code, data, references; not symbols/comments); `length` bytes from `address` (default: the code unit at address).
   clear_code: { params: { address: Address; length?: number }; result: {} };
+  // ---- data type edits (program's own types only; one transaction each, undo label in protocol.md) ----
+  create_data_type: { params: { kind: "struct" | "union" | "enum" | "typedef" | "pointer" | "category"; name?: string; category?: string; size?: number; base?: string }; result: { path: string } };
+  delete_data_type: { params: { path: string; category?: boolean }; result: {} };
+  rename_data_type: { params: { path: string; newName: string }; result: { path: string } };
+  edit_struct: { params: { path: string; op: StructOp }; result: {} };
+  edit_enum: { params: { path: string; op: EnumOp }; result: {} };
+  // Struct from the data items in [address, address+length) (instructions refused), applied at address unless apply=false; one transaction.
+  create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
   // ---- persistence ----
   // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
   save: { params: {}; result: { saved: boolean } };
@@ -164,7 +176,42 @@ export interface StringItem { address: Address; value: string; length: number } 
 /** kind "bytes": hex with wildcards ("48 8b ?? 24"); "text": a string (encoding ascii | utf16le | utf16be, caseSensitive default true). start = where to continue (a previous `next`); limit default 1000, max 10000. */
 export interface SearchMemoryParams { pattern: string; kind?: "bytes" | "text"; encoding?: "ascii" | "utf16le" | "utf16be"; caseSensitive?: boolean; start?: Address; limit?: number }
 export interface MemoryHit { address: Address; length: number; bytes: string; function?: string } // bytes: hex of the match, at most 16 bytes
-export interface DataTypeHit { name: string; path: string; size: number } // size -1 = dynamic/unsized
+export interface DataTypeHit { name: string; path: string; size: number; kind: DataTypeKind } // size -1 = dynamic/unsized; an empty struct has size 0
+export type DataTypeKind = "struct" | "union" | "enum" | "typedef" | "pointer" | "function" | "array" | "builtin";
+export interface DtSource { id: string; name: string; writable: boolean } // id "program" | "builtin"
+export interface StructComponent {
+  ordinal: number; offset: number; length: number;
+  type: string; typePath: string;   // display name ("char[8]", "S *"), parseable by the type field; path identifies it
+  name: string | null; defaultName: string; comment: string | null;
+  undefined: boolean;               // undefined filler byte of an unpacked structure
+  bitfield: boolean;                // not editable here
+}
+export interface DataTypeDetail extends DataTypeHit {
+  source: string; writable: boolean; description: string;
+  archive: string | null;           // non-local source archive name (.gdt / project archive), else null
+  // struct | union
+  packed?: boolean; packingValue?: number | null; minAlign?: number | null; alignment?: number; components?: StructComponent[];
+  // enum: values sorted by value; value is a decimal string (64-bit safe)
+  values?: { name: string; value: string }[];
+  // typedef | pointer | array
+  base?: string; basePath?: string | null; elements?: number;
+  // function definition
+  signature?: string;
+}
+/** Struct/union edit. `ordinal` indexes StructComponent.ordinal; type is a C-ish name as in define_data (fixed length only). */
+export type StructOp =
+  | { op: "add"; type: string; name?: string; comment?: string }                    // append (union: new member)
+  | { op: "insert"; ordinal: number; type: string; name?: string; comment?: string } // later fields shift down, struct grows
+  | { op: "set"; ordinal: number; type?: string; name?: string; comment?: string }   // omitted = keep, "" = clear; type required on filler
+  | { op: "delete"; ordinal: number }                                                // removed, later fields shift up
+  | { op: "clear"; ordinal: number }                                                 // struct: back to undefined filler, size kept; union: same as delete
+  | { op: "move"; ordinal: number; to: number }                                      // packed structs and unions only
+  | { op: "resize"; size: number }                                                   // unpacked structs only
+  | { op: "pack"; packed: boolean; packingValue?: number; minAlign?: number };
+export type EnumOp =
+  | { op: "set"; name: string; value: string; oldName?: string } // add, or change value; oldName renames
+  | { op: "remove"; name: string }
+  | { op: "resize"; size: 1 | 2 | 4 | 8 };
 export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty = unsaved changes since open or last save
 
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */
