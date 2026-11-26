@@ -37,6 +37,8 @@ class Proc:
 
 class Client:
     """One websocket; notifications are kept in `notes` (with arrival time), replies are matched by id."""
+    analysis = "blocking"  # default `analysis` of open_binary; None for a provider without the analysis capability
+
     def __init__(self, port, token=None):
         self.token = token
         self.port, self.notes, self.waiters, self.nid, self.t0 = port, [], {}, 0, time.monotonic()
@@ -59,8 +61,8 @@ class Client:
                 self.waiters[m["id"]].set_result((time.monotonic(), m))
 
     async def send(self, method, *, session_id=None, **params):
-        if method == "open_binary":  # the suite predates background analysis: its programs are analyzed when open_binary replies (test_analysis.py asks for "background")
-            params.setdefault("analysis", "blocking")
+        if method == "open_binary" and self.analysis:  # the suite predates background analysis: its programs are analyzed when open_binary replies (test_analysis.py asks for "background")
+            params.setdefault("analysis", self.analysis)
         self.nid += 1
         self.waiters[self.nid] = asyncio.get_running_loop().create_future()
         request = {"jsonrpc": "2.0", "id": self.nid, "method": method, "params": params}

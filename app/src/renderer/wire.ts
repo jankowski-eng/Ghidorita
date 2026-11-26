@@ -28,6 +28,9 @@ const symbolKind = oneOf("function", "label", "data", "external", "variable", "o
 const source = oneOf("user", "analysis", "imported", "default", "other");
 const typeFields = { name: str, path: str, size: integer, kind: oneOf("struct", "union", "enum", "typedef", "pointer", "function", "array", "builtin") };
 const profile = nonempty;
+const analysisFields = { state: oneOf("idle", "running", "done", "cancelled", "failed"), analysis: oneOf("none", "partial", "done"), profile: oneOf("full", "fast"),
+  analyzer: str, done: count, pct: number, error: optional(str) };
+const analysisState = shape(analysisFields);
 const options = shape({ loader: optional(str), language: optional(str), compilerSpec: optional(str), baseAddress: optional(address), profile: optional(profile) });
 const comments = { eol: optional(str), pre: optional(str), post: optional(str), plate: optional(str), repeatable: optional(str) };
 const row = shape({
@@ -43,9 +46,12 @@ export const results = {
   provider_info: shape({ version: (x) => x === 1, provider: nonempty, capabilities: array(nonempty),
     recovery: optional(shape({ snapshotIntervalSeconds: (x) => typeof x === "number" && Number.isFinite(x) && x > 0 })) }),
   active_session: nullable(shape(sessionFields)),
-  open_binary: shape({ ...sessionFields, persisted: bool }),
+  open_binary: shape({ ...sessionFields, persisted: bool, analysis: optional(analysisState) }),
   close_program: object,
   cancel_open: shape({ cancelled: bool }),
+  analysis_status: analysisState,
+  start_analysis: analysisState,
+  cancel_analysis: shape({ cancelled: bool }),
   cancel_search: shape({ cancelled: bool }),
   cancel_decompile: shape({ cancelled: bool }),
   listing_info: shape({ totalBytes: count, ranges: array(shape({ start: address, size: positive })) }),
@@ -99,7 +105,7 @@ export const results = {
   redo: undo,
   save: shape({ saved: bool, undoHistoryCleared: bool }),
   load_coverage: shape({ ranges: array(range) }),
-  list_programs: array(shape({ programId: nonempty, name: str, sourcePath: optional(str), sizeBytes: count, analyzed: bool, lastOpened: optional(str), options })),
+  list_programs: array(shape({ programId: nonempty, name: str, sourcePath: optional(str), sizeBytes: count, analyzed: bool, analysis: optional(oneOf("none", "partial", "done")), analysisProfile: optional(oneOf("full", "fast")), lastOpened: optional(str), options })),
   delete_program: object,
   import_candidates: shape({ candidates: array(shape({ loader: str, language: nullable(str), compilerSpec: nullable(str), preferred: bool, acceptsBaseAddress: bool, requiresLanguage: optional(bool) })),
     sizeBytes: count, entropy: array(number), note: optional(str), profiles: optional(array(shape({ id: profile, label: str }))), defaultProfile: optional(profile),
@@ -112,6 +118,7 @@ export const notifications = {
   program_changed: shape({ sessionId: nonempty, ranges: nullable(array(range)), undo,
     kinds: array(oneOf("symbol", "comment", "function", "data", "code", "type", "other")),
   }),
+  analysis_state: shape({ sessionId: nonempty, ...analysisFields }),
   error: shape({ message: str }),
 } satisfies Record<keyof Notifications, Check>;
 

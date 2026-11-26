@@ -16,7 +16,7 @@ export function autotestBackend(backend: ApplicationBackend, requests: AutotestC
     capabilities: backend.capabilities, recovery: backend.recovery, imports: backend.imports, projects: backend.projects, events: backend.events,
     lifecycle: {
       ...backend.lifecycle,
-      open(path, options, progress) {
+      open(path, options, progress, mode) {
         const params = { ...options, path };
         openAttempts.push(params);
         if (holdOpen) {
@@ -27,7 +27,7 @@ export function autotestBackend(backend: ApplicationBackend, requests: AutotestC
         if (cancelOpen?.(params)) {
           return { result: Promise.reject(new BackendError("cancelled", "Open cancelled")), cancel: async () => false };
         }
-        return backend.lifecycle.open(path, options, progress);
+        return backend.lifecycle.open(path, options, progress, mode);
       },
     },
     program(session) {

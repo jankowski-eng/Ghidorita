@@ -1,5 +1,5 @@
 import type {
-  ActiveSession, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
+  ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
   ChangeKind, FunctionGraph, TopSymbol,
@@ -17,14 +17,17 @@ export interface OpenJob { result: Promise<OpenResult>; cancel(): Promise<boolea
 export interface OpenProgress { phase: string; pct: number; message: string; analyzer?: string; done?: number }
 export interface ProgramChange { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState }
 
+/** `analysis` capability: "background" (default) replies once the program is published and analyzes on; "blocking" replies when the analysis is done. */
+export type AnalysisMode = "background" | "blocking";
 export interface ProgramLifecycle {
-  open(path: string, options: ImportOptions, onProgress: (progress: OpenProgress) => void): OpenJob;
+  open(path: string, options: ImportOptions, onProgress: (progress: OpenProgress) => void, mode?: AnalysisMode): OpenJob;
   active(): Promise<ActiveSession | null>;
   close(session: ActiveSession): Promise<void>;
 }
 export interface ProviderEvents {
   onChange(listener: (sessionId: string, change: ProgramChange) => void): () => void;
   onError(listener: (message: string) => void): () => void;
+  onAnalysis(listener: (sessionId: string, state: AnalysisState) => void): () => void;
 }
 
 export interface ListingReads {
@@ -108,12 +111,19 @@ export interface Exports {
 export interface ProjectCatalog {
   list(): Promise<ProgramEntry[]>;
   remove(params: { programId: string }): Promise<{}>;
-  reopen(entry: ProgramEntry, progress: (event: OpenProgress) => void): OpenJob;
+  reopen(entry: ProgramEntry, progress: (event: OpenProgress) => void, mode?: AnalysisMode): OpenJob;
 }
 
 export interface ImportSelection {
   choices(params: { path: string }): Promise<ImportChoices>;
   languages(): Promise<LanguageInfo[]>;
+}
+
+/** Analysis of the open program (`analysis` capability). start without a profile = the recorded one; fast to full on a finished fast program keeps the programId. */
+export interface AnalysisControl {
+  status(): Promise<AnalysisState>;
+  start(profile?: "full" | "fast"): Promise<AnalysisState>;
+  cancel(): Promise<{ cancelled: boolean }>;
 }
 
 /** Operations bound to one active session. A retained callback continues to address that session. */
@@ -129,6 +139,7 @@ export interface ProgramOperations {
   history: ProgramHistory;
   coverage: CoverageReads;
   exports: Exports;
+  analysis: AnalysisControl;
 }
 export interface ApplicationBackend {
   capabilities: ReadonlySet<Capability>;

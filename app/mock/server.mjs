@@ -210,7 +210,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "suggestions", "export"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "suggestions", "export", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -280,7 +280,7 @@ const handlers = {
     if (/missing/.test(path)) throw { code: -32004, message: "NotFound" }; // mock: paths containing "missing"
     const sizeBytes = /big/.test(path) ? 30 * 1048576 : 4096; // mock: paths containing "big" are 30 MB (the UI defaults those to the fast profile)
     const entropy = Array.from({ length: 24 }, (_, i) => (i < 6 ? 5.8 : i < 18 ? 6.4 : 7.9)); // mock: some code, data, then a packed tail
-    const profiles = [{ id: "full", label: "Full" }, { id: "fast", label: "Fast" }];
+    const profiles = [{ id: "full", label: "Full" }, { id: "fast", label: "Fast (skips switch analysis, call-convention ID, stack)" }];
     const defaults = { sizeBytes, entropy, profiles, defaultProfile: sizeBytes > 20 * 1048576 ? "fast" : "full" };
     if (/\.(bin|rom|img)$/i.test(path)) return { ...defaults, candidates: [{ loader: "Raw Binary", language: null, compilerSpec: null, preferred: true, acceptsBaseAddress: true }] };
     return { ...defaults, candidates: [
@@ -772,8 +772,8 @@ wss.on("connection", (ws) => {
     try {
       if (req.method === "provider_info") versioned = true;
       const id = activeSession?.sessionId;
-      const notify = (method, params) => ws.send(JSON.stringify({
-        jsonrpc: "2.0", method, params: method === "program_changed" ? { ...params, sessionId: id } : params,
+      const notify = (method, params) => ws.send(JSON.stringify({ // the session is read at send time: an analysis started by open_binary keeps this closure after the swap
+        jsonrpc: "2.0", method, params: method === "program_changed" || method === "analysis_state" ? { ...params, sessionId: activeSession?.sessionId } : params,
       }));
       const h = Object.hasOwn(handlers, req.method) && handlers[req.method];
       if (!h) throw { code: -32601, message: "MethodNotFound" };

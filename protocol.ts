@@ -128,12 +128,12 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "suggestions", "export",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "suggestions", "export", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
 export interface ActiveSession { sessionId: string; programId: string; name: string }
-export interface OpenResult extends ActiveSession { persisted: boolean }
+export interface OpenResult extends ActiveSession { persisted: boolean; analysis?: AnalysisState } // analysis: only from providers with the `analysis` capability
 export interface ImportChoices {
   candidates: ImportCandidate[];
   sizeBytes: number;
@@ -148,7 +148,7 @@ export interface Methods {
   provider_info: { params: {}; result: ProviderInfo };
   active_session: { params: {}; result: ActiveSession | null };
   // analysis (default "background"): the reply comes right after the import is saved and published, analysis keeps running on its own lane (see AnalysisState, protocol.md "Analysis"). "blocking": the reply waits for the analysis (`progress` events, cancel_open cancels it and nothing is saved).
-  open_binary: { params: { path: string; analysis?: "background" | "blocking" } & ImportOptions; result: OpenResult & { analysis: AnalysisState } };
+  open_binary: { params: { path: string; analysis?: "background" | "blocking" } & ImportOptions; result: OpenResult };
   cancel_open: { params: { id?: number }; result: { cancelled: boolean } };
   analysis_status: { params: {}; result: AnalysisState };
   // Starts (or resumes) the analysis of the open program. profile omitted = the program's recorded profile. fast -> full on a finished fast program runs only the three analyzers the fast profile skipped; the programId does not change. No-op (returns the state) if the program is already analyzed with that profile or better. Busy while an analysis runs.
@@ -248,8 +248,8 @@ export interface ProgramEntry {
   sourcePath?: string;          // path at first import; may no longer exist
   sizeBytes: number;            // size of the source file at import
   analyzed: boolean;            // analysis === "done"
-  analysis: AnalysisRecord;     // what the project has stored; "partial" = interrupted, open_binary resumes it
-  analysisProfile: "full" | "fast"; // the profile that ran (or runs) on it
+  analysis?: AnalysisRecord;    // `analysis` capability: what the project has stored; "partial" = interrupted, open_binary resumes it
+  analysisProfile?: "full" | "fast"; // the profile that ran (or runs) on it
   lastOpened?: string;          // ISO-8601 UTC
   options: ImportOptions;       // {} = default import
 }
@@ -327,7 +327,7 @@ export interface AnalysisState {
 
 export interface Notifications {
   // Sent when an analysis starts, about every 250 ms while the analyzer/done/pct change, and once at the end (done/cancelled/failed).
-  analysis_state: AnalysisState;
+  analysis_state: AnalysisState & { sessionId: string }; // of the program session it belongs to; a client ignores other sessions'
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
   progress: { openId: number; phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
   // ranges null = unknown/broad, refetch everything (also when a change has no address: type edits); start/end inclusive, same space, any space. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); about 1 s while an analysis runs, then always ranges null and all kinds; not during a blocking open_binary.

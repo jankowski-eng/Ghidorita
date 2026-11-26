@@ -1,6 +1,6 @@
-import { ErrorCode, type ActiveSession, type Capability, type Methods, type Notifications } from "../../../protocol";
+import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type Methods, type Notifications } from "../../../protocol";
 import {
-  BackendError, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenProgress, type ProgramChange,
+  BackendError, type AnalysisMode, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenProgress, type ProgramChange,
   type ProgramLifecycle, type ProgramOperations, type ProjectCatalog, type ProviderEvents,
 } from "./backend";
 import { notifications, object, results, knownCapabilities } from "./wire";
@@ -30,6 +30,7 @@ export class WebSocketBackend implements ApplicationBackend {
   private progress = new Map<number, (event: OpenProgress) => void>();
   private changes = new Set<(sessionId: string, event: ProgramChange) => void>();
   private errors = new Set<(message: string) => void>();
+  private analyses = new Set<(sessionId: string, state: AnalysisState) => void>();
   capabilities: ReadonlySet<Capability> = new Set();
   recovery?: { snapshotIntervalSeconds: number };
 
@@ -76,6 +77,9 @@ export class WebSocketBackend implements ApplicationBackend {
       } else if (reply.method === "program_changed" && notifications.program_changed(reply.params)) {
         const { sessionId, ...event } = reply.params as Notifications["program_changed"];
         if (sessionId === this.sessionId) for (const listener of this.changes) listener(sessionId, event);
+      } else if (reply.method === "analysis_state" && notifications.analysis_state(reply.params)) {
+        const { sessionId, ...state } = reply.params as Notifications["analysis_state"];
+        if (sessionId === this.sessionId) for (const listener of this.analyses) listener(sessionId, state);
       } else if (reply.method === "error" && notifications.error(reply.params)) {
         for (const listener of this.errors) listener((reply.params as Notifications["error"]).message);
       }
@@ -107,10 +111,10 @@ export class WebSocketBackend implements ApplicationBackend {
   }
 
   readonly lifecycle: ProgramLifecycle = {
-    open: (path, options, onProgress) => {
+    open: (path, options, onProgress, mode) => {
       const id = this.nextId++;
       this.progress.set(id, onProgress);
-      const result = this.send(id, "open_binary", { ...options, path }).then((session) => {
+      const result = this.send(id, "open_binary", { ...options, path, ...(mode ? { analysis: mode } : {}) }).then((session) => {
         this.adopt(session);
         return session;
       }).finally(() => this.progress.delete(id));
@@ -131,18 +135,19 @@ export class WebSocketBackend implements ApplicationBackend {
   readonly events: ProviderEvents = {
     onChange: (listener) => { this.changes.add(listener); return () => this.changes.delete(listener); },
     onError: (listener) => { this.errors.add(listener); return () => this.errors.delete(listener); },
+    onAnalysis: (listener) => { this.analyses.add(listener); return () => this.analyses.delete(listener); },
   };
   readonly projects: ProjectCatalog = {
     list: () => this.request("projects", "list_programs", {}),
     remove: (params) => this.request("projects", "delete_program", params),
-    reopen: (entry, progress) => {
+    reopen: (entry, progress, mode) => {
       const params = reopenParams(entry);
       if (!this.capabilities.has("projects") || !params) {
         const error = params ? this.unsupported("projects") : new BackendError("notFound", `${entry.name} has no stored source path. Use File → Open.`);
         return { result: Promise.reject(error), cancel: async () => false };
       }
       const { path, ...options } = params;
-      return this.lifecycle.open(path, options, progress);
+      return this.lifecycle.open(path, options, progress, mode);
     },
   };
   readonly imports: ImportSelection = {
@@ -220,6 +225,11 @@ export class WebSocketBackend implements ApplicationBackend {
       },
       coverage: { load: (p) => read("load_coverage", p, "coverage") },
       exports: { symbols: (p) => read("export_symbols", p, "export"), header: (p) => read("export_header", p, "export") },
+      analysis: {
+        status: () => read("analysis_status", {}, "analysis"),
+        start: (profile) => read("start_analysis", profile ? { profile } : {}, "analysis"),
+        cancel: () => read("cancel_analysis", {}, "analysis"),
+      },
     };
   }
 

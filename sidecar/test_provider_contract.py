@@ -44,6 +44,8 @@ def test_browsing_protocol(provider, tmp_path):
             async with websockets.connect(f"ws://127.0.0.1:{port}/wrong"):
                 pytest.fail("accepted an invalid token")
         async with Client(port, TOKEN) as c:
+            if name == "fixture":
+                c.analysis = None  # no `analysis` capability
             info = await c.ok("provider_info")
             assert info["provider"] == name and info["version"] == 1
             assert await c.ok("active_session") is None

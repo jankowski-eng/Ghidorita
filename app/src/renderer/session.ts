@@ -1,4 +1,4 @@
-import type { ActiveSession, FunctionInfo, ListingRow } from "../../../protocol";
+import type { ActiveSession, FunctionInfo, ListingRow, OpenResult } from "../../../protocol";
 import type { OpenJob, ProgramLifecycle, ProgramOperations } from "./backend";
 import { AddrMap } from "./addrmap";
 
@@ -7,7 +7,7 @@ export const windowTitle = (name: string | null, dirty: boolean): string =>
   (name ? `${dirty ? "• " : ""}${name} — ` : "") + "Ghidrette";
 
 export type Replacement =
-  | { kind: "opened"; session: ActiveSession }
+  | { kind: "opened"; session: OpenResult }
   | { kind: "failed"; session: ActiveSession | null; error: unknown }
   | { kind: "unknown"; error: unknown; reconciliationError: unknown };
 

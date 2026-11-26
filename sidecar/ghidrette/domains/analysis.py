@@ -126,7 +126,7 @@ class Analysis:
     def _publish(self, **kw):
         with self.lock:
             self.st = st = {**self.st, **kw}
-        self.ctx.notify("analysis_state", dict(st))
+        self.ctx.notify("analysis_state", {"sessionId": self.ses.session_id, **st})
 
     def state(self):
         with self.lock:
@@ -186,7 +186,7 @@ class Analysis:
         self.ctx.project.meta_update(key, analysis="partial", analysisProfile=profile, analyzed=False)
         threading.Thread(target=self._run, args=(prog, key, self.ses.epoch, mon, disabled, profile, upgrade), daemon=True, name="analysis").start()
         st = self.state()
-        self.ctx.notify("analysis_state", st)
+        self.ctx.notify("analysis_state", {"sessionId": self.ses.session_id, **st})
         return st
 
     def _run(self, prog, key, epoch, mon, disabled, profile, upgrade):
