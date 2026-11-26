@@ -30,7 +30,7 @@ async function start() {
   ]);
   if (cfg.decompileTimeout) testTimeout.secs = cfg.decompileTimeout;
   const { controls, instrumented } = autotestBackend(backend, requests);
-  root.render(<App backend={instrumented} onReady={(driver) => {
+  root.render(<App backend={instrumented} autotest onReady={(driver) => {
     void (cfg.bench ? runBench : runAutotest)(cfg.autotest!, { ...driver, ...controls,
       cancelFile: cfg.cancelFile, only: cfg.only, flow: cfg.flow, expect: cfg.expect,
     });

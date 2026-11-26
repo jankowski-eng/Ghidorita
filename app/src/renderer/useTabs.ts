@@ -86,3 +86,5 @@ export function useTabs(decompiler: Decompilation | undefined, onError: (e: unkn
     reset: () => set({ ...emptyTabs, nextId: tabsRef.current.nextId }),
   };
 }
+
+export type TabsApi = ReturnType<typeof useTabs>;
