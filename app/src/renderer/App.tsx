@@ -112,7 +112,16 @@ export function App() {
       return fl;
     } catch (e) {
       if (e instanceof RpcError && e.code === -32002) setNotice("Open cancelled."); // not an error
-      else { fail(e); setNotice("Could not open " + p); }
+      else {
+        fail(e); setNotice("Could not open " + p);
+        if (/save failed before closing/.test(e instanceof Error ? e.message : "")) { // the old program (with its unsaved edits) is still open: show it again
+          try {
+            const [fl, info] = await Promise.all([rpc.call("list_functions", {}), rpc.call("listing_info", {})]);
+            funcsCountRef.current = fl.length; funcsRef.current = fl; setFuncs(fl); setMap(new AddrMap(info.ranges)); setOpened(true); openedRef.current = true;
+            rpc.call("undo_state", {}).then(setUndo, fail);
+          } catch { /* stays closed */ }
+        }
+      }
     } finally { openingRef.current = false; setOpening(null); setProgress(null); }
   };
   const cancelOpen = () => {
@@ -146,9 +155,10 @@ export function App() {
   // ---- editing ----
   const focusKind = (el: Element | null): Focus => {
     if (!el) return "other";
+    // Monaco's own hidden textarea (.inputarea) is the editor; its find widget input is a real text input
+    if (el.matches("input, textarea, select, [contenteditable]") && !el.classList.contains("inputarea")) return "input";
     if (el.closest(".monaco-editor")) return "decompiler";
-    if (el.closest(".lbox")) return "listing";
-    return el.matches("input, textarea, select, [contenteditable]") ? "input" : "other";
+    return el.closest(".lbox") ? "listing" : "other";
   };
   const activeTab = () => { const t = tabsRef.current(); return t.tabs.find((x) => x.id === t.active) ?? null; };
   const send = async (f: () => Promise<unknown>) => { try { await f(); } catch (e) { fail(e); } };
@@ -287,7 +297,12 @@ export function App() {
       setSaving(true);
       (openedRef.current ? rpc.call("save", {}) : Promise.resolve({ saved: false })).then(
         () => window.host.quitReady({ ok: true }),
-        (e) => window.host.quitReady(e instanceof RpcError && e.code === -32001 ? { ok: true } : { ok: false, error: e instanceof Error ? e.message : String(e) }));
+        (e) => {
+          if (e instanceof RpcError && e.code === -32001) return window.host.quitReady({ ok: true });
+          setSaving(false); // the user may cancel the quit in main's "Saving failed" dialog; the app must stay usable
+          fail(e);
+          return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        });
     });
     return () => { off(); offQuit(); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("focusin", pane); };
   }, []);

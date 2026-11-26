@@ -45,15 +45,15 @@ export function EditDialog({ spec, onSubmit, onClose }: {
       if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(-1, s - 1)); return; }
       if ((e.key === "Enter" || e.key === "Tab") && sel >= 0) { e.preventDefault(); setValue(hits[sel].name); setHits([]); setSel(-1); return; }
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(); }
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.target as HTMLElement).tagName !== "BUTTON") { e.preventDefault(); void submit(); }
   };
-  const common = { ref: input, value, disabled: busy, "aria-label": spec.label, "aria-invalid": !!error, "aria-describedby": "edit-err", onKeyDown: onKey,
+  const common = { ref: input, value, disabled: busy, "aria-label": spec.label, "aria-invalid": !!error, "aria-describedby": "edit-err",
     onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => { setValue(e.target.value); setError(""); } };
   return (
-    <div className="dlg"><div className="card" role="dialog" aria-modal="true" aria-label={spec.title}>
+    <div className="dlg"><div className="card" role="dialog" aria-modal="true" aria-label={spec.title} onKeyDown={onKey}>
       <div className="title">{spec.title}</div>
       {spec.field === "comment" && (
-        <label>Comment kind <select aria-label="Comment kind" value={kind} disabled={busy} onChange={(e) => setKind(e.target.value as CommentKind)} onKeyDown={onKey}>
+        <label>Comment kind <select aria-label="Comment kind" value={kind} disabled={busy} onChange={(e) => setKind(e.target.value as CommentKind)}>
           {COMMENT_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}</select></label>
       )}
       <label>{spec.label}

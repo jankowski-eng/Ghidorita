@@ -4,7 +4,7 @@
 Threads: the asyncio loop (dispatch, cancel_*), R (all program reads and ALL writes), O (one open_binary at a time:
 import + analysis + save), and N decompiler workers sharing one queue, each owning a DecompInterface.
 """
-import asyncio, concurrent.futures, hashlib, json, os, queue, signal, sys, threading, time
+import asyncio, concurrent.futures, hashlib, json, os, queue, re, signal, sys, threading, time
 from collections import OrderedDict
 
 import websockets
@@ -227,7 +227,7 @@ class Sidecar:
         return self.proj
 
     # ---- program lifecycle ----
-    def _close(self):
+    def _close(self, strict=False):
         """Run on thread R. Order matters: stop new decompiles, cancel running ones, wait until every worker
         disposed its DecompInterface (on its own thread), only then release the program."""
         prog, res, consumer, lst = self.program, self.results, self.consumer, self.listener
@@ -235,6 +235,9 @@ class Sidecar:
             try:
                 self._save_program(prog, "close")
             except Exception as e:  # noqa
+                if strict:  # replacing the program (open_binary): keep it open rather than drop its unsaved edits
+                    log("close save FAILED, keeping the program open:", repr(e))
+                    raise RuntimeError("save failed before closing the current program, not opening another: %s" % e)
                 log("close save FAILED, edits lost:", repr(e))
         with self.pool_lock:
             self.program = None
@@ -332,7 +335,7 @@ class Sidecar:
         import pyghidra
         res = prog = None
         try:
-            self.on_r(self._close)  # old program goes first (listener removed, cache cleared, interfaces disposed)
+            self.on_r(lambda: self._close(strict=True))  # old program goes first (listener removed, cache cleared, interfaces disposed)
             op.check()
             h, done, size = hashlib.sha256(), 0, max(1, os.path.getsize(path))
             with open(path, "rb") as f:
@@ -351,8 +354,8 @@ class Sidecar:
                     prog, consumer = pyghidra.consume_program(proj, "/" + key)
                 except Exception as e:  # noqa
                     # a SIGKILL during the first (non-atomic) save of an import leaves a registered but unreadable item
-                    if op.cancelled:
-                        raise
+                    if op.cancelled or re.search(r"lock|in use|already open|upgrade", repr(e), re.I):
+                        raise  # not corruption: never delete a program that may hold saved edits
                     log("persisted program unreadable (%r): deleting it and re-importing" % (e,))
                     proj.getProjectData().getFile("/" + key).delete()
                     persisted = False
@@ -1231,7 +1234,8 @@ def main():
         sc.shutdown()
 
     threading.Thread(target=watch_stdin, daemon=True).start()
-    signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=sc.shutdown, daemon=True).start())
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(_sig, lambda *_: threading.Thread(target=sc.shutdown, daemon=True).start())
     asyncio.run(serve())
 
 
