@@ -7,7 +7,7 @@
     "build": "electron-vite build",
     "start": "electron-vite build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/addrmap.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.10",
