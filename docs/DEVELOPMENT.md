@@ -61,7 +61,7 @@ Listing (row cursor: click or arrows): `L` rename label/function, `;` comment (k
 Autotest edit flow: `AUTOTEST=/bin/ls SIDECAR_PROJECTS_DIR=<fresh dir> npm start`, then `AUTOTEST_PHASE=2` with the same dir to check the edit persisted.
 `L` on a row without a label creates one (`create_label`); `;` prefills the chosen kind from `get_comments` and follows the kind selector. View > Strings opens the strings panel (filter, paging, click goes to the address). Import dialog: analysis profile Full or Fast (default Fast above 20 MB).
 Opening shows the program as soon as the import is saved; the analysis runs in the background (status bar: analyzer, count, Cancel; an interrupted analysis shows "Resume", a fast program "Run full analysis"). Edits, undo and redo are Busy while it runs (protocol.md "Analysis"). `bench/bench_background.py` and `bench/bench_headless.py` measure it against `analyzeHeadless`.
-Listing rows show function headers, plate/pre/post/EOL/repeatable comments, all symbols, `XREF[n]` annotations (click to navigate, `X` opens the references panel) and structure/array data folded (click the arrow or Left/Right to unfold); all address spaces (overlay blocks too), addresses above 2^63 unsigned (protocol.md). Pytest for it: `sidecar/test_listing.py` (in-process, hand-built programs). `X` on a decompiler global opens its references; `X` on a temporary (`iVar1`) lists its writes and reads (`variable_uses`), a click navigates and highlights the token. Remaining gaps: SPIKE_REPORT "Round 8: listing completeness" and "Round 8 (second part)". xrefs list memory references and imports, not stack/register references.
+Listing rows show function headers, plate/pre/post/EOL/repeatable comments, all symbols, `XREF[n]` annotations (click to navigate, `X` opens the references panel) and structure/array data folded (click the arrow or Left/Right to unfold); all address spaces (overlay blocks too), addresses above 2^63 unsigned (protocol.md). Pytest for it: `sidecar/test_listing.py` (in-process, hand-built programs). `X` on a decompiler global opens its references; `X` on a temporary (`iVar1`) lists its writes and reads (`variable_uses`), a click navigates and highlights the token. Remaining gaps: SPIKE_REPORT "Round 8: listing completeness" and "Round 8 (second part)". `xrefs_to` lists memory references and imports; stack and register variables go through `xrefs_to_variable`, and `xrefs_from` also returns stack, register and external targets.
 
 ## Packaging (macOS, Apple Silicon)
 
@@ -70,13 +70,15 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home 
 cd app && npm run dist        # -> app/dist/Ghidrette-<ver>-arm64.dmg and app/dist/mac-arm64/Ghidrette.app
 ```
 
+Status: no full `npm run dist` has been recorded since the sidecar became a package (SPIKE_REPORT Round 6, "Not tested"; later rounds added the Java helpers and the fixture provider to the bundle). Treat the bundle description below as the design until a build is run and launched.
+
 `npm run dist` = `packaging/prepare.sh` (stages `app/bundle/`: `jdk`, `ghidra`, `python`, `sidecar`; needs `uv` and network for python-build-standalone) + `electron-vite build` + `electron-builder`. electron-builder was chosen over Forge because `extraResources` + dmg + ad-hoc signing need no plugin chain. The Ghidra checkout and `ghidra-install/` are only read.
 
 What the bundle contains (`Contents/Resources/`):
 - `jdk/`: `jlink` runtime with the modules found by `jdeps -s` over every Ghidra jar and `org.jpype.jar` (java.base, desktop, sql, xml, naming, rmi, management, scripting, net.http, jdk.compiler, jdk.unsupported, …) plus `jdk.zipfs jdk.crypto.ec jdk.management jdk.charsets java.prefs`. Verified by running analysis + decompile + the edit flow with it.
 - `ghidra/`: copy of the distribution minus FunctionID databases, docs, Extensions, Debug (debugger), GhidraServer, BSim, x86_64/other-OS natives, `*-src.zip`, unused `support/` launchers (sizes in `app/bundle/trim-log.txt`). The `os/mac_arm_64` decompiler binary is kept and `chmod +x`'d; electron-builder preserves the mode. Also cut: `Features/FunctionID/data` (195 MB; the Function ID analyzer stays but has no databases, so it names no library functions in PE/ELF binaries). Kept although large: `Features/Base/data/typeinfo` (124 MB, data type archives), all processors.
 - `python/`: python-build-standalone 3.12 with websockets, jpype1, packaging, typing_extensions, pyghidra (wheel from the Ghidra build). Links only against system libs.
-- `sidecar/main.py` and the `sidecar/ghidrette/` package (code layout: [sidecar/ARCHITECTURE.md](sidecar/ARCHITECTURE.md)).
+- `sidecar/main.py` and the `sidecar/ghidrette/` package (code layout: [sidecar/ARCHITECTURE.md](../sidecar/ARCHITECTURE.md)), plus `sidecar/jscans/out/` with the Java helpers compiled by `prepare.sh`.
 
 The PyGhidra launch configuration (`app/src/main/providers.ts`) uses these when `app.isPackaged` (JAVA_HOME, GHIDRA_INSTALL_DIR, PYTHONNOUSERSITE set; the shell's values are ignored); in dev it still uses the env vars and `sidecar/.venv`. `SIDECAR_MAXMEM`, `SIDECAR_ANALYSIS_DISABLE`, `SIDECAR_PROJECTS_DIR` (default `userData/projects`) pass through. Autotest output in the packaged app goes to `userData/out` (asar is read-only). `MOCK`/`AUTOTEST`/`BENCH` work as before.
 
@@ -95,12 +97,10 @@ For Developer ID + notarization later (not attempted):
 - jlink runtime and python-build-standalone per OS/arch; the python path becomes `python/python.exe` on Windows.
 - Ghidra: keep `os/linux_x86_64` or `os/win_x86_64` natives instead of `mac_arm_64` (and decompile binaries become `.exe` on Windows); the `GPL/` demangler natives likewise.
 - Packaging targets (AppImage/deb or NSIS/MSI), no dmg, Windows executable bits not needed; signing via signtool/GPG rather than codesign.
-- `userData` path, default `SIDECAR_PROJECTS_DIR` fallback in `sidecar/main.py` (`~/Library/Application Support/…`) and the macOS menu/dock code.
+- `userData` path, default `SIDECAR_PROJECTS_DIR` fallback in `sidecar/ghidrette/domains/project.py` (`~/Library/Application Support/…`) and the macOS menu/dock code.
 
 ## Navigate and find
 View menu: Symbol Table (Cmd+Shift+Y), Defined Strings (Cmd+Shift+E), Search Memory… (Cmd+Shift+F) open a dock under the panes; each window is server-paged (a click or Enter navigates the listing and the decompiler). Search Memory takes hex bytes with `??` wildcards or ASCII / UTF-16 text and streams pages until done; Cancel keeps what was found, Continue resumes. `X` on a listing row or a decompiler token (also Go > Show References To, and the decompiler context menu) pins the References panel to it ("follow cursor" unpins); its "from…" button lists what the current instruction references.
-
-Backend gaps: listing shows EOL comments only (no pre/plate/post, function headers, xref columns); no way to read non-EOL comments (comment dialog prefills EOL only); `rename_symbol` cannot create a label where none exists.
 
 Data types: View > Data Type Manager (Cmd+Shift+T) or "Data Type Manager" in the command bar (Cmd+K, `>`); Edit > Create Structure from Data… on the listing cursor row. Struct/enum edits are undoable like any edit. The autotest also covers this flow (`AUTOTEST_PHASE=2` checks the struct survived).
 

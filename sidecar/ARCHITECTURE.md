@@ -17,21 +17,27 @@ sidecar/
       session.py       Session = the open program: program, epoch, program_id, session_id (fresh per open, via publish()), undo snapshot, need(), addr(), edit(), cmd(), function()
       events.py        Events = DomainObjectListener, coalescing -> program_changed, subscribe(fn(kinds, ranges, broad)), record(), reset()
       context.py       Ctx = the object every domain gets (below)
+      jscans.py        compiles (javac, when missing or stale) and loads the Java helpers in ../jscans/ through Ghidra's class loader
+      recovery.py      take_recovery_snapshot(): Ghidra's DB recovery snapshot without a GUI (used by program.py's snapshot loop)
       rpc.py           @rpc(lane=...), Registry, Dispatcher (the rules formerly in handle())
       server.py        Server: websocket conn(), one-client rule, auth guard, serve(), shutdown()
     domains/           one module per feature area; each is a class taking ctx, with @rpc methods
       project.py       Ghidra project, programs.json, list_programs, delete_program, list_languages, import_candidates, program_key
       program.py       provider_info, active_session, open_binary (import, save, publish; blocking mode analyzes first; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
       analysis.py      the analysis of the open program on its own thread: start_analysis, cancel_analysis, analysis_status; execute()/Poller/new_monitor shared with blocking opens
-      listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments
-      decompile.py     decompile and variable_uses (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
+      listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments, load_coverage
+      decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
-      highvars.py      rename_variable, retype_variable, auto_create_structure
-      search.py        search_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache
-      layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates)
+      highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference)
+      search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidretteScans)
+      exports.py       export_symbols (JSON symbol map), export_header (C header)
+      layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
       xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from
       datatypes.py     list_data_types and the data-type-manager RPCs
-  test_*.py, testlib.py, conftest.py    tests: one file per domain, black box over WebSocket against real Ghidra on /bin/ls
+  jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
+  test_*.py, testlib.py, conftest.py    tests: mostly one file per domain, black box over WebSocket against real Ghidra on /bin/ls
+  inproc.py            in-process harness (methods called directly on hand-built programs: test_listing.py, test_addresses.py)
+  test_provider_contract.py, test_provider_ui.py   the same browsing contract against the fixture and PyGhidra providers; the built Electron app per provider
 ```
 
 ## Lanes and threads
@@ -42,11 +48,11 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 |---|---|---|
 | `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
 | `edit` | S pool, then R | variable edits decompile and infer structure fields on S, then queue the write on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. Structure inference shares a deadline across the initial decompile, direct callees, and pointer tracing. The commit checks program epoch and write revision |
-| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | symbol table, strings, memory search, `list_data_types`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
-| `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile` only. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
+| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
+| `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile`, `variable_uses`, `function_graph`. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `file` | asyncio file thread | `load_coverage` parses its file without occupying R and checks the program epoch before returning |
-| `project` | R | `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
-| `loop` | the asyncio loop | `cancel_*`: quick, only flip flags |
+| `project` | R | `list_programs`, `delete_program`, `import_candidates`, `list_languages`, `close_program`. `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
+| `loop` | the asyncio loop | `cancel_*`, `provider_info`, `active_session`, `analysis_status`: quick, no Ghidra work |
 | `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | validate, load or import the replacement, then call back onto R with `lanes.on_r()` to save and swap the current program |
 | A | one `analysis` thread per run (`domains/analysis.py`), at most one at a time | Ghidra's AutoAnalysisManager inside the program's one "Analysis" transaction, then clearUndo + save. Never waits for R, so `close()` on R can wait for it. `analysis_status`/`cancel_analysis` are `loop` lane, `start_analysis` is `R` |
 
@@ -90,6 +96,9 @@ Everything a domain shares goes through `ctx`. The only direct calls between dom
 2. `program` -> `analysis`: `analysis.execute/Poller/new_monitor` (the blocking open uses the same engine), `ctx.analysis.start/stop/state/reset`.
 3. `program` -> `project`: `ctx.project` (Ghidra project, `lock`, `meta_touch`) and the persistence-key helpers `project.program_key`,
    `analysis_disabled`, `FAST_PROFILE`, `RAW`, which belong to the key format in protocol.md "Persistence".
+4. `analysis` -> `project`: `FAST_PROFILE` (which analyzers the fast profile skips).
+5. `exports` -> `listing`: `ROW_COMMENT_KINDS`, `SOURCES` (the same comment kinds and symbol sources as the listing rows).
+6. `project` -> `layout`: `file_layout`, `shannon` for the import card.
 
 Shared helpers that are not edges live in `core`: `session.edit()` (one transaction, flushes events), `session.cmd()`, `session.function()`,
 `args.name_arg()`.
