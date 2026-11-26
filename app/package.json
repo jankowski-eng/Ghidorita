@@ -7,7 +7,8 @@
     "build": "electron-vite build",
     "start": "electron-vite build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "dist": "../packaging/prepare.sh && electron-vite build && electron-builder --mac dmg --arm64"
   },
   "devDependencies": {
     "@types/node": "^26.6.10",
@@ -16,6 +17,7 @@
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^41.7.1",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^3.1.0",
     "typescript": "^7.0.2",
     "vite": "^6.4.6"
@@ -27,5 +29,49 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "ws": "^8.23.0"
+  },
+  "build": {
+    "appId": "li.jankowski.ghidrette",
+    "productName": "Ghidrette",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**",
+      "build/icon.png",
+      "package.json",
+      "!node_modules/{monaco-editor,@monaco-editor,react,react-dom,@tanstack}/**"
+    ],
+    "extraResources": [
+      {
+        "from": "bundle/jdk",
+        "to": "jdk"
+      },
+      {
+        "from": "bundle/ghidra",
+        "to": "ghidra"
+      },
+      {
+        "from": "bundle/python",
+        "to": "python"
+      },
+      {
+        "from": "bundle/sidecar",
+        "to": "sidecar"
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "identity": "-",
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "entitlements": "../packaging/entitlements.mac.plist",
+      "entitlementsInherit": "../packaging/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false
+    }
   }
 }

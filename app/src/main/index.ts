@@ -10,6 +10,7 @@ import { validPath } from "./recent";
 
 const appDir = path.resolve(__dirname, "../.."); // app/ (this file is app/out/main/index.js)
 const repo = path.resolve(appDir, "..");
+const outDir = app.isPackaged ? path.join(app.getPath("userData"), "out") : path.join(appDir, "out"); // app.asar is read-only
 let sidecar: ChildProcess | null = null;
 
 const alive = () => !!sidecar && sidecar.exitCode === null && sidecar.signalCode === null;
@@ -69,6 +70,8 @@ function startSidecar(): Promise<number> {
   } else if (process.env.SIDECAR_CMD) {
     // shortcut: whitespace split, no quoting support; use a wrapper script if paths contain spaces
     [cmd, ...args] = process.env.SIDECAR_CMD.split(/\s+/);
+  } else if (app.isPackaged) {
+    cmd = path.join(process.resourcesPath, "python/bin/python3"); args = [path.join(process.resourcesPath, "sidecar/main.py")];
   } else {
     cmd = path.join(repo, "sidecar/.venv/bin/python"); args = [path.join(repo, "sidecar/main.py")];
   }
@@ -76,6 +79,10 @@ function startSidecar(): Promise<number> {
   // the sidecar requires a token: always a fresh random one, and never let the test-only no-auth escape hatch leak in from the shell
   const env: NodeJS.ProcessEnv = { ...process.env, SIDECAR_TOKEN: token, SIDECAR_PROJECTS_DIR: process.env.SIDECAR_PROJECTS_DIR ?? path.join(app.getPath("userData"), "projects") };
   delete env.SIDECAR_ALLOW_NO_AUTH;
+  if (app.isPackaged && !process.env.SIDECAR_CMD) { // bundled runtime; a Homebrew JDK / user site-packages in the launching shell must not leak in
+    env.JAVA_HOME = path.join(process.resourcesPath, "jdk"); env.GHIDRA_INSTALL_DIR = path.join(process.resourcesPath, "ghidra");
+    env.PYTHONNOUSERSITE = "1"; delete env.PYTHONPATH; delete env.PYTHONHOME;
+  }
   sidecar = spawn(cmd, args, { stdio: ["pipe", "pipe", "inherit"], env });
   return new Promise((resolve, reject) => {
     sidecar!.on("error", reject);
@@ -129,10 +136,10 @@ async function finishAutotest(result: { ok: boolean; persist?: unknown }) {
   await new Promise((r) => setTimeout(r, 300)); // let the last paint land
   try {
     const img = await win.webContents.capturePage();
-    mkdirSync(path.join(appDir, "out"), { recursive: true });
-    writeFileSync(path.join(appDir, "out/screenshot.png"), img.toPNG());
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(path.join(outDir, "screenshot.png"), img.toPNG());
   } catch (e) { console.error("screenshot failed", e); }
-  if (result.persist) writeFileSync(path.join(appDir, "out/autotest-persist.json"), JSON.stringify(result.persist));
+  if (result.persist) writeFileSync(path.join(outDir, "autotest-persist.json"), JSON.stringify(result.persist));
   console.log("AUTOTEST_RESULT " + JSON.stringify(result));
 }
 
@@ -141,7 +148,7 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
   let port: number;
   try { port = await startSidecar(); } catch (e) { console.error("sidecar start failed:", e); killSidecarNow(); app.exit(1); return; }
-  ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(appDir, "out/autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null }));
+  ipcMain.handle("get-config", (e) => !fromWin(e) ? null : (rendererReady = true, { expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null }));
   win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidrette", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js") } });
   menu = createMenu({ getWin: () => win, pick: pickFile });
   win.loadFile(path.join(__dirname, "../renderer/index.html"));
