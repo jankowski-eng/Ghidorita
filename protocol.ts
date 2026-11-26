@@ -25,6 +25,8 @@ export const ErrorCode = {
   Cancelled: -32002,
   Timeout: -32003,
   NotFound: -32004,
+  Busy: -32005,            // open_binary in progress (or a second open_binary)
+  InvalidArgument: -32602, // bad/missing params, unparsable type or signature, invalid name
   Internal: -32603,
   MethodNotFound: -32601,
 } as const;
@@ -73,14 +75,46 @@ export interface AddrRange {
 
 export interface Methods {
   open_binary: { params: { path: string }; result: { programId: string; name: string; persisted: boolean } };
+  cancel_open: { params: {}; result: { cancelled: boolean } };
   list_functions: { params: {}; result: FunctionInfo[] };
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
+  // ---- reads ----
+  get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
+  search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
+  xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
+  xrefs_from: { params: { address: Address }; result: XrefFrom[] };
+  list_strings: { params: { offset?: number; limit?: number; minLength?: number }; result: { total: number; items: StringItem[] } };
+  list_data_types: { params: { query: string; limit?: number }; result: DataTypeHit[] };
+  undo_state: { params: {}; result: UndoState };
+  // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
+  rename_symbol: { params: { address: Address; newName: string }; result: {} };
+  set_comment: { params: { address: Address; kind: CommentKind; text: string }; result: {} }; // empty text clears
+  create_function: { params: { address: Address; name?: string }; result: { entry: Address; name: string } };
+  set_function_signature: { params: { entry: Address; signature: string }; result: {} };
+  rename_variable: { params: { entry: Address; name: string; newName: string }; result: {} };
+  retype_variable: { params: { entry: Address; name: string; dataType: string }; result: {} };
+  undo: { params: {}; result: UndoState };
+  redo: { params: {}; result: UndoState };
 }
 
+export type CommentKind = "eol" | "pre" | "post" | "plate" | "repeatable";
+export interface SymbolHit { name: string; address: Address; kind: "function" | "label" | "data" | "external" | "other" }
+export interface XrefTo { from: Address; type: string; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; function: name of function containing `from`
+export interface XrefFrom { to: Address; type: string }
+export interface StringItem { address: Address; value: string; length: number }
+export interface DataTypeHit { name: string; path: string; size: number } // size -1 = dynamic/unsized
+export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string }
+
+/** Coarse classification of a program change; the client refetches what it shows for these kinds. */
+export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "other";
+
 export interface Notifications {
-  progress: { phase: "import" | "analysis" | "ready"; pct: number; message: string };
+  // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
+  progress: { phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
+  // ranges null = unknown/broad, refetch everything. Coalesced ~50 ms. Fired for edits, undo and redo; not during open_binary.
+  program_changed: { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }
