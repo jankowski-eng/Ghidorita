@@ -27,12 +27,12 @@ src/renderer/
     coverage.ts        load / clear coverage runs and repaint
     exports.ts         File > Export (symbol map, C header, Ghidra archive)
     copy.ts            useCopy: copy address / bytes (hex, C array) / decompiled text from the focused pane; clipboard.ts has the writer (navigator.clipboard, then the validated IPC)
-    debug.ts           useDebug: jump to every stop, the first address F9 uses, the attach dialog (the pure helpers are in ../debug.ts; the state is `debug` in the program store, the actions are session.debugAction)
-    exports.ts         File > Export
+    debug.ts           useDebug: jump to every stop, resolve the function of a stop and fetch its variables (checked against the stop and pc), the first address F9 uses, the attach dialog, `stepStatement` (F7/F10/Shift+F10: the statement starts come from the decompiler's line mapping, revalidated before the step goes out); the pure helpers are in ../debug.ts (line for an address, statement range, values after lines, hexdump rows, changed registers)
     reactions.ts       useProgramReactions: program_changed -> tabs, listing rows, xrefs, function list (the decisions are in changes.ts); tabs reset with the program
     bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, Space, focus), quit-save, the autotest driver
   useTabs.ts tabs.ts   decompiler tabs and their results (tabs.ts is the pure part)
   session.ts           open helpers used by store/session.ts: resolveOpen, readBrowsing (first listing page), windowTitle
+  RegistersPanel.tsx LocalsPanel.tsx MemoryPanel.tsx   the debugger's dock tabs (the shown stop's registers, variables with what they were, target memory as a hexdump or through a data type)
   Workbench.tsx        the three panes of the open program; WelcomePane.tsx the program browser; Shell.tsx toolbar, search/go-to bars, dock, status bar, type manager
   autotest/            AUTOTEST=<file> / BENCH=1 scripted modes; a separate chunk, loaded only in those modes
   *.tsx *.ts           components (Listing, Decompiler, panels, dialogs) and pure logic with unit tests (nav, changes, rowcache, address, addrmap, editActions, openOptions, coverage, ...)
@@ -53,11 +53,11 @@ src/renderer/
 
 | store | holds | reset by |
 |---|---|---|
-| `session.store` (`program.ts`) | active program, open lifecycle, progress, functions, address map, first rows, undo/dirty, saving, stats, messages | `program` action when the session id changes |
+| `session.store` (`program.ts`) | active program, open lifecycle, progress, functions, address map, first rows, undo/dirty, the debugger (`debug`, the registers of the last stop, the history of stops and which one the panes show, `shownDebug`), saving, stats, messages | `program` action when the session id changes |
 | `session.views` (`views.ts`) | history, current function, scroll/refetch signals, versions, pinned xref target, dock, bars, dialogs | `reset`: all but pane visibility, the control-flow and call graph toggles, counters and the pending import |
 | `useTabs` | decompiler tabs and results | `onReset` (reactions.ts) |
 | `coverage` (module) | coverage runs | `coverage.clear()` in the session's reset |
 
 ## Tests
 
-`npm test`: the pure logic, plus `store.test.mjs` (reducers), `session.test.mjs` (open/replace/fail/cancel/close and program_changed against an in-memory backend) and `layering.test.mjs`. Scripted end to end: `AUTOTEST=/bin/ls npm start` (mock: `MOCK=1`), `AUTOTEST_PHASE=2` for persistence, and `sidecar/test_provider_ui.py`.
+`npm test`: the pure logic (the debugger's: `debug.test.mjs`), plus `store.test.mjs` (reducers), `session.test.mjs` (open/replace/fail/cancel/close and program_changed against an in-memory backend) and `layering.test.mjs`. Scripted end to end: `AUTOTEST=/bin/ls npm start` (mock: `MOCK=1`), `AUTOTEST_PHASE=2` for persistence, and `sidecar/test_provider_ui.py` (which also runs `AUTOTEST_FLOW=debug`: the debugger through the UI against the mock's fake stopped target).

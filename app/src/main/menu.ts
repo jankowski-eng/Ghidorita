@@ -98,10 +98,11 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "xrefs", label: lab("Show References To", "xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },
       { label: "Debug", submenu: ([
-        ["Attach to QEMU…", "", "attach"], ["Detach", "", "detach"], [null, "", ""],
-        ["Continue", "F5", "continue"], ["Pause", "F6", "pause"], ["Step Over Statement", "F7", "step"], ["Step Into", "F10", "stepinto"], ["Step Out", "Shift+F10", "stepout"], ["Step Instruction", "F8", "stepi"], [null, "", ""], ["Back in History", "Shift+F7", "back"], ["Forward in History", "Shift+F8", "forward"], ["Toggle Breakpoint", "F9", "breakpoint"],
-      ] as const).map(([label, key, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
-        : { id: "debug-" + action, label, accelerator: key || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
+        ["Attach to QEMU…", "attach"], ["Detach", "detach"], [null, ""],
+        ["Continue", "continue"], ["Pause", "pause"], ["Step Over Statement", "step"], ["Step Into", "stepinto"], ["Step Out", "stepout"], ["Step Instruction", "stepi"], [null, ""],
+        ["Back in History", "back"], ["Forward in History", "forward"], ["Toggle Breakpoint", "breakpoint"],
+      ] as const).map(([label, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
+        : { id: "debug-" + action, label, accelerator: acc("debug:" + action), enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
       { role: "windowMenu" },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));

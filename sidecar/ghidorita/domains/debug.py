@@ -5,8 +5,9 @@
 - register names come from the program's language (Ghidra), the gdb numbers from the target's target.xml; a target register the language
   does not know is not listed;
 - a stop reply arrives on the gdb reader thread; a worker thread reads the registers and publishes `debug_state`. The state is per
-  program session: a different session drops the connection.
-Every RPC is on thread R (it needs the language); none waits for the target to run."""
+  program session: Program.close() calls teardown() (a different session or a closed program drops the connection and the breakpoints);
+- a statement step (statement, into, out) runs on its own worker thread, owned by a token, and announces `running`.
+The RPCs are on thread R (they need the language; none waits for the target to run), except debug_values (scan lane: it decompiles)."""
 import queue, threading, time
 
 from ..core.args import MASK64

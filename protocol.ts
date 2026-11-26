@@ -170,7 +170,7 @@ export interface Methods {
   function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
   // Call graph (scan lane, cancel_search; bounded by visited functions and time, `truncated` says a bound hit): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
   call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
-  // Debugger (thread R; the new state arrives as `debug_state`, results are empty except debug_status). debug_attach connects to a GDB remote stub (QEMU's -gdb), reads its register description, stops there and installs the breakpoints; Target error if refused, lost or of another architecture than the program. Breakpoint toggles, continue, step and pause need the target stopped (resp. running for pause): Busy otherwise.
+  // Debugger (thread R, debug_values on the scan lane; the new state arrives as `debug_state`, results are empty except debug_status). debug_attach connects to a GDB remote stub (QEMU's -gdb), reads its register description, stops there and installs the breakpoints; Target error if refused, lost or of another architecture than the program. Breakpoint toggles, continue, step and pause need the target stopped (resp. running for pause): Busy otherwise.
   debug_attach: { params: { host?: string; port?: number; offset?: string }; result: {} }; // offset: hex, runtime address minus program address (default "0x0")
   debug_detach: { params: {}; result: {} };
   debug_status: { params: {}; result: DebugState };
