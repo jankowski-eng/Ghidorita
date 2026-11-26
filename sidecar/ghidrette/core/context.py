@@ -18,6 +18,7 @@ class Ctx:
         self.events = Events(self)
         self.project = None
         self.analysis = None  # domains/analysis.py, set by app.py
+        self.debug = None     # domains/debug.py (its constructor sets it): program.close() tears the debugger down first
         self.shutdown_hooks = []
 
     def notify(self, method, params, generation=None):  # thread-safe

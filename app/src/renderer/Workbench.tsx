@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Address } from "../../../protocol";
-import { bpLines, firstAddress, inFunction, lineForAddress, lineValues, statementRange } from "./debug";
+import { bpLines, firstAddress, lineForAddress, lineValues, statementRange } from "./debug";
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
@@ -43,10 +43,9 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   ];
   const stoppedAt = dbg?.state === "stopped" ? dbg.address ?? null : null, bps = liveDbg?.breakpoints ?? [];
   const toggleBp = (a: Address | null) => { if (a) void s.debugAction("breakpoint", a); };
-  const here_fn = active ? funcs.find((f) => f.entry === active.entry) : undefined;
-  const pcLine = ad && stoppedAt && here_fn && inFunction(here_fn, stoppedAt) ? lineForAddress(ad.tokens, stoppedAt) : null; // only in the function that holds the stop
+  const pcLine = ad && stoppedAt && active && dbg?.fn === active.entry ? lineForAddress(ad.tokens, stoppedAt) : null; // only in the function that holds the stop (the containing-function lookup, not entry + size: bodies can have gaps)
   const stmt = ad && pcLine !== null && stoppedAt ? statementRange(ad.tokens, pcLine, stoppedAt) : null; // the instructions behind the current line
-  const vals = ad && dbg?.values && here_fn && dbg.values.entry === here_fn.entry && pcLine !== null ? lineValues(ad.tokens, ad.text, dbg.values.items, dbg.values.was) : []; // values only in the function that holds the stop
+  const vals = ad && dbg?.values && active && dbg.values.entry === active.entry && pcLine !== null ? lineValues(ad.tokens, ad.text, dbg.values.items, dbg.values.was) : []; // values only in the function that holds the stop
   const bpl = useMemo(() => (ad && bps.length ? bpLines(ad.tokens, bps) : []), [ad?.tokens, bps.join(",")]); // eslint-disable-line
 
   if (!map) return (

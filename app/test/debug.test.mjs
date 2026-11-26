@@ -6,7 +6,7 @@ const load = async (f) => {
   const r = await build({ entryPoints: [new URL(`../src/renderer/${f}`, import.meta.url).pathname], bundle: true, format: "esm", write: false, platform: "node" });
   return import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 };
-const { lineForAddress, firstAddress, bpLines, inFunction, changedRegs, parseTarget, debugLabel } = await load("debug.ts");
+const { lineForAddress, firstAddress, bpLines, changedRegs, parseTarget, debugLabel } = await load("debug.ts");
 const { programReducer, initialProgram } = await load("store/program.ts");
 
 // two statements: line 3 holds 0x1010 and 0x1014, line 4 holds 0x1020; line 5 has no address
@@ -28,8 +28,7 @@ test("firstAddress and bpLines: a line's breakpoint address is its lowest mapped
   assert.deepEqual(bpLines(tokens, []), []);
 });
 
-test("inFunction, parseTarget, debugLabel", () => {
-  assert.ok(inFunction({ entry: "0x1000", size: 0x20 }, "0x101f")); assert.ok(!inFunction({ entry: "0x1000", size: 0x20 }, "0x1020"));
+test("parseTarget, debugLabel", () => {
   assert.deepEqual(parseTarget("localhost:1234"), { host: "localhost", port: 1234 });
   assert.deepEqual(parseTarget(" 10.0.0.2 "), { host: "10.0.0.2", port: 1234 });
   assert.deepEqual(parseTarget(":4321"), { host: "localhost", port: 4321 });
@@ -97,4 +96,15 @@ test("program: stepping back through the recorded stops, values with what they w
   assert.deepEqual(s.debug.values.was, { a: "1" }); assert.deepEqual(s.debugHistory[3].values.items[0].value, "2");
   s = programReducer(s, { type: "debugValues", stop: 99, entry: "0x10", items: [] }); assert.equal(s.debugHistory.length, 4);
   assert.deepEqual(programReducer(s, { type: "debug", state: { state: "detached", target: "", stop: 4, offset: "0x0", breakpoints: [] } }).debugHistory, []);
+});
+
+test("program: the function of a stop is stored per stop; a later stop's lookup does not touch an earlier one", () => {
+  const stop = (n) => ({ type: "debug", state: { state: "stopped", target: "h:1", stop: n, offset: "0x0", breakpoints: [], address: "0x" + n, registers: [{ name: "r0", value: "0x" + n }] } });
+  let s = [stop(1), stop(2)].reduce(programReducer, initialProgram);
+  s = programReducer(s, { type: "debugFunction", stop: 1, entry: "0x10" });
+  assert.equal(s.debugHistory[0].fn, "0x10"); assert.equal(s.debugHistory[1].fn, undefined); assert.equal(s.debug.fn, undefined);
+  s = programReducer(s, { type: "debugFunction", stop: 2, entry: null });
+  assert.equal(s.debug.fn, null);
+  s = programReducer(s, { type: "debug", state: { ...s.debug, breakpoints: ["0x8"], changed: undefined, values: undefined, fn: undefined } }); // a breakpoint toggled at the same stop keeps the lookup
+  assert.equal(s.debug.fn, null); assert.deepEqual(s.debug.breakpoints, ["0x8"]);
 });

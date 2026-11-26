@@ -58,6 +58,7 @@ export type ProgramAction =
   | { type: "analysis"; state: AnalysisState | null }
   | { type: "debug"; state: DebugState }
   | { type: "debugView"; to: "back" | "forward" | "live" }
+  | { type: "debugFunction"; stop: number; entry: Address | null }
   | { type: "debugValues"; stop: number; entry: Address; items: DebugValue[] }
   | { type: "saving"; on: boolean }
   | { type: "stats"; patch: Stats }
@@ -85,7 +86,7 @@ export function programReducer(s: ProgramState, a: ProgramAction): ProgramState 
         const gone = st.state === "detached";
         return { ...s, debug: { ...st, changed: prev?.changed ?? {} }, debugLast: gone ? {} : s.debugLast, debugHistory: gone ? [] : s.debugHistory, debugAt: gone ? null : s.debugAt };
       }
-      if (prev?.state === "stopped" && prev.stop === st.stop) return { ...s, debug: { ...st, changed: prev.changed, values: prev.values } }; // the same stop again (a breakpoint toggled)
+      if (prev?.state === "stopped" && prev.stop === st.stop) return { ...s, debug: { ...st, changed: prev.changed, values: prev.values, fn: prev.fn } }; // the same stop again (a breakpoint toggled)
       const regs = st.registers ?? [], view: DebugView = { ...st, changed: changedRegs(s.debugLast, regs) };
       return { ...s, debug: view, debugLast: regValues(regs), debugHistory: [...s.debugHistory, view].slice(-HISTORY), debugAt: null }; // a new stop returns the panes to the live state
     }
@@ -95,11 +96,17 @@ export function programReducer(s: ProgramState, a: ProgramAction): ProgramState 
       const next = at + (a.to === "back" ? -1 : 1);
       return next < 0 || n === 0 ? s : { ...s, debugAt: next >= n - 1 ? null : next };
     }
+    case "debugFunction": {
+      const i = s.debugHistory.findIndex((v) => v.stop === a.stop);
+      if (i < 0) return s;
+      const history = s.debugHistory.map((v, k) => (k === i ? { ...v, fn: a.entry } : v));
+      return { ...s, debugHistory: history, debug: s.debug?.stop === a.stop ? { ...s.debug, fn: a.entry } : s.debug };
+    }
     case "debugValues": {
       const i = s.debugHistory.findIndex((v) => v.stop === a.stop);
       if (i < 0) return s;
       const before = s.debugHistory[i - 1]?.values, was = before && before.entry === a.entry ? Object.fromEntries(before.items.map((x) => [x.name, x.value])) : {};
-      const view = { ...s.debugHistory[i], values: { entry: a.entry, items: a.items, was } }, history = s.debugHistory.map((v, k) => (k === i ? view : v));
+      const view = { ...s.debugHistory[i], fn: a.entry, values: { entry: a.entry, items: a.items, was } }, history = s.debugHistory.map((v, k) => (k === i ? view : v));
       return { ...s, debugHistory: history, debug: s.debug?.stop === a.stop ? { ...s.debug, values: view.values } : s.debug };
     }
     case "saving": return { ...s, saving: a.on };

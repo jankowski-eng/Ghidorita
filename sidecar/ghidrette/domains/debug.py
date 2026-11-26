@@ -7,7 +7,7 @@
 - a stop reply arrives on the gdb reader thread; a worker thread reads the registers and publishes `debug_state`. The state is per
   program session: a different session drops the connection.
 Every RPC is on thread R (it needs the language); none waits for the target to run."""
-import queue, threading
+import queue, threading, time
 
 from ..core.errors import BUSY, INVALID, NOT_FOUND, TARGET, RpcError, log
 from ..core.gdb import Gdb, GdbError
@@ -35,6 +35,7 @@ class Debug:
         self.regs, self.pc, self.sp, self.big, self.bp_kind = [], None, None, False, 4
         self.worker = False  # a statement step is running on its own thread
         ctx.shutdown_hooks.append(self.close)
+        ctx.debug = self
 
     # ---- state ----
     def snapshot(self):
@@ -65,6 +66,17 @@ class Debug:
             if self.g is None:
                 raise RpcError(TARGET, "Not attached to a target")
             return self.g
+
+    def teardown(self):
+        """Thread R, before a program is closed or replaced: end a statement step (it reads the program), drop the connection, forget the
+        breakpoints and the session they belonged to."""
+        self.cancel.set()
+        self._drop()  # closes the socket: a step waiting on the target fails at once
+        deadline = time.monotonic() + 10
+        while self.worker and time.monotonic() < deadline:
+            time.sleep(0.02)
+        with self.lock:
+            self.bps, self.sid, self.error = [], None, ""
 
     def close(self):  # shutdown hook
         if self.g is not None:
@@ -216,11 +228,18 @@ class Debug:
                     finally:
                         g.sync = None
                     if r is None or r[0] in "WX":
+                        if r is not None:
+                            self._stopped(g, r)  # the target ended: announce it
                         raise RpcError(TARGET, "The target stopped running")
+                    genuine = r[1:3] != "02"  # SIGINT is our own Ctrl-C; anything else (a breakpoint, a signal) is a real stop
                     try:
                         self._z(g, "z" if a in self.bps else "Z", a)
                     finally:
-                        g.resume("c")
+                        if genuine:
+                            self.state = "running"  # announced as the stop it is, the target stays stopped
+                            self._stopped(g, r)
+                        else:
+                            g.resume("c")
                 elif self.state != "stopped" or self.worker:
                     raise RpcError(BUSY, "Pause the target before changing breakpoints")
                 else:
@@ -303,35 +322,43 @@ class Debug:
                     break
                 npc = self._pc_of(g)
                 inside = body is not None and body.contains(space.getAddress(npc))
-                if npc in self.bps or (inside and npc in starts):
+                if npc in self.bps:
                     break
-                if body is None:
-                    break
-                if inside or ins is None:
-                    pc = npc
+                after = ins.getFallThrough() if ins is not None and ins.getFlowType().isCall() else None
+                if after is not None and npc != after.getOffset():  # a call was taken (a recursive one stays inside the body)
+                    if mode == "into":
+                        break
+                    back, temp = after.getOffset(), after.getOffset() not in self.bps
+                    if temp:
+                        self._z(g, "Z", back)
+                    try:
+                        while True:
+                            r = g.resume("c", wait=True, timeout=CALL_SECS)
+                            if r[0] in "WX" or self.cancel.is_set():
+                                break
+                            pc = self._pc_of(g)
+                            sp = self._sp_of(g)
+                            if pc != back or pc in self.bps or sp0 is None or sp is None or sp >= sp0:
+                                break
+                            # a deeper (recursive) frame returned to the same address: step off the temporary breakpoint, put it back, go on
+                            self._z(g, "z", back)
+                            r = g.resume("s", wait=True)
+                            self._z(g, "Z", back)
+                            if r[0] in "WX" or self.cancel.is_set():
+                                break
+                    finally:
+                        if temp and not g.closed:
+                            self._z(g, "z", back)
+                    if r[0] in "WX" or self.cancel.is_set() or pc != back or pc in self.bps or (pc in starts and mode != "out"):
+                        break
                     continue
-                if not ins.getFlowType().isCall() or mode == "into":  # left the function by a return or a jump (or into a callee): stop there
+                if ins is not None and ins.getFlowType().isTerminal():  # a return (or an exit): this frame is done, also when the caller is the same function
                     break
-                after = ins.getFallThrough()
-                if after is None:
+                if body is None or not inside:  # left the function by a jump (a tail call)
                     break
-                back, temp = after.getOffset(), after.getOffset() not in self.bps
-                if temp:
-                    self._z(g, "Z", back)
-                try:
-                    while True:
-                        r = g.resume("c", wait=True, timeout=CALL_SECS)
-                        if r[0] in "WX" or self.cancel.is_set():
-                            break
-                        pc = self._pc_of(g)
-                        sp = self._sp_of(g)
-                        if pc != back or pc in self.bps or sp0 is None or sp is None or sp >= sp0:  # a deeper frame returning to the same address has a lower sp
-                            break
-                finally:
-                    if temp and not g.closed:
-                        self._z(g, "z", back)
-                if r[0] in "WX" or self.cancel.is_set() or pc != back or pc in self.bps or pc in starts:  # a breakpoint or pause inside the callee, or the next statement begins right after the call
+                if npc in starts and mode != "out":
                     break
+                pc = npc
             self.worker = False  # before the stop is announced: the client's next step must find the target free
             self._stopped(g, r)
         except (GdbError, RpcError) as e:
@@ -466,7 +493,7 @@ class Debug:
         from .decompile import decompile_for_edit
         g = self._stopped_live()
         with self.lock:
-            pc, regs = self.address, {r["name"]: int(r["value"], 16) for r in self.registers}
+            pc, gen, regs = self.address, self.stops, {r["name"]: int(r["value"], 16) for r in self.registers}
         with self.ctx.lanes.scanning(scan) as prog:
             func = prog.getFunctionManager().getFunctionAt(self.ses.addr(entry, prog))
             if func is None:
@@ -492,34 +519,42 @@ class Debug:
                     if not 0 < size <= VALUE_MAX:
                         continue
                     places.append((("param" if sym.isParameter() else kind), str(sym.getName()), sym.getDataType(), size, st))
-            items = []
-            for kind, name, dt, size, st in places[:ITEMS_MAX]:
-                where, raw = None, None
-                try:
-                    if st.isStackStorage():
-                        if sp is None or depth is None:
-                            continue
-                        addr = (sp - depth + int(st.getStackOffset())) & ((1 << 64) - 1)
-                        where, data = "stack%+d" % int(st.getStackOffset()), self._read_mem(g, addr, size)
-                    elif st.isRegisterStorage():
-                        reg = st.getRegister()
-                        base = reg.getBaseRegister()
-                        v = regs.get(str(base.getName()))
-                        if v is None:
-                            continue
-                        where = str(reg.getName())
-                        data = (((v >> int(reg.getLeastSignificantBit())) & ((1 << (size * 8)) - 1))).to_bytes(size, "big" if self.big else "little")
-                    elif st.isMemoryStorage():
-                        addr = int(st.getMinAddress().getOffset())
-                        where, data = hex(addr), self._read_mem(g, addr + self.offset, size)
-                    else:
-                        continue
-                except RpcError:
-                    continue  # unreadable (an unmapped address): leave it out
-                try:
-                    value = self._represent(prog, dt, data, 0)
-                except Exception:  # noqa
-                    value = "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()
-                items.append({"name": name, "kind": kind, "type": str(dt.getName()), "size": size, "where": where, "value": value,
-                              "raw": "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()})
+            with self.lock:  # run control takes this lock too: the memory read belongs to the stop the registers and the pc came from
+                if self.g is not g or self.state != "stopped" or self.stops != gen:
+                    raise RpcError(BUSY, "The target moved on while the values were computed")
+                items = self._sample(prog, g, places, regs, depth)
             return {"pc": hex(pc) if pc is not None else None, "items": items}
+
+    def _sample(self, prog, g, places, regs, depth):
+        sp = regs.get(self.sp)
+        items = []
+        for kind, name, dt, size, st in places[:ITEMS_MAX]:
+            where, raw = None, None
+            try:
+                if st.isStackStorage():
+                    if sp is None or depth is None:
+                        continue
+                    addr = (sp - depth + int(st.getStackOffset())) & ((1 << 64) - 1)
+                    where, data = "stack%+d" % int(st.getStackOffset()), self._read_mem(g, addr, size)
+                elif st.isRegisterStorage():
+                    reg = st.getRegister()
+                    base = reg.getBaseRegister()
+                    v = regs.get(str(base.getName()))
+                    if v is None:
+                        continue
+                    where = str(reg.getName())
+                    data = (((v >> int(reg.getLeastSignificantBit())) & ((1 << (size * 8)) - 1))).to_bytes(size, "big" if self.big else "little")
+                elif st.isMemoryStorage():
+                    addr = int(st.getMinAddress().getOffset())
+                    where, data = hex(addr), self._read_mem(g, addr + self.offset, size)
+                else:
+                    continue
+            except RpcError:
+                continue  # unreadable (an unmapped address): leave it out
+            try:
+                value = self._represent(prog, dt, data, 0)
+            except Exception:  # noqa
+                value = "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()
+            items.append({"name": name, "kind": kind, "type": str(dt.getName()), "size": size, "where": where, "value": value,
+                          "raw": "0x" + int.from_bytes(data, "big" if self.big else "little").to_bytes(size, "big").hex()})
+        return items

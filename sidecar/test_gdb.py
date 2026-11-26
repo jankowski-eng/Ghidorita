@@ -61,3 +61,18 @@ def test_connection_refused_in_plain_words():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
     with pytest.raises(GdbError, match="refused"):
         Gdb("127.0.0.1", port, print, print)
+
+
+def test_unanswered_request_gives_the_connection_up():
+    """Replies carry no request id: after a timeout a late reply could answer the next request, so the connection is closed and reported lost."""
+    def script(read, send, c):
+        assert read() == "p0"  # never answered
+        assert read() is None  # the client closed the socket
+    port = serve(script)
+    lost = queue.Queue()
+    g = Gdb("127.0.0.1", port, print, lambda: lost.put(1))
+    with pytest.raises(GdbError, match="did not answer"):
+        g.request("p0", timeout=0.2)
+    assert lost.get(timeout=3) == 1 and g.closed
+    with pytest.raises(GdbError):
+        g.request("p0")

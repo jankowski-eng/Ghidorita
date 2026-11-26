@@ -3,6 +3,7 @@ import type { Address, DebugState, DebugValue, Token } from "../../../protocol";
 /** The debugger state the store keeps: the provider's state plus the registers that differ from the previous stop. */
 export type DebugView = DebugState & {
   changed: Record<string, string>; // register -> its value at the stop before
+  fn?: Address | null;             // the entry of the function that holds the stop (null: none), once looked up
   values?: { entry: Address; items: DebugValue[]; was: Record<string, string> }; // the function's variables at this stop; was: name -> value at the stop before (same function)
 };
 
@@ -44,12 +45,6 @@ export function debugLabel(d: DebugState | null): string {
   if (!d) return "";
   if (d.state === "stopped") return `stopped at ${d.address}`;
   return d.state === "running" ? "running" : d.error ? `detached (${d.error})` : "detached";
-}
-
-/** True when the function (entry, size) holds `pc`; a body with gaps counts as its span. */
-export function inFunction(f: { entry: Address; size: number }, pc: Address): boolean {
-  const e = num(f.entry), p = num(pc);
-  return e !== null && p !== null && p >= e && p < e + BigInt(Math.max(f.size, 1));
 }
 
 /** The decompiler lines (0-based) whose first address has a breakpoint. */

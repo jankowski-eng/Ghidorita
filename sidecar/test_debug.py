@@ -9,6 +9,7 @@ from testlib import HERE, INVALID, Client, Proc, run
 QEMU = shutil.which("qemu-system-arm") or ("/opt/homebrew/bin/qemu-system-arm" if os.path.exists("/opt/homebrew/bin/qemu-system-arm") else None)
 FW = os.path.join(HERE, "testdata", "fw", "fw.bin")
 WORK_A, WORK_B, MAIN, SCALE, TARGET = "0x8", "0x18", "0x28", "0x54", -32008
+FACT = "0xa4"
 
 
 def free_port():
@@ -82,12 +83,14 @@ def test_attach_break_continue_step_detach(qemu, proc):
             n, st3 = await stop_at(c, n)
             assert st3["address"] == WORK_A
             await c.ok("debug_breakpoint", address=WORK_A)  # toggled off while stopped
-            assert (await stop_at(c, n, "stopped"))[1]["breakpoints"] == []
+            n, st = await stop_at(c, n, "stopped")  # the toggle announces the same stop again
+            assert st["breakpoints"] == []
             await c.ok("debug_continue")
+            n, _ = await stop_at(c, n, "running")
             await asyncio.sleep(0.3)
             await c.ok("debug_pause")
-            n, st4 = await stop_at(c, n)
-            assert st4["state"] == "stopped" and int(st4["address"], 16) < 0x40
+            n, st4 = await stop_at(c, n)  # a stop after the pause (the cursor is past the running announcement)
+            assert st4["state"] == "stopped" and st4["stop"] > st["stop"] and int(st4["address"], 16) < 0x100, st4  # anywhere in the image, `scale` and `fact` included
             await c.ok("debug_detach")
             assert (await stop_at(c, n, "detached"))[1]["state"] == "detached"
             assert (await c.ok("debug_status"))["state"] == "detached"
@@ -139,9 +142,10 @@ def test_statement_step(qemu, proc):
 
 async def open_fw(c):
     await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x0")
-    await c.ok("clear_code", address=WORK_A, length=0x90)  # a raw image has no functions yet: the analysis left data after the vectors
-    for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop"), (SCALE, "scale")):
-        await c.ok("create_function", address=a, name=n)
+    await c.ok("clear_code", address=WORK_A, length=os.path.getsize(FW) - 8)  # a raw image has no functions yet: the analysis left data after the vectors
+    for a, n in ((WORK_A, "work_a"), (WORK_B, "work_b"), (MAIN, "main_loop"), (SCALE, "scale"), (FACT, "fact")):
+        await c.call("create_function", address=a, name=n)  # a call target may already have become a function
+    assert {WORK_A, WORK_B, MAIN, SCALE, FACT} <= {f["entry"] for f in await c.ok("list_functions")}
 
 
 def test_memory_values_into_out_and_live_breakpoints(qemu, proc):
@@ -257,5 +261,44 @@ def test_stack_parameters_of_an_unoptimised_function(qemu, proc):
             v = await c.ok("debug_values", entry=SCALE)
             stack = [i for i in v["items"] if i["where"].startswith("stack")]
             assert [i["raw"] for i in stack] == ["0x00000005", "0x00000006"], v  # scale(counter, 2, 3, 4, 5, 6): e and f from the frame
+            await c.ok("debug_detach")
+    run(go())
+
+
+def test_step_out_of_a_recursive_function(qemu, proc):
+    """fact(3) calls itself: step out from the outer frame runs the inner calls over (their returns land inside the same body, one frame deeper) and stops in scale."""
+    async def go():
+        async with Client(proc.port) as c:
+            await open_fw(c)
+            await c.ok("debug_breakpoint", address=FACT)
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu)
+            n, st = await stop_at(c)
+            await c.ok("debug_continue")
+            n, st = await stop_at(c, n)
+            assert st["address"] == FACT, st["address"]
+            await c.ok("debug_breakpoint", address=FACT)  # off: the inner calls must not stop the step
+            n, _ = await stop_at(c, n)
+            await c.ok("debug_step", mode="out")
+            n, st = await stop_at(c, n, "stopped")
+            assert int(SCALE, 16) <= int(st["address"], 16) < int(FACT, 16), st["address"]  # back in scale, not in a deeper fact frame
+            await c.ok("debug_detach")
+    run(go())
+
+
+def test_replacing_the_program_tears_the_debugger_down(qemu, proc):
+    """The connection, the breakpoints and a step worker belong to the program: opening another one drops them, and the next attach starts clean."""
+    async def go():
+        async with Client(proc.port) as c:
+            await open_fw(c)
+            await c.ok("debug_breakpoint", address=WORK_A)
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu)
+            n, st = await stop_at(c)
+            await c.ok("open_binary", path=FW, loader="Raw Binary", language="ARM:LE:32:Cortex", baseAddress="0x1000")  # another program key: a replacement
+            n, st = await stop_at(c, n, "detached")
+            s = await c.ok("debug_status")
+            assert s["state"] == "detached" and s["breakpoints"] == [] and not s.get("error"), s
+            await c.ok("debug_attach", host="127.0.0.1", port=qemu)  # the gdbstub took the old client's disconnect: a new attach works
+            n, st = await stop_at(c, n)
+            assert st["breakpoints"] == [], st
             await c.ok("debug_detach")
     run(go())

@@ -22,15 +22,17 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
     }
     was.current = store.getState().debug?.state ?? "detached";
   }, [state, stop, at]); // eslint-disable-line
-  useEffect(() => { // the variables of the function at a new stop (best effort: a function without a decompile or readable memory shows none)
+  useEffect(() => { // the function that holds a new stop, then its variables (best effort: no decompile or unreadable memory shows none)
     const d = store.getState().debug, current = s.program();
     if (!current || !d || d.state !== "stopped" || !d.address) return;
-    const address = d.address, n = d.stop;
+    const address = d.address, n = d.stop, same = () => s.program() === current && store.getState().debug?.stop === n; // a later stop makes this one obsolete
     void (async () => {
       const f = await current.lookup.containing(address);
+      if (!same()) return;
+      store.dispatch({ type: "debugFunction", stop: n, entry: f?.entry ?? null });
       if (!f) return;
       const r = await current.api.debug.values({ entry: f.entry }).result;
-      if (s.program() === current) store.dispatch({ type: "debugValues", stop: n, entry: f.entry, items: r.items });
+      if (same() && r.pc === address) store.dispatch({ type: "debugValues", stop: n, entry: f.entry, items: r.items }); // the sidecar read the same stop
     })().catch(() => {});
   }, [stop]); // eslint-disable-line
 
@@ -51,6 +53,7 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
   const stepStatement = async (mode: "statement" | "into" | "out" = "statement") => {
     const current = s.program(), d = store.getState().debug;
     if (!current || !d || d.state !== "stopped" || !d.address) return void s.debugAction("step");
+    const n = d.stop, same = () => s.program() === current && store.getState().debug?.stop === n && store.getState().debug?.state === "stopped"; // the target may have moved while we looked
     if (mode === "out") return void s.debugAction("step", undefined, { mode });
     let starts: Address[] = [];
     try {
@@ -58,6 +61,7 @@ export function useDebug(nav: Navigation, tabs: TabsApi) {
       const tab = f && tabs.state.tabs.find((t) => t.entry === f.entry), data = tab ? tabs.data[tab.id] : undefined;
       if (f && s.caps.has("decompile")) starts = lineStarts(data?.status === "ready" ? data.tokens : (await current.api.decompiler.decompile({ entry: f.entry }).result).tokens);
     } catch (e) { s.fail(e); return; }
+    if (!same()) return; // not the stop these boundaries belong to: do nothing rather than step a different one
     if (!starts.length) { s.flash("No decompiler lines here: stepped one instruction."); return void s.debugAction("step"); }
     await s.debugAction("step", undefined, { mode, boundaries: starts });
   };

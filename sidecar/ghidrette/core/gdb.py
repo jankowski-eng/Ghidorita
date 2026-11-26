@@ -96,16 +96,20 @@ class Gdb:
 
     def request(self, payload, timeout=5.0):
         with self.lock:
-            while not self.replies.empty():  # a stale reply (after a timeout) must not answer this request
+            while not self.replies.empty():  # a stale reply must not answer this request
                 self.replies.get_nowait()
             self._send(frame(payload))
             try:
                 r = self.replies.get(timeout=timeout)
             except queue.Empty:
-                raise GdbError("The target did not answer")
-            if r is None:
-                raise GdbError("Lost the connection to the target")
-            return r
+                r = False
+        if r is False:  # replies carry no request id: a late one could answer the next request, so the connection is given up
+            self.close(polite=False)
+            self.on_lost()
+            raise GdbError("The target did not answer; the connection was closed")
+        if r is None:
+            raise GdbError("Lost the connection to the target")
+        return r
 
     def resume(self, payload, wait=False, timeout=5.0):
         """`c` or `s`. Without wait the stop reply goes to on_stop; with wait it is returned here."""
