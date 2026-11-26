@@ -21,7 +21,7 @@ def thin_binary(tmp_path):
 
 def test_smoke(tmp_path):
     timings = {}
-    env = dict(os.environ, GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(tmp_path / "projects"))
+    env = dict(os.environ, SIDECAR_ALLOW_NO_AUTH="1", GHIDRA_INSTALL_DIR=ghidra_dir(), JAVA_HOME=JAVA, SIDECAR_PROJECTS_DIR=str(tmp_path / "projects"))
     t0 = time.monotonic()
     p = subprocess.Popen([sys.executable, os.path.join(HERE, "main.py")], stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, env=env)
