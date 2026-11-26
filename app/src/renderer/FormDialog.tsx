@@ -54,16 +54,17 @@ export function FormDialog({ typeSearch, title, fields, submit, onSubmit, onClos
   const [vals, setVals] = useState(() => Object.fromEntries(fields.map((f) => [f.key, f.initial ?? ""])));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [pv, setPv] = useState<{ message: string; ok: boolean } | null>(null);
+  const [pv, setPv] = useState<{ message: string; ok: boolean; for: Record<string, string> } | null>(null); // the result and the inputs it was computed for
   const settled = useDebounced(vals, 250);
   useEffect(() => {
     if (!preview) return;
     let live = true;
     const job = preview(settled);
-    job.result.then((r) => { if (live) setPv(r); }, (e) => { if (live) setPv({ message: e instanceof Error ? e.message : String(e), ok: false }); });
+    job.result.then((r) => { if (live) setPv({ ...r, for: settled }); }, (e) => { if (live) setPv({ message: e instanceof Error ? e.message : String(e), ok: false, for: settled }); });
     return () => { live = false; job.cancel(); };
   }, [settled]); // eslint-disable-line
-  const ready = !preview || (!!pv?.ok && settled === vals);
+  const fresh = !!pv && pv.for === vals; // a preview counts only for the exact inputs now in the form
+  const ready = !preview || (fresh && pv!.ok);
   const go = async () => {
     if (busy || !ready) return;
     setBusy(true); setError("");
@@ -90,7 +91,7 @@ export function FormDialog({ typeSearch, title, fields, submit, onSubmit, onClos
               {f.choices?.length ? <datalist id={"choices-" + f.key}>{f.choices.map((c) => <option key={c} value={c} />)}</datalist> : null}</>}
         </label>
       ))}
-      {preview && <div className={pv?.ok && settled === vals ? "pv" : "pv wait"} role="status" aria-label="Preview">{settled === vals && pv ? pv.message : "…"}</div>}
+      {preview && <div className={fresh && pv!.ok ? "pv" : "pv wait"} role="status" aria-label="Preview">{fresh ? pv!.message : "…"}</div>}
       <div className="err" role="alert">{error}</div>
       <div className="btns">
         <button onClick={onClose} disabled={busy} aria-label={`Cancel ${title}`}>Cancel</button>

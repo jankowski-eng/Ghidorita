@@ -4,7 +4,7 @@ import { allowsCommand } from "../../capabilities";
 import type { MenuCommand, MenuState } from "../../preload/index";
 import { windowTitle } from "../session";
 import { useProgram, useSession, useViews, type Session } from "../store/session";
-import type { Views } from "../store/views";
+import { clearTrail, type Views } from "../store/views";
 import type { EditAction } from "../editActions";
 import { requestOpen } from "./dialogs";
 import { applyLayout, movePane, removeLayout, saveCurrentLayout } from "./layouts";
@@ -37,7 +37,7 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "dock") { if (opened()) set({ dock: c.panel }); }
   else if (c.type === "xrefs") t.showXrefs();
   else if (c.type === "trail") t.trail();
-  else if (c.type === "trail-clear") set({ trail: null });
+  else if (c.type === "trail-clear") views.dispatch({ type: "set", patch: clearTrail });
   else if (c.type === "copy") void t.copy(c.what);
   else if (c.type === "export") void exportAs(s, c.kind);
   else if (c.type === "debug") {

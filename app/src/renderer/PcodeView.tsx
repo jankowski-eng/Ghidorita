@@ -15,13 +15,14 @@ export function PcodeView({ source, entry, cursor, version, onGo }: { source: De
   const [res, setRes] = useState<PcodeResult | null>(null), [err, setErr] = useState(""), [mode, setMode] = useState<PcodeMode>("high");
   useEffect(() => {
     let live = true;
-    setErr("");
+    setErr(""); setRes(null); // never show the previous function's p-code under the new one
     const job = source({ entry });
     job.result.then((r) => { if (live) setRes(r); }, (e) => { if (live && !isCancelled(e) && !isNoProgram(e)) { setRes(null); setErr(e instanceof Error ? e.message : String(e)); } });
     return () => { live = false; job.cancel(); };
   }, [source, entry, version]);
   const lines = useMemo(() => (res ? pcodeLines(res, mode) : []), [res, mode]);
-  const cur = useMemo(() => linesAt(lines, cursor), [lines, cursor]);
+  const instrs = useMemo(() => (res ? res.raw.map((i) => i.address) : []), [res]);
+  const cur = useMemo(() => linesAt(lines, cursor, instrs), [lines, cursor, instrs]);
   const box = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: lines.length, getScrollElement: () => box.current, estimateSize: () => LH, overscan: 20 });
   useEffect(() => { if (cur.length) v.scrollToIndex(cur[0], { align: "auto" }); }, [cur[0], lines]); // eslint-disable-line
@@ -37,8 +38,8 @@ export function PcodeView({ source, entry, cursor, version, onGo }: { source: De
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
           {v.getVirtualItems().map((it) => {
             const l = lines[it.index];
-            return <div key={it.index} role="row" className={"pc-line" + (l.head ? " head" : "") + (cur.includes(it.index) ? " cur" : "")} aria-current={cur[0] === it.index ? "true" : undefined}
-              style={{ position: "absolute", top: 0, left: 0, right: 0, height: LH, transform: `translateY(${it.start}px)` }} onClick={() => l.address && onGo(l.address)}>{l.text}</div>;
+            return <div key={it.index} role="row" className={"pc-line" + (l.head ? " head" : "") + (cur.includes(it.index) ? " cur" : "")} aria-current={cur[0] === it.index ? "true" : undefined} tabIndex={l.address ? 0 : undefined} aria-label={l.address ? `${l.text} (Enter goes to ${l.address})` : undefined}
+              style={{ position: "absolute", top: 0, left: 0, right: 0, height: LH, transform: `translateY(${it.start}px)` }} onClick={() => l.address && onGo(l.address)} onKeyDown={(e) => { if (l.address && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onGo(l.address); } }}>{l.text}</div>;
           })}
         </div>
       </div>

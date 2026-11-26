@@ -4,6 +4,7 @@ import type { AutotestCtx, AutotestControls } from "../autotest/autotest";
 import { isObsolete } from "../backend";
 import { undoRoute, type EditAction } from "../editActions";
 import { useSession } from "../store/session";
+import { clearTrail } from "../store/views";
 import { focusKind } from "./editing";
 import { KEYS, matchesKey } from "../../keys";
 import type { MenuCommand } from "../../preload/index";
@@ -70,7 +71,7 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
     // Esc clears the value trail (not while a dialog or the command bar is up: their Esc closes them)
     const trailEsc = (e: KeyboardEvent) => {
       const v = s.views.getState();
-      if (e.key === "Escape" && v.trail && !v.dlg && !v.formDlg && !v.searchOpen && !v.gotoOpen && !v.importFor) s.views.dispatch({ type: "set", patch: { trail: null } });
+      if (e.key === "Escape" && v.trail && !v.dlg && !v.formDlg && !v.searchOpen && !v.gotoOpen && !v.importFor) s.views.dispatch({ type: "set", patch: clearTrail });
     };
     window.addEventListener("keydown", trailEsc);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") refs.lastPane.current = k; };

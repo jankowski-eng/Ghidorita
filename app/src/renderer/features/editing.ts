@@ -194,7 +194,7 @@ export function useEditing(tabs: TabsApi) {
     }
   };
   // J: the value trail of the decompiler variable under the cursor (a scan-like job: a newer one or Esc cancels the older)
-  const trailJob = { cancel: (() => {}) as () => void };
+  const trailJob = useRef({ cancel: (() => {}) as () => void }).current; // one per hook, not per render
   const trail = () => {
     const current = session.program();
     if (!current || session.blocked() || !caps.has("valueTrail")) return;
@@ -202,12 +202,14 @@ export function useEditing(tabs: TabsApi) {
     const tok = d && pos ? tokenAt(d.tokens, pos.lineNumber, pos.column) : undefined;
     if (!tab || !tok || !tok.varName || (tok.kind !== "variable" && tok.kind !== "param")) return session.flash("Put the cursor on a variable to trace its value.");
     trailJob.cancel();
+    const seq = views.getState().trailSeq + 1;
+    views.dispatch({ type: "set", patch: { trailSeq: seq } }); // this request is now the newest; Esc, a program change or another J bumps it again
     const job = current.api.decompiler.valueTrail({ entry: tab.entry, name: tok.varName, line: tok.line, colStart: tok.colStart });
     trailJob.cancel = job.cancel;
     const name = tok.varName;
     void session.send(async () => {
       const r = await job.result;
-      if (session.program() !== current) return;
+      if (session.program() !== current || views.getState().trailSeq !== seq) return;
       views.dispatch({ type: "set", patch: { trail: { entry: tab.entry, name, trail: r } } });
     });
   };

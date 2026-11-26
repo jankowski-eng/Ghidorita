@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 
 const bundle = async (f) => import("data:text/javascript," + encodeURIComponent((await build({ entryPoints: [new URL(`../src/renderer/${f}`, import.meta.url).pathname], bundle: true, format: "esm", write: false })).outputFiles[0].text));
-const { hexLayout, segAt, rowOf, formatRow, parseHex } = await bundle("hex.ts");
+const { hexLayout, segAt, rowOf, formatRow, parseHex, stepByte } = await bundle("hex.ts");
 
 const L = hexLayout([{ start: "0x1008", size: 0x20 }, { start: "0x1040", size: 0x10 }, { start: "code:10", size: 4 }]);
 
@@ -57,4 +57,15 @@ test("parseHex", () => {
   assert.deepEqual(parseHex("48 8b 05", 3), [0x48, 0x8b, 5]);
   assert.equal(parseHex("48 8b", 3), null);
   assert.equal(parseHex("48 zz", 2), null);
+});
+
+test("stepByte moves over mapped bytes only: across a gap it lands on the next mapped byte, at the ends it stops", () => {
+  assert.deepEqual(stepByte(L, "", 0x1008n, 1), { space: "", off: 0x1009n });
+  assert.deepEqual(stepByte(L, "", 0x1008n, 16), { space: "", off: 0x1018n });
+  assert.deepEqual(stepByte(L, "", 0x1027n, 1), { space: "", off: 0x1040n });   // over the gap 0x1028..0x103f
+  assert.deepEqual(stepByte(L, "", 0x1040n, -1), { space: "", off: 0x1027n });
+  assert.deepEqual(stepByte(L, "", 0x1020n, 16), { space: "", off: 0x1040n });  // a row down into the gap: the next range
+  assert.deepEqual(stepByte(L, "", 0x1008n, -1), null);                        // first byte
+  assert.deepEqual(stepByte(L, "", 0x104fn, 1), null);                         // last byte of the last range in that space
+  assert.equal(stepByte(L, "", 0x1030n, 1), null);                             // not on a mapped byte
 });

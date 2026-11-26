@@ -8,7 +8,7 @@ export interface Layout { order: PaneId[]; visible: Record<PaneId, boolean>; siz
 
 export const DEFAULT_NAME = "Default";
 export const PANES: readonly PaneId[] = ["functions", "listing", "decompiler"];
-export const DOCKS = ["strings", "symbols", "memsearch", "changes", "coverage", "calls", "bookmarks", "hex"] as const satisfies readonly DockId[];
+export const DOCKS = ["strings", "symbols", "memsearch", "changes", "coverage", "calls", "bookmarks", "stack", "undefined", "hex"] as const satisfies readonly DockId[];
 const CENTERS: readonly Center[] = ["c", "graph", "callgraph", "pcode"];
 export const MIN = 120, MAX = 2000;
 export const KEY = "ghidorita.layouts.v1", OLD_KEY = "ghidra.layout.v1"; // OLD_KEY: the sizes saved before named layouts existed

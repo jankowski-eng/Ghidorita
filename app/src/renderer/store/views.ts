@@ -24,6 +24,7 @@ export interface Views {
   xrefVersion: number;
   cursorAt: Address | null;            // the shared cursor: the listing row or decompiler token last clicked or moved to (the hex view follows it)
   xrefTarget: XrefTarget | null;       // pinned "show references" target; null = follow the cursor
+  trailSeq: number;                    // bumped whenever a trail starts or is cleared (Esc, command, a program change): a reply for an older one is dropped
   trail: { entry: Address; name: string; trail: ValueTrail } | null; // the value trail shown in the decompiler and listing (Esc clears it)
   useHl: { name: string; address: Address } | null; // a clicked decompiler-variable use: its token is highlighted
   dock: DockId | null;
@@ -42,7 +43,7 @@ export interface Views {
   importFor: string | null;
 }
 export const initialViews: Views = {
-  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, useHl: null,
+  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, trailSeq: 0, useHl: null,
   dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
   visible: { functions: true, listing: true, decompiler: true }, paneOrder: ["functions", "listing", "decompiler"], paneSizes: { functions: 260, listing: 560 }, layoutNames: ["Default"], dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };
@@ -51,8 +52,11 @@ export type ViewsAction = { type: "set"; patch: Partial<Views> | ((v: Views) => 
 export function viewsReducer(v: Views, a: ViewsAction): Views {
   if (a.type === "set") return { ...v, ...(typeof a.patch === "function" ? a.patch(v) : a.patch) };
   // the scroll request keeps counting so the listing notices the new position
-  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, visible: v.visible, paneOrder: v.paneOrder, paneSizes: v.paneSizes, layoutNames: v.layoutNames, graphOn: v.graphOn, callGraphOn: v.callGraphOn, pcodeOn: v.pcodeOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
+  return { ...initialViews, scrollReq: { address: "" as Address, n: v.scrollReq.n + 1 }, trailSeq: v.trailSeq, visible: v.visible, paneOrder: v.paneOrder, paneSizes: v.paneSizes, layoutNames: v.layoutNames, graphOn: v.graphOn, callGraphOn: v.callGraphOn, pcodeOn: v.pcodeOn, dataVersion: v.dataVersion, typesVersion: v.typesVersion, covVersion: v.covVersion, importFor: v.importFor };
 }
+/** Patch that clears the value trail and invalidates any request still in flight for it. */
+export const clearTrail = (v: Views): Partial<Views> => ({ trail: null, trailSeq: v.trailSeq + 1 });
+
 /** The views store; the pane sizes and order start from the stored Default layout and the sizes last dragged to (storage read in try/catch, the built-in sizes if it fails). */
 export function createViews() {
   const start = startupLayout();

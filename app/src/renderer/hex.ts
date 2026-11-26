@@ -84,3 +84,15 @@ export function parseHex(text: string, count: number): number[] | null {
   const out = parts.map((p) => (/^[0-9a-f]{2}$/i.test(p) ? parseInt(p, 16) : -1));
   return out.includes(-1) ? null : out;
 }
+
+/** The mapped byte `delta` bytes from `off` (a step over a gap or into another range lands on the nearest mapped byte in that direction); null at the ends. */
+export function stepByte(l: HexLayout, space: string, off: bigint, delta: number): { space: string; off: bigint } | null {
+  const data = l.segs.filter((s) => s.kind === "data");
+  const i = data.findIndex((s) => s.space === space && off >= s.lo && off < s.hi);
+  if (i < 0) return null;
+  const want = off + BigInt(delta), s = data[i];
+  if (want >= s.lo && want < s.hi) return { space, off: want };
+  if (delta > 0) { const n = data.slice(i + 1).find((x) => x.space === space && x.hi > want); return n ? { space, off: n.lo > want ? n.lo : want } : off === s.hi - 1n ? null : { space, off: s.hi - 1n }; }
+  const p = [...data.slice(0, i)].reverse().find((x) => x.space === space && x.lo <= want);
+  return p ? { space, off: p.hi - 1n < want ? p.hi - 1n : want } : off === s.lo ? null : { space, off: s.lo };
+}

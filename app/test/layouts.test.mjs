@@ -67,3 +67,12 @@ test("applying a layout the provider cannot show falls back to C and no dock", (
   assert.equal(L.fitLayout({ ...mine, dock: "symbols" }, caps, dockCap).dock, null);
   assert.equal(L.fitLayout({ ...mine, center: "pcode" }, new Set(["decompile", "pcode"]), dockCap).center, "pcode");
 });
+
+test("every dock tab round-trips, the stack and undefined tabs included", () => {
+  for (const dock of L.DOCKS) {
+    const st = memory();
+    L.saveLayout("d", { ...mine, dock }, st);
+    assert.equal(L.readLayouts(st).layouts.d?.dock, dock, dock);
+  }
+  assert.ok(L.DOCKS.includes("stack") && L.DOCKS.includes("undefined"));
+});
