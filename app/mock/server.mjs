@@ -379,7 +379,7 @@ const handlers = {
   list_data_types({ query, limit }) {
     if (typeof query !== "string") bad("query");
     const q = query.toLowerCase();
-    return [...DATA_TYPES.map((d) => ({ ...d, kind: "builtin" })), ...[...S.dt.values()].map(nodeOf)].filter((d) => d.name.toLowerCase().includes(q)).slice(0, parseInt0(limit, 50, "limit"));
+    return [...[...S.dt.values()].map((t) => ({ ...nodeOf(t), source: "program" })), ...DATA_TYPES.map((d) => ({ ...d, kind: "builtin", source: "builtin" }))].filter((d) => d.name.toLowerCase().includes(q)).slice(0, parseInt0(limit, 50, "limit"));
   },
   // ---- data types ----
   dt_sources: () => [{ id: "program", name: "mock", writable: true }, { id: "builtin", name: "BuiltInTypes", writable: false }],

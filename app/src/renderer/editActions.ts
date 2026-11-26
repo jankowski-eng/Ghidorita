@@ -1,6 +1,6 @@
 import type { Address, Token } from "../../../protocol";
 
-export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "clear" | "signature" | "undo" | "redo" | "save";
+export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "clear" | "signature" | "undo" | "redo" | "save";
 export type Focus = "listing" | "decompiler" | "input" | "other";
 export interface KeyLike { key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
 

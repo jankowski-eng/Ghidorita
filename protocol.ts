@@ -176,7 +176,7 @@ export interface StringItem { address: Address; value: string; length: number } 
 /** kind "bytes": hex with wildcards ("48 8b ?? 24"); "text": a string (encoding ascii | utf16le | utf16be, caseSensitive default true). start = where to continue (a previous `next`); limit default 1000, max 10000. */
 export interface SearchMemoryParams { pattern: string; kind?: "bytes" | "text"; encoding?: "ascii" | "utf16le" | "utf16be"; caseSensitive?: boolean; start?: Address; limit?: number }
 export interface MemoryHit { address: Address; length: number; bytes: string; function?: string } // bytes: hex of the match, at most 16 bytes
-export interface DataTypeHit { name: string; path: string; size: number; kind: DataTypeKind } // size -1 = dynamic/unsized; an empty struct has size 0
+export interface DataTypeHit { name: string; path: string; size: number; kind: DataTypeKind; source?: string } // source: list_data_types only // size -1 = dynamic/unsized; an empty struct has size 0
 export type DataTypeKind = "struct" | "union" | "enum" | "typedef" | "pointer" | "function" | "array" | "builtin";
 export interface DtSource { id: string; name: string; writable: boolean } // id "program" | "builtin"
 export interface StructComponent {

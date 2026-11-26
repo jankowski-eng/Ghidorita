@@ -29,6 +29,8 @@ import { containingFunction, clearFunctionCache, searchSymbols, type FuncAt } fr
 import { useTabs, canForce } from "./useTabs";
 import { EditDialog, type EditSpec } from "./EditDialog";
 import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus, type XrefTarget } from "./editActions";
+import { FormDialog, type FormField } from "./FormDialog";
+import { DataTypes } from "./DataTypes";
 import type { CommentKind, UndoState } from "../../../protocol";
 
 export function App() {
@@ -81,7 +83,11 @@ export function App() {
   const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const setFlash = (m: string) => { setFlashState(m); clearTimeout(flashTimer.current); flashTimer.current = setTimeout(() => setFlashState(""), 5000); };
   const [dlg, setDlg] = useState<{ spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> } | null>(null);
-  const dlgRef = useRef(dlg); dlgRef.current = dlg;
+  const dlgRef = useRef<unknown>(null); dlgRef.current = dlg;
+  const [formDlg, setFormDlg] = useState<{ title: string; submit: string; fields: FormField[]; go: (v: Record<string, string>) => Promise<void> } | null>(null);
+  const formRef = useRef(formDlg); formRef.current = formDlg;
+  const [typesOpen, setTypesOpen] = useState(false);
+  const [typesVersion, setTypesVersion] = useState(0);
   const lastPane = useRef<"listing" | "decompiler">("listing");
 
   const fail = (e: unknown) => { const m = e instanceof Error ? e.message : String(e); errors.current.push(m); setError(m); };
@@ -120,7 +126,7 @@ export function App() {
 
   // Forget everything about the current program. Called on open and close; bumping goSeq/refetch makes in-flight replies no-ops.
   const clearProgram = () => {
-    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); funcsRef.current = [];
+    openedRef.current = false; setOpened(false); setSearchOpen(false); setGotoOpen(false); setDock(null); setXrefTarget(null); setProgramName(null); setUndo({ canUndo: false, canRedo: false, dirty: false }); setDlg(null); setFormDlg(null); setTypesOpen(false); funcsRef.current = [];
     tabs.reset(); setNav(emptyNav); setFuncs([]); setMap(null); setFn(null); setStats({}); setXrefVersion(0); topAddrRef.current = "";
     clearFunctionCache(); ++goSeq.current; void refetch(Promise.resolve(null)); funcsCountRef.current = 0;
   };
@@ -193,7 +199,7 @@ export function App() {
   const programChanged = (p: Parameters<typeof onProgramChanged>[0]) => {
     if (!openedRef.current) return;
     if (p.ranges && !p.ranges.length && !p.kinds.length) { setUndo(p.undo); return; } // save: only `dirty` changed
-    clearFunctionCache(); setDataVersion((v) => v + 1);
+    clearFunctionCache(); setDataVersion((v) => v + 1); setTypesVersion((v) => v + 1);
     onProgramChanged(p, {
       refetchFunctions: async () => { const fl = await refetch(rpc.call("list_functions", {})); if (fl) { funcsRef.current = fl; funcsCountRef.current = fl.length; setFuncs(fl); } return fl ?? funcsRef.current; },
       tabs: () => tabsRef.current().tabs,
@@ -238,7 +244,7 @@ export function App() {
   const listingEdit = async (a: EditAction) => {
     const addr = cursorRef.current || topAddrRef.current;
     if (!addr) return;
-    const row = (window as any).__listing?.rowAt(addr) as { address: Address; label?: string } | undefined;
+    const row = (window as any).__listing?.rowAt(addr) as { address: Address; length: number; label?: string; comment?: string } | undefined;
     if (!row) return setFlash("Cursor row not loaded.");
     const at = row.address;
     if (a === "rename") {
@@ -255,6 +261,8 @@ export function App() {
     else if (a === "clear") await rpc.call("clear_code", { address: at });
     else if (a === "defineData") ask({ title: "Define data", label: "Data type", field: "datatype", initial: "", submit: "Define" },
       async (v) => { await rpc.call("define_data", { address: at, dataType: v.trim() }); });
+    else if (a === "createStruct") setFormDlg({ title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
+      go: async (v) => { await rpc.call("create_struct_from_data", { address: at, length: Number(v.length), name: v.name.trim() }); } });
     else if (a === "signature") { const f = await containingFunction(at); if (f) await editSignature(f.entry); else setFlash("No function here."); }
     else if (a === "retype") setFlash("Retype works on a variable in the decompiler.");
   };
@@ -292,11 +300,11 @@ export function App() {
     const kind = focusKind(document.activeElement);
     if (a === "undo" || a === "redo") {
       if (undoRoute(kind) === "text") { document.execCommand(a); return; } // a text input keeps its own undo
-      if (dlgRef.current) return; // no program undo under an open dialog
+      if (dlgRef.current || formRef.current) return; // no program undo under an open dialog
       return doUndo(a);
     }
     if (a === "save") return doSave();
-    if (dlgRef.current) return;
+    if (dlgRef.current || formRef.current) return;
     await send(() => ((kind === "decompiler" || (kind !== "listing" && lastPane.current === "decompiler")) ? decompEdit(a) : listingEdit(a)));
   };
   // X: references to the listing cursor row, or to the decompiler token under the cursor (pinned in the xref panel)
@@ -335,6 +343,7 @@ export function App() {
     else if (c.type === "edit") void edit(c.action);
     else if (c.type === "dock") { if (openedRef.current) setDock(c.panel); }
     else if (c.type === "xrefs") showXrefs();
+    else if (c.type === "datatypes") { if (openedRef.current) setTypesOpen((o) => !o); }
     else if (c.type === "toggle-pane") setVisible((v) => ({ ...v, [c.pane]: c.visible }));
   };
   const apiNow = { go, back, forward, clickAt, open, cancelOpen, programChanged, edit, handleMenu };
@@ -417,7 +426,7 @@ export function App() {
   return (
     <div className="app">
       <Toolbar path={path} setPath={setPath} canBack={canBack} canForward={canForward} canGoto={opened} busy={busy}
-        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onOpen={() => requestOpen(path)}
+        onBack={back} onForward={forward} onGoto={() => setGotoOpen(true)} onSearch={() => setSearchOpen(true)} onTypes={() => { if (openedRef.current) setTypesOpen((o) => !o); }} typesOpen={typesOpen} onOpen={() => requestOpen(path)}
         onPick={async () => { const p = await window.host.pickFile(); if (p) requestOpen(p); }} />
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={cancelOpen} />}
       {importFor && !opening && <ImportDialog key={importFor} path={importFor} onOpen={(o) => void confirmImport(importFor, o)} onCancel={cancelImport} />}
@@ -452,7 +461,9 @@ export function App() {
         <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
       {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash} />
+      {typesOpen && opened && <DataTypes version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}
       {dlg && <EditDialog spec={dlg.spec} onSubmit={dlg.submit} onClose={() => setDlg(null)} />}
+      {formDlg && <FormDialog title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} onSubmit={formDlg.go} onClose={() => setFormDlg(null)} />}
     </div>
   );
 }

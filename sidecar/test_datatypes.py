@@ -48,7 +48,7 @@ def test_no_program_and_tree(projects):
                 await c.err("get_data_type", NOT_FOUND, path="/NoSuchType")
                 await c.err("create_data_type", INVALID, kind="bogus", name="X")
                 hits = await c.ok("list_data_types", query="dword", limit=5)
-                assert hits and hits[0]["kind"] == "builtin" and "size" in hits[0]
+                assert hits and hits[0]["kind"] == "builtin" and "size" in hits[0] and {h["source"] for h in hits} <= {"program", "builtin"}
         finally:
             proc.stop()
     run(go())

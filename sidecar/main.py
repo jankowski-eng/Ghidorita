@@ -1199,12 +1199,12 @@ class Sidecar:
         text_arg(query, "query")
         limit, q = lim(limit, 100, 1000), query.strip().lower()
         hits, seen = [], set()
-        for dtm in (BuiltInDataTypeManager.getDataTypeManager(), prog.getDataTypeManager()):
+        for src, dtm in (("program", prog.getDataTypeManager()), ("builtin", BuiltInDataTypeManager.getDataTypeManager())):  # program first: its types shadow built-ins of the same path
             for dt in dtm.getAllDataTypes():
                 n = str(dt.getName())
                 if q in n.lower() and str(dt.getPathName()) not in seen:
                     seen.add(str(dt.getPathName()))
-                    hits.append((0 if n.lower().startswith(q) else 1, len(n), self._dt_node(dt)))
+                    hits.append((0 if n.lower().startswith(q) else 1, len(n), dict(self._dt_node(dt), source=src)))
         hits.sort(key=lambda h: h[:2])
         return [h[2] for h in hits[:limit]]
 
