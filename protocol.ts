@@ -1,5 +1,10 @@
-// JSON-RPC 2.0 over WebSocket. Source of truth: protocol.md. Addresses are hex strings ("0x401000").
+// JSON-RPC 2.0 over WebSocket. Source of truth: protocol.md.
 
+/**
+ * Address string, always unsigned hex (up to 64 bit, never negative). Default space: "0x401000" (lowercase, no padding).
+ * Any other space: "<space>:<hex>", an overlay space "<space>::<hex>" (Ghidra's own spelling), e.g. "code:1000", "OVL1::1000", "0xffffffffffff0000".
+ * The parts are split at the last ":" (a trailing ":" belongs to the space name). Input also accepts "ram:401000" for the default space.
+ */
 export type Address = string;
 
 export interface Request<M extends keyof Methods = keyof Methods> {
@@ -64,11 +69,49 @@ export interface ListingRow {
   bytes: string;     // hex, e.g. "55 48 89 e5"
   mnemonic: string;  // for data: the data type name, e.g. "db", "ds"
   operands: string;
-  label?: string;
-  comment?: string;
+  label?: string;    // primary symbol at this address
+  labels?: string[]; // only when there is more than one symbol: all of them, primary first (labels[0] === label)
+  comment?: string;  // EOL comment
+  pre?: string;      // pre, post, plate and repeatable comments (multi-line text, "\n" separated); absent when not set
+  post?: string;
+  plate?: string;
+  repeatable?: string;
+  header?: FunctionHeader; // set on the row at a function's entry
+  xrefs?: RowXrefs;        // set when something references this address
+  parts?: DataPart[];      // defined struct/array/union data: its components (the row shows them folded, the client may unfold)
+  partsTotal?: number;     // component count when parts is cut (shortcut: first PARTS_MAX = 64)
+  bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16)
 }
 
-/** A contiguous loaded+initialized address range, ascending, non-overlapping. */
+export interface FunctionHeader {
+  signature: string;          // C prototype as Ghidra prints it
+  convention?: string;        // calling convention name, absent when unknown/default
+  params: number;             // parameter count
+  paramBytes: number;         // stack frame: parameter area size
+  localBytes: number;         // stack frame: locals area size
+  noReturn?: boolean;
+  thunk?: boolean;
+}
+
+/** Reference annotation: "XREF[count]: a, b, ...". items is cut at 5 (shortcut), count is the full number of memory references to the address. */
+export interface RowXrefs {
+  count: number;
+  items: { from: Address; kind: "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other" }[];
+}
+
+export interface DataPart {
+  offset: number;   // byte offset inside the unit
+  length: number;
+  type: string;     // data type name
+  name: string;     // field name, or "[i]" for array elements
+  value: string;    // display value
+}
+
+/**
+ * A contiguous loaded+initialized address range, non-overlapping. `start` may be in any address space. Ranges come in the sidecar's
+ * traversal order (Ghidra's address order: spaces in space order, ascending inside a space): `listing_rows` walks the same order, so the
+ * client maps scroll position <-> address by the sequence of ranges and must not re-sort them.
+ */
 export interface AddrRange {
   start: Address;
   size: number; // bytes
@@ -222,7 +265,7 @@ export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "
 export interface Notifications {
   // pct -1 = indeterminate (analysis: no global total exists, see protocol.md). analyzer/done/total only during analysis.
   progress: { phase: "import" | "analysis" | "saving" | "ready"; pct: number; message: string; analyzer?: string; done?: number; total?: number };
-  // ranges null = unknown/broad, refetch everything; start/end inclusive. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); not during open_binary.
+  // ranges null = unknown/broad, refetch everything (also when a change has no address: type edits); start/end inclusive, same space, any space. Coalesced ~50 ms. Fired for edits, undo, redo and save (save: ranges [], kinds [] = nothing to refetch, only `undo.dirty` changed); not during open_binary.
   program_changed: { ranges: { start: Address; end: Address }[] | null; kinds: ChangeKind[]; undo: UndoState };
   error: { message: string };
 }

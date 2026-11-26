@@ -17,7 +17,8 @@ const DATA_TYPES = ["bool", "byte", "char", "double", "dword", "float", "int", "
   .map((n) => ({ name: n, path: `/${n}`, size: { bool: 1, byte: 1, char: 1, double: 8, dword: 4, float: 4, int: 4, long: 8, longlong: 8, pointer: 8, qword: 8, short: 2, uint: 4, ulong: 8, undefined: 1, undefined4: 4, word: 2 }[n] ?? -1 }));
 const bad = (what) => { throw { code: -32602, message: `InvalidArgument: ${what}` }; };
 const nf = () => { throw { code: -32004, message: "NotFound" }; };
-const parseAddr = (a) => { if (typeof a !== "string" || !/^0x[0-9a-f]+$/i.test(a)) bad("address"); return parseInt(a, 16); };
+// qualified ("OVL1::1000") and beyond-2^53 addresses are valid but name nothing the number-based mock edits: -1
+const parseAddr = (a) => { if (typeof a !== "string" || !/^(0x[0-9a-f]+|[^:\s]+::?[0-9a-f]+)$/i.test(a)) bad("address"); return /^0x/i.test(a) && BigInt(a) < 2n ** 53n ? parseInt(a, 16) : -1; };
 const parseInt0 = (v, d, what) => { if (v === undefined) return d; if (!Number.isInteger(v) || v < 0) bad(what); return v; };
 const idxOfEntry = (n) => { const d = n - BASE; return d >= 0 && d % STEP === 0 && d / STEP < NFUNC ? d / STEP : -1; };
 const validName = (n) => { if (typeof n !== "string" || !/^[A-Za-z_][A-Za-z0-9_.$]*$/.test(n)) bad("invalid name"); return n; };
@@ -57,22 +58,62 @@ function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mut
 }
 const MNEMS = ["push", "mov", "lea", "call", "add", "sub", "cmp", "jne", "xor", "ret"];
 
+const hexb = (h, n) => Array.from({ length: n }, (_, k) => (((h >>> ((k % 4) * 8)) + k) & 255).toString(16).padStart(2, "0")).join(" ");
+const partsOf = (dd) => { // components of applied struct/array data, like the sidecar's `parts`
+  const t = S.dt.get(dd.ref.path);
+  if (!t) return {};
+  const all = dd.ref.count > 1 ? Array.from({ length: dd.ref.count }, (_, k) => ({ offset: k * sizeOf(t), length: sizeOf(t), type: t.name, name: `[${k}]`, value: "0x0" }))
+    : t.kind === "struct" ? t.comps.reduce((a, c, k) => (a.list.push({ offset: a.off, length: c.len, type: c.display ?? "undefined", name: c.name ?? `field${k}`, value: "0x0" }), a.off += c.len, a), { list: [], off: 0 }).list : [];
+  return all.length ? { parts: all.slice(0, 64), ...(all.length > 64 ? { partsTotal: all.length } : {}) } : {};
+};
+const callersOf = (n) => { const i = idxOfEntry(n); return i < 0 ? [] : handlers.xrefs_to({ address: hex(n), limit: 1000 }); };
 const row = (idx) => {
   const h = (idx * 2654435761) >>> 0;
   const m = MNEMS[h % MNEMS.length];
-  const r = { address: hex(BASE + idx * STRIDE), length: STRIDE, bytes: (h >>> 8).toString(16).padStart(8, "0").replace(/(..)/g, "$1 ").trim(),
-    mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
-  if (idx % ROWS_PER_FUNC === 0) r.label = nameOf(idx / ROWS_PER_FUNC);
-  const dd = S.data.get(BASE + idx * STRIDE);
+  const a = BASE + idx * STRIDE;
+  const r = { address: hex(a), length: STRIDE, bytes: hexb(h, 4), mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
+  if (idx % ROWS_PER_FUNC === 0) {
+    const i = idx / ROWS_PER_FUNC;
+    r.label = nameOf(i);
+    if (i % 5 === 0) { r.labels = [r.label, `alias_${i}`]; }
+    r.header = { signature: sigOf(i), convention: "__cdecl", params: 2, paramBytes: 16, localBytes: 32 };
+  }
+  const dd = S.data.get(a);
   const live = dd && (!dd.ref || S.dt.get(dd.ref.path)); // applied data of a deleted type disappears
-  if (live) { r.mnemonic = dd.mnemonic; r.length = dd.ref ? sizeOf(S.dt.get(dd.ref.path)) * dd.ref.count : dd.length; r.operands = ""; }
-  if (S.created.has(BASE + idx * STRIDE)) r.label = S.created.get(BASE + idx * STRIDE);
-  if (S.labels.has(BASE + idx * STRIDE)) r.label = S.labels.get(BASE + idx * STRIDE);
-  const ov = COMMENT_KINDS.map((k) => S.comments.get(`${BASE + idx * STRIDE}|${k}`)).find(Boolean);
-  if (ov) r.comment = ov;
-  else if (idx % 50 === 7 && !S.comments.has(`${BASE + idx * STRIDE}|eol`)) r.comment = `note ${idx}`;
+  if (live) {
+    r.mnemonic = dd.mnemonic; r.length = dd.ref ? sizeOf(S.dt.get(dd.ref.path)) * dd.ref.count : dd.length; r.operands = "";
+    if (r.length > 16) { r.bytes = hexb(h, 16); r.bytesMore = r.length - 16; }
+    if (dd.ref) Object.assign(r, partsOf(dd));
+  }
+  if (S.created.has(a)) { r.label = S.created.get(a); r.header = { signature: `void ${r.label}(void)`, params: 0, paramBytes: 0, localBytes: 0 }; }
+  if (S.labels.has(a)) r.label = S.labels.get(a);
+  for (const [k, f] of [["eol", "comment"], ["pre", "pre"], ["post", "post"], ["plate", "plate"], ["repeatable", "repeatable"]]) { const t = S.comments.get(`${a}|${k}`); if (t) r[f] = t; }
+  if (idx % 50 === 7 && !S.comments.has(`${a}|eol`)) r.comment = `note ${idx}`;
+  if (idx % ROWS_PER_FUNC === 0 || S.created.has(a)) { const x = callersOf(a); if (x.length) r.xrefs = { count: x.length, items: x.slice(0, 5).map((q) => ({ from: q.from, kind: q.kind })) }; }
   return r;
 };
+// Extra segments after the main one: a range above 2^63 in the default space and an overlay space (read-only, plain instruction rows).
+const SEGS = [
+  { space: "", base: BigInt(BASE), n: ROWS, mk: row },
+  { space: "", base: 0xfffffffffff00000n, n: 64 },
+  { space: "OVL1::", base: 0x1000n, n: 64 },
+];
+const segAddr = (g, i) => (g.space ? g.space + (g.base + BigInt(i * STRIDE)).toString(16) : "0x" + (g.base + BigInt(i * STRIDE)).toString(16));
+SEGS.forEach((g) => { g.row = g.mk ?? ((i) => ({ address: segAddr(g, i), length: STRIDE, bytes: hexb(i * 77 + 1, 4), mnemonic: i === 0 ? "nop" : "mov", operands: i === 0 ? "" : `r0, 0x${i.toString(16)}`, ...(i === 0 ? { label: `${g.space || "high"}_start`, plate: `segment ${g.space || "high"}` } : {}) })); });
+const segOf = (address) => { // -> [segment, row index within it] for an address string, or null
+  const m = /^(?:(0x)|(.*?::?))([0-9a-f]+)$/i.exec(address);
+  if (!m) bad("address");
+  const sp = m[1] ? "" : m[2].replace(/(?<!:):$/, "::"), off = BigInt("0x" + m[3]);
+  const g = SEGS.find((g) => g.space === sp && off >= g.base && off < g.base + BigInt(g.n * STRIDE));
+  return g ? [g, Number((off - g.base) / BigInt(STRIDE))] : null;
+};
+const gIndex = (address) => { // global row index of the row at/after `address` (a gap maps to the next segment's first row)
+  const f = segOf(address);
+  if (f) return SEGS.slice(0, SEGS.indexOf(f[0])).reduce((a, g) => a + g.n, 0) + f[1];
+  const m = /^(?:(0x)|(.*?::?))([0-9a-f]+)$/i.exec(address);
+  return m && m[1] && BigInt(address) >= SEGS[0].base + BigInt(ROWS * STRIDE) && BigInt(address) < SEGS[1].base ? ROWS : m && m[1] && BigInt(address) < SEGS[0].base ? 0 : SEGS.reduce((a, g) => a + g.n, 0);
+};
+const rowAtG = (gi) => { for (const g of SEGS) { if (gi < g.n) return g.row(gi); gi -= g.n; } return null; };
 
 function decompile(i) {
   const a = (i * 7 + 1) % NFUNC, b = (i * 13 + 2) % NFUNC, c = (i * 31 + 3) % NFUNC;
@@ -268,13 +309,13 @@ const handlers = {
       cancels.set(rid, () => { clearTimeout(t); cancels.delete(rid); reject({ code: -32002, message: "Cancelled" }); });
     });
   },
-  listing_info: () => ({ ranges: [{ start: hex(BASE), size: ROWS * STRIDE }], totalBytes: ROWS * STRIDE }),
+  listing_info: () => ({ ranges: SEGS.map((g) => ({ start: segAddr(g, 0), size: g.n * STRIDE })), totalBytes: SEGS.reduce((a, g) => a + g.n * STRIDE, 0) }),
   async listing_rows({ address, count, direction = "forward" }) {
     await sleep(20);
-    const idx = Math.floor((parseInt(address, 16) - BASE) / STRIDE);
+    const total = SEGS.reduce((a, g) => a + g.n, 0), idx = gIndex(address);
     const [from, to] = direction === "backward" ? [idx - count, idx] : [idx, idx + count];
     const out = [];
-    for (let i = Math.max(0, from); i < Math.min(ROWS, to); i++) out.push(row(i));
+    for (let i = Math.max(0, from); i < Math.min(total, to); i++) out.push(rowAtG(i));
     return out;
   },
   // ---- reads ----
