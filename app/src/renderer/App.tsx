@@ -504,7 +504,7 @@ export function App() {
         }}</Panes>
       ) : <div className="notice">{notice && <p role="status">{notice}</p>}<p>Open a binary to begin (File → Open Binary…, Cmd+O), or reopen a program below.</p>
         <Welcome programs={progs.list} loading={progs.loading} error={progs.error} onOpen={openStored} onDelete={(entry) => setDeleting({ entry, error: "", busy: false })} /></div>}
-      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
+      {opened && dock && <Dock active={dock} onActivate={setDock} onClose={() => setDock(null)} version={dataVersion} onGo={(a) => go(a, "search")} onError={fail} cov={{ version: covVersion, funcs, onLoad: () => void pickCoverage(), onChange: covChanged }} />}
       <StatusBar address={here} func={fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={undo.dirty} saving={saving} flash={flash}
         back={[...nav.back].reverse().map((l) => l.address)} forward={[...nav.forward].reverse().map((l) => l.address)} onBack={back} onForward={forward} />
       {typesOpen && opened && <DataTypes version={typesVersion} cursorAddress={cursorRef.current || topAddrRef.current} onClose={() => setTypesOpen(false)} />}

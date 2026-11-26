@@ -74,6 +74,13 @@ export class CoverageRuns {
     if (ca && cb) return ina && inb ? " cov" : ina ? " cov-a" : inb ? " cov-b" : "";
     return ina || inb ? " cov" : "";
   }
+  /** Functions (any overlap with the body counts) reached only in A and only in B; null unless two runs are shown. */
+  funcDiff<F extends { entry: Address; size: number }>(funcs: F[]): { onlyA: F[]; onlyB: F[] } | null {
+    const ca = this.get(this.a), cb = this.get(this.b);
+    if (!ca || !cb) return null;
+    const hit = (c: Coverage, f: F) => c.has(f.entry, f.size);
+    return { onlyA: funcs.filter((f) => hit(ca.cov, f) && !hit(cb.cov, f)), onlyB: funcs.filter((f) => hit(cb.cov, f) && !hit(ca.cov, f)) };
+  }
   /** Bytes only in A, only in B and in both; null unless two runs are shown. */
   diff(): { onlyA: bigint; onlyB: bigint; both: bigint } | null {
     const ca = this.get(this.a), cb = this.get(this.b);
