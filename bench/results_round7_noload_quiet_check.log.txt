@@ -1,0 +1,6 @@
+== headless fast 1 11:09:52 load: 4.97 5.38 9.23
+== bg fast noload 1 11:16:08 load: 5.50 5.32 7.77
+== headless fast 2 11:24:21 load: 7.59 7.82 8.06
+== bg fast noload 2 11:30:53 load: 4.79 6.00 7.05
+== headless fast 3 11:39:26 load: 6.87 7.63 7.43
+== bg fast noload 3 11:46:11 load: 4.76 6.03 6.72

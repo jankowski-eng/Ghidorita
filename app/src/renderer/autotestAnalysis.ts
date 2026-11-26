@@ -30,7 +30,16 @@ export async function runAnalysisFlow(file: string, c: AutotestCtx, result: Reco
   R.functions = { atOpen: f0, atCancel: fCancel, atEnd: fEnd };
   R.grew = fEnd > f0 && fEnd >= fCancel;
   R.fastOffersFull = !!btn("Run full analysis") && c.analysis()?.analysis === "done";
+  // program browser: the finished fast program offers "Run full analysis" (open it, then the upgrade runs on the same program)
+  const base = file.split("/").pop()!;
+  c.command({ type: "close-program" });
+  await waitFor(() => !c.status().opened && document.querySelector(".welcome"), 10000, "welcome pane");
+  const full = await waitFor(() => btn(`Run full analysis of ${base}`), 10000, "browser button Run full analysis");
+  full.click();
+  await waitFor(() => c.status().opened, 60000, "program open from the browser");
+  await waitFor(() => c.analysis()?.profile === "full" && c.analysis()?.state === "done" && c.analysis()?.analysis === "done", 240000, "full analysis done");
+  R.browserFull = true;
   await c.open(file); // the default import (analysis done) is open from here on
-  R.ok = R.runningAtOpen && R.listingWhileRunning && R.indicator && R.cancelled && R.grew && R.fastOffersFull;
+  R.ok = R.runningAtOpen && R.listingWhileRunning && R.indicator && R.cancelled && R.grew && R.fastOffersFull && R.browserFull;
   return R.ok === true;
 }
