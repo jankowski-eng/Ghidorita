@@ -1,8 +1,8 @@
-import type { Address, FunctionInfo } from "../../../protocol";
-import { AddrMap } from "./addrmap";
-import type { ApplicationBackend, ProgramOperations } from "./backend";
-import type { ImportOptions } from "../../../protocol";
-import type { MenuCommand, MenuState } from "../preload/index";
+import type { Address, FunctionInfo } from "../../../../protocol";
+import { AddrMap } from "../addrmap";
+import type { ApplicationBackend, ProgramOperations } from "../backend";
+import type { ImportOptions } from "../../../../protocol";
+import type { MenuCommand, MenuState } from "../../preload/index";
 import { runEditFlow, runPhase2, runTypesFlow } from "./autotestEdit";
 import { runNavFlow } from "./autotestNav";
 import { runR5Flow } from "./autotestR5";

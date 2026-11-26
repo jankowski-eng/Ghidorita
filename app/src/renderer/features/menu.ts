@@ -7,6 +7,7 @@ import { useProgram, useSession, useViews, type Session } from "../store/session
 import type { Views } from "../store/views";
 import type { EditAction } from "../editActions";
 import { requestOpen } from "./dialogs";
+import { exportAs } from "./exports";
 import type { CoverageActions } from "./coverage";
 
 export interface MenuTargets {
@@ -32,6 +33,8 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "edit") void t.edit(c.action);
   else if (c.type === "dock") { if (opened()) set({ dock: c.panel }); }
   else if (c.type === "xrefs") t.showXrefs();
+  else if (c.type === "export") void exportAs(s, c.kind);
+  else if (c.type === "graph") { if (opened()) set({ graphOn: !views.getState().graphOn }); }
   else if (c.type === "datatypes") { if (opened()) set({ typesOpen: !views.getState().typesOpen }); }
   else if (c.type === "toggle-pane") set({ visible: { ...views.getState().visible, [c.pane]: c.visible } });
 }

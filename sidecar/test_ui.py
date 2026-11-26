@@ -1,4 +1,4 @@
-"""The Electron app against the real sidecar, one focused flow each (AUTOTEST_FLOW, see app/src/renderer/autotestFlows.ts). Needs a display (the autotest opens a window)."""
+"""The Electron app against the real sidecar, one focused flow each (AUTOTEST_FLOW, see app/src/renderer/autotest/autotestFlows.ts). Needs a display (the autotest opens a window)."""
 import json, os, subprocess
 
 import pytest

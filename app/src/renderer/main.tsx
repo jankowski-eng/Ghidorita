@@ -6,7 +6,7 @@ import { App } from "./App";
 import { WebSocketBackend } from "./rpc";
 import { testTimeout } from "./tabs";
 import { changeLog } from "./changeLog";
-import type { AutotestControls } from "./autotest";
+import type { AutotestControls } from "./autotest/autotest";
 import "./style.css";
 
 // Bundle Monaco locally (no CDN).
@@ -26,7 +26,7 @@ async function start() {
   if (!cfg.autotest) { root.render(<App backend={backend} />); return; }
 
   const [{ runAutotest, runBench }, { autotestBackend }] = await Promise.all([
-    import("./autotest"), import("./autotestBackend"),
+    import("./autotest/autotest"), import("./autotest/autotestBackend"),
   ]);
   if (cfg.decompileTimeout) testTimeout.secs = cfg.decompileTimeout;
   const { controls, instrumented } = autotestBackend(backend, requests);

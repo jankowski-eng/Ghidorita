@@ -33,7 +33,7 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
     : Promise.resolve(funcs.filter((f) => f.name.toLowerCase().startsWith(q.toLowerCase())).map((f) => ({ name: f.name, address: f.entry, kind: "function" })));
   return (
     <>
-      {searchOpen && opened && <SearchPanel capabilities={s.caps} searchSymbols={symbolSearch} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
+      {searchOpen && opened && <SearchPanel capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
       {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => close("gotoOpen")} />}
     </>
   );

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { Address } from "../../../../protocol";
-import type { AutotestCtx, AutotestControls } from "../autotest";
+import type { AutotestCtx, AutotestControls } from "../autotest/autotest";
 import { isObsolete } from "../backend";
 import { undoRoute, type EditAction } from "../editActions";
 import { useSession } from "../store/session";
@@ -53,6 +53,13 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
       void api().edit(e.shiftKey ? "redo" : "undo");
     };
     window.addEventListener("keydown", undoKey, true);
+    // Space toggles the graph, but only where it types nothing: the listing, the decompiler, the graph or the bare page (never a dialog or text field)
+    const spaceKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey || !s.program() || !(t === document.body || t.closest(".lbox, .editor, .graph"))) return;
+      e.preventDefault(); api().handleMenu({ type: "graph" });
+    };
+    window.addEventListener("keydown", spaceKey);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") refs.lastPane.current = k; };
     window.addEventListener("focusin", pane);
     // quit: save first (the status bar shows "Saving…"), then main stops the sidecar
@@ -69,6 +76,6 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); offChanged(); offError(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", spaceKey); window.removeEventListener("focusin", pane); };
   }, []); // eslint-disable-line
 }

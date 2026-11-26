@@ -1,5 +1,5 @@
-import type { SearchMemoryParams } from "../../../protocol";
-import type { FunctionInfo } from "../../../protocol";
+import type { SearchMemoryParams } from "../../../../protocol";
+import type { FunctionInfo } from "../../../../protocol";
 import { byLabel, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Navigate-and-find flow of the autotest: the dock windows (symbols, strings, memory search) and the references panel, driven through the real

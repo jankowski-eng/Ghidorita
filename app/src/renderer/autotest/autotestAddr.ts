@@ -1,4 +1,4 @@
-import type { FunctionInfo, Token } from "../../../protocol";
+import type { FunctionInfo, Token } from "../../../../protocol";
 import { byLabel, isMock, press, setSelect, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Round 8 flow of the autotest: X on a decompiler global opens the references to its address, X on a decompiler temporary (iVar1, uVar3)

@@ -1,6 +1,6 @@
-import type { FunctionInfo, ListingRow } from "../../../protocol";
+import type { FunctionInfo, ListingRow } from "../../../../protocol";
 import { sleep, waitFor, type AutotestCtx } from "./autotest";
-import { addrAdd } from "./address";
+import { addrAdd } from "../address";
 
 // Listing completeness flow of the autotest (round 8): function header, plate comment through an edit that refreshes only its rows,
 // a navigation right after an edit (the old re-jump race), an xref click, folding data components, the run cache and the thumb drag guard,

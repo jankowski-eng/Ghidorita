@@ -1,4 +1,4 @@
-import type { FunctionInfo } from "../../../protocol";
+import type { FunctionInfo } from "../../../../protocol";
 import { byLabel, isMock, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
 
 // Edit flow of the real-sidecar autotest. Everything goes through the UI: key events on the listing / Monaco's input,

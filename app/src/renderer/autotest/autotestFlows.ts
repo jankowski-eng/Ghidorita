@@ -1,6 +1,6 @@
-import { isFailure } from "./backend";
+import { isFailure } from "../backend";
 import { byLabel, press, sleep, typeInto, waitFor, type AutotestCtx } from "./autotest";
-import { LARGE_FUNCTION } from "./tabs";
+import { LARGE_FUNCTION } from "../tabs";
 import { runShotFlow } from "./autotestShots";
 
 // Focused flows (AUTOTEST_FLOW=<name>, driven by sidecar/test_ui.py): each checks one thing against the real sidecar, through the real DOM.

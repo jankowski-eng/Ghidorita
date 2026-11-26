@@ -1,4 +1,4 @@
-import { BackendError, type ApplicationBackend } from "./backend";
+import { BackendError, type ApplicationBackend } from "../backend";
 import type { AutotestControls } from "./autotest";
 
 export function autotestBackend(backend: ApplicationBackend, requests: AutotestControls["requests"]) {
