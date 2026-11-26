@@ -98,7 +98,7 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
     const rows = await rpc.call("listing_rows", { address, count, direction });
     const ms = performance.now() - t0;
     onLatency(Math.round(ms));
-    ((window as any).__lst ??= []).push({ ms, direction, count, address, rows: rows.length });
+    ((window as any).__lst ??= []).push({ ms, direction, count, address, rows: rows.length, where: new Error().stack?.split("\n").slice(2, 5).map((x) => x.trim().slice(0, 60)).join(" | ") });
     return rows;
   };
 
@@ -143,7 +143,7 @@ export function Listing({ map, scrollReq, change, topAddrRef, cursorRef, onLaten
   };
 
   // ---- invalidation after edits ----
-  const queue = (r: Range[] | null) => { st.pend = { r: st.pend && st.pend.r && r ? [...st.pend.r, ...r] : null }; void drain(); };
+  const queue = (r: Range[] | null) => { st.pend = st.pend ? { r: st.pend.r && r ? [...st.pend.r, ...r] : null } : { r }; void drain(); }; // a null (address-less change) wins over ranges
   const drain = async () => {
     if (st.busy || !st.pend || !st.rows.length) return; // no rows yet: the jump that fetches them calls drain() when it lands
     const { r } = st.pend;

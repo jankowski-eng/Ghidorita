@@ -20,7 +20,7 @@ export interface MenuState {
 }
 
 export interface Host {
-  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null; expect: unknown }>;
+  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null; only?: string | null; expect: unknown }>;
   pickFile(): Promise<string | null>;
   autotestDone(result: unknown): Promise<void>;
   /** Subscribe to menu commands; returns the unsubscribe function. */

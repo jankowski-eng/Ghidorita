@@ -16,6 +16,8 @@ export interface AutotestCtx {
   goAddr(address: Address): Promise<void>;
   clickAt(line1: number, col1: number): Promise<void> | void;
   cancelFile: string | null;
+  /** AUTOTEST_ONLY=listing: open the file and run just that flow (fast iteration) */
+  only?: string | null;
   status(): { funcs: number; opened: boolean; opening: boolean; phase: string; notice: string };
   back(): void;
   forward(): void;
@@ -64,6 +66,12 @@ export async function runAutotest(file: string, c: AutotestCtx) {
     let persist: unknown;
     try {
       c.setPath(file);
+      if (c.only === "listing") {
+        await c.open(file);
+        result.ok = (await runListingFlow(await rpc.call("list_functions", {}), c, result)) && c.errors.length === 0;
+        result.errors = c.errors;
+        return window.host.autotestDone(result);
+      }
       if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again, all through the UI
         const openViaUi = async () => { // path box + Enter, then Enter in the import dialog (defaults)
           const i = document.querySelector<HTMLInputElement>('input[aria-label="Binary path"]')!; typeInto(i, c.cancelFile!); press(i, "Enter");

@@ -38,6 +38,7 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   await c.select(f.entry); await shows(f.entry, "back to the function");
 
   // 3. plate comment through an edit: only the intersecting rows are refetched, the view stays
+  await waitFor(() => !L().busy(), 5000, "listing idle"); await sleep(300); // the jump's own prefetch must not count as the edit's refetch
   const top0 = c.topAddr(), n0 = lst().length;
   await rpc.call("set_comment", { address: f.entry, kind: "plate", text: "Autotest plate" });
   await waitFor(() => lineText("k-plate").some((t) => t.includes("Autotest plate")), 10000, "plate comment line");
@@ -67,8 +68,10 @@ export async function runListingFlow(fl: FunctionInfo[], c: AutotestCtx, result:
   await c.select(far); await shows(far, "far again");
   await sleep(300);
   need(runs >= 1, "a run was kept: " + runs);
-  need(lst().length === n1, "jump back into a kept run fetched " + (lst().length - n1) + " times");
-  R.runCache = { runs, refetches: lst().length - n1 };
+  // the jump itself fetches nothing; the prefetch that tops the restored run up to its margin may (it starts at the run's edge, not at the target)
+  const after = lst().slice(n1), jumpFetch = after.filter((x) => x.direction === "forward" && x.count >= 100 && at(far) && x.address === at(far)!.address);
+  need(jumpFetch.length === 0, "jump back into a kept run fetched the target again: " + JSON.stringify(after));
+  R.runCache = { runs, prefetches: after.map((x) => `${x.direction} ${x.rows}`) };
 
   // 6. the thumb stays where the user holds it
   L().dragging(true);

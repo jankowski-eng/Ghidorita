@@ -71,7 +71,7 @@ const row = (idx) => {
   const h = (idx * 2654435761) >>> 0;
   const m = MNEMS[h % MNEMS.length];
   const a = BASE + idx * STRIDE;
-  const r = { address: hex(a), length: STRIDE, bytes: hexb(h, 4), mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
+  const r = { address: hex(a), length: STRIDE, bytes: (h >>> 8).toString(16).padStart(8, "0").replace(/(..)/g, "$1 ").trim(), mnemonic: m, operands: m === "ret" ? "" : `r${h % 8}, 0x${(h % 4096).toString(16)}` };
   if (idx % ROWS_PER_FUNC === 0) {
     const i = idx / ROWS_PER_FUNC;
     r.label = nameOf(i);
