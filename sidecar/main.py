@@ -1089,9 +1089,13 @@ class Sidecar:
         for d in DefinedStringIterator.forProgram(prog):
             if len(items) & 255 == 0:
                 scan.check()
-            v = StringDataInstance.getStringDataInstance(d).getStringValue()
-            if v is not None and len(str(v)) >= minLength:
-                items.append({"address": hx(d.getMinAddress().getOffset()), "value": str(v)[:STRING_VALUE_CAP], "length": int(d.getLength())})
+            v = d.getValue()  # the String for string data types; the StringDataInstance is the fallback (e.g. a pointer-typed string)
+            if not isinstance(v, str):
+                v = StringDataInstance.getStringDataInstance(d).getStringValue()
+            if v is not None:
+                v = str(v)
+                if len(v) >= minLength:
+                    items.append({"address": hx(d.getMinAddress().getOffset()), "value": v[:STRING_VALUE_CAP], "length": int(d.getLength())})
         return items
 
     def list_strings(self, offset=0, limit=500, minLength=4, query="", scan=None):
