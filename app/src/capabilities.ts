@@ -20,7 +20,7 @@ export function allowsCommand(caps: ReadonlySet<Capability>, cmd: MenuCommand): 
     case "edit": return allowsEdit(caps, cmd.action);
     case "dock": return caps.has(dockCapability[cmd.panel]);
     case "datatypes": return caps.has("dataTypes");
-    case "coverage-path": case "coverage-clear": return caps.has("coverage");
+    case "coverage-path": case "coverage-load": case "coverage-clear": return caps.has("coverage");
     case "xrefs": return caps.has("references");
     case "toggle-pane": return cmd.pane !== "decompiler" || caps.has("decompile");
     case "close-tab": return caps.has("decompile");
