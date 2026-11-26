@@ -165,3 +165,4 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .cmdhint { flex: 1; text-align: left; color: #999; background: #1e1e1e; border: 1px solid #555; padding: 3px 8px; }
 .cmdhint kbd { float: right; color: #777; font: inherit; }
 .status .hist { margin-right: 8px; } .status .hist button { background: transparent; color: #fff; border: 0; padding: 0 4px; cursor: pointer; font: inherit; } .status .hist button:disabled { opacity: .4; cursor: default; }
+.funcs .todo { padding: 2px 8px; }

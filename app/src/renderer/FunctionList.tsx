@@ -4,6 +4,7 @@ import type { FunctionInfo, Address } from "../../../protocol";
 import { searchSymbols } from "./symbols";
 import { latest } from "./latest";
 import { useDebounced } from "./hooks";
+import { notRenamed } from "./names";
 
 const SRC_TITLE: Record<string, string> = { user: "named by you", analysis: "named by analysis (a guess)", imported: "name from the file", default: "default name, not yet named", other: "" };
 
@@ -19,13 +20,15 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
     run(searchSymbols(dq, 5000)).then((r) => { if (r) { setErr(r.length >= 5000 ? "more than 5000 symbols match; showing the first 5000 (refine the filter)" : ""); setHits(r.filter((h) => h.kind === "function").map((h) => ({ name: h.name, entry: h.address, size: 0 }))); } },
       (e) => setErr(e instanceof Error ? e.message : String(e)));
   }, [dq, funcs]); // eslint-disable-line
-  const shown = hits ?? funcs;
+  const [todo, setTodo] = useState(false); // "Not yet renamed": hide what a person already named
   const src = useMemo(() => new Map(funcs.map((f) => [f.entry, f.source])), [funcs]); // filter hits come from search_symbols, which has no source
+  const base = hits ?? funcs;
+  const shown = useMemo(() => (todo ? base.filter((f) => notRenamed(f.source ?? src.get(f.entry))) : base), [todo, base, src]);
   const [cursor, setCursor] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({ count: shown.length, getScrollElement: () => ref.current, estimateSize: () => 20, overscan: 10 });
   useEffect(() => { const i = shown.findIndex((f) => f.entry === selected); if (i >= 0) { setCursor(i); v.scrollToIndex(i); } }, [selected]); // eslint-disable-line
-  useEffect(() => setCursor(0), [hits]);
+  useEffect(() => setCursor(0), [hits, todo]);
   const move = (i: number) => { const c = Math.max(0, Math.min(shown.length - 1, i)); setCursor(c); v.scrollToIndex(c); };
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); move(cursor + 1); }
@@ -37,6 +40,7 @@ export function FunctionList({ funcs, selected, onSelect, onPin }: { funcs: Func
   return (
     <div className="funcs" onKeyDown={onKey}>
       <input aria-label="Filter functions" placeholder={`filter ${funcs.length} functions`} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <label className="chip todo"><input type="checkbox" aria-label="Not yet renamed" checked={todo} onChange={(e) => setTodo(e.target.checked)} /> not yet renamed{todo ? ` (${shown.length})` : ""}</label>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="scroll" ref={ref} style={{ flex: 1 }} role="listbox" tabIndex={0} aria-label="Functions" aria-activedescendant={shown[cursor] ? `fn-${shown[cursor].entry}` : undefined}>
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
