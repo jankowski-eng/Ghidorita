@@ -5,7 +5,7 @@ import { isCancelled, isNoProgram, scanner } from "./scan";
 import { VirtualTable, type Col } from "./VirtualTable";
 
 type Row = { dir: "caller" | "callee"; edge: CallEdge };
-const label = (e: CallEdge) => (e.thunk && e.target ? `${e.name} → ${e.target.name}` : e.name);
+const label = (e: CallEdge) => (e.thunk && e.target && e.target.name !== e.name ? `${e.name} → ${e.target.name}` : e.name);
 const kind = (e: CallEdge) => (e.external ? "external" : e.thunk ? (e.target?.external ? "thunk to external" : "thunk") : "");
 /** A thunk with a memory target opens the stub itself; an external has nowhere to go. */
 export const goTo = (e: CallEdge): Address | null => e.entry;

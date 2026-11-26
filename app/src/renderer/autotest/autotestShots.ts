@@ -12,6 +12,9 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-map") return mapShot(fl!, args, c, result);
   if (name === "shot-export") return exportShot(fl!, c, result);
   if (name === "shot-bar") return barShot(c, result);
+  if (name === "shot-calls") return callsShot(fl!, c, result);
+  if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
+  if (name === "shot-copy") return copyShot(fl!, c, result);
   throw new Error("unknown shot flow " + name);
 }
 
@@ -80,6 +83,59 @@ async function exportShot(fl: { entry: string }[], c: AutotestCtx, result: Recor
     await waitFor(() => /Exported Ghidra archive/.test(flash()), 60000, "gzf exported");
   }
   result.export = flash().match(/Exported [^|]*/g);
+  await sleep(300);
+  return true;
+}
+
+type Fn = { name: string; entry: string; size: number };
+const mainRows = () => [...document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")];
+
+// the Calls panel on a function with callers, callees and a thunk
+async function callsShot(fl: Fn[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  let best: { f: Fn; n: number } | null = null;
+  for (const f of fl.slice(0, 400)) {
+    const r = await c.program().references.calls({ entry: f.entry }).result;
+    const n = r.callers.length + r.callees.length + 3 * r.callees.filter((e) => e.thunk).length;
+    if (r.callers.length >= 2 && r.callees.some((e) => e.thunk) && (!best || n > best.n)) best = { f, n };
+  }
+  need(best, "a function with callers and a thunk callee");
+  await c.select(best!.f.entry);
+  await waitFor(() => c.editorText().length > 0, 20000, "decompiled");
+  c.command({ type: "dock", panel: "calls" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Calls"]'), 5000, "calls panel");
+  await waitFor(() => /\d+ callers, \d+ callees/.test(region.textContent!) && /thunk/.test(region.textContent!), 10000, "calls with a thunk shown");
+  result.calls = { function: best!.f.name, text: region.textContent };
+  await sleep(300);
+  return true;
+}
+
+// a few bookmarks on one function: markers in the listing, the panel under it
+async function bookmarksShot(fl: Fn[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  const f = fl.find((x) => x.name === "main") ?? [...fl].sort((a, b) => b.size - a.size).find((x) => x.size > 300 && x.size < 3000)!;
+  await c.select(f.entry);
+  await waitFor(() => c.topAddr() === f.entry && mainRows().length > 12, 15000, "listing at the function");
+  const rows = (await c.program().listing.rows({ address: f.entry, count: 14 })).filter((r) => !r.label || r.address !== f.entry);
+  const notes: [number, string, string][] = [[2, "triage", "argument parsing starts here"], [6, "todo", "check the length before the copy"], [11, "crypto", "constant looks like a hash seed"]];
+  for (const [i, category, comment] of notes) await c.program().bookmarks.set({ address: rows[i].address, category, comment });
+  await waitFor(() => document.querySelectorAll(".lbox .bm").length >= 3, 10000, "three markers in the listing");
+  c.command({ type: "dock", panel: "bookmarks" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Bookmarks"]'), 5000, "bookmarks panel");
+  await waitFor(() => /3 bookmarks/.test(region.textContent!) && /constant looks like/.test(region.textContent!), 10000, "the three notes in the panel");
+  result.bookmarks = { function: f.name, addresses: notes.map(([i]) => rows[i].address) };
+  await sleep(300);
+  return true;
+}
+
+// the right-click menu of a listing row
+async function copyShot(fl: Fn[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  const f = fl.find((x) => x.name === "main") ?? [...fl].sort((a, b) => b.size - a.size).find((x) => x.size > 300 && x.size < 3000)!;
+  await c.select(f.entry);
+  await waitFor(() => c.topAddr() === f.entry && mainRows().length > 8, 15000, "listing at the function");
+  const row = mainRows()[5], box = row.getBoundingClientRect();
+  row.click();
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: box.left + 160, clientY: box.top + 8 }));
+  await waitFor(() => document.querySelector(".ctxmenu"), 5000, "context menu");
+  result.copy = { menu: [...document.querySelectorAll(".ctxmenu [role=menuitem]")].map((e) => e.textContent) };
   await sleep(300);
   return true;
 }

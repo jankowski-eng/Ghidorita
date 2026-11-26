@@ -30,9 +30,10 @@ sidecar/
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
       highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference)
       search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidretteScans)
-      exports.py       export_symbols (JSON symbol map), export_header (C header)
+      exports.py       export_symbols (JSON symbol map), export_header (C header), export_gzf (Ghidra archive, lane R)
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
-      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from, call_graph
+      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from, call_graph, function_calls (scan lane)
+      bookmarks.py     list_bookmarks, set_bookmark, remove_bookmark (BookmarkManager; set/remove are edits that announce their address)
       datatypes.py     list_data_types and the data-type-manager RPCs
   jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
   test_*.py, testlib.py, conftest.py    tests: mostly one file per domain, black box over WebSocket against real Ghidra on /bin/ls

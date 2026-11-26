@@ -22,7 +22,8 @@ src/renderer/
     DialogHost.tsx     renders the modal dialogs: opening progress, import, edit, form
     menu.ts            routeMenu (every menu/command-bar command), useMenuState (pushed to main), useWindowTitle, useBusy
     coverage.ts        load / clear coverage runs and repaint
-    exports.ts         File > Export
+    exports.ts         File > Export (symbol map, C header, Ghidra archive)
+    copy.ts            useCopy: copy address / bytes (hex, C array) / decompiled text from the focused pane; clipboard.ts has the writer (navigator.clipboard, then the validated IPC)
     reactions.ts       useProgramReactions: program_changed -> tabs, listing rows, xrefs, function list (the decisions are in changes.ts); tabs reset with the program
     bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, Space, focus), quit-save, the autotest driver
   useTabs.ts tabs.ts   decompiler tabs and their results (tabs.ts is the pure part)

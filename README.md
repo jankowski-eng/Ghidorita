@@ -12,7 +12,7 @@ Ghidrette is a fast desktop reverse-engineering workspace on top of [Ghidra](htt
 
 ## Features and how to use them
 
-Shortcuts are shown for macOS (use Ctrl on other platforms). Screenshots: `mysqldump` (arm64), `/usr/bin/zip`, `/usr/bin/vim` and `/bin/bash` (x86-64 Mach-O).
+Shortcuts are shown for macOS (use Ctrl on other platforms). Screenshots: `mysqldump` (arm64), `/usr/bin/zip`, `/usr/bin/vim` and `/bin/bash` (x86-64 Mach-O); the Calls, Bookmarks and Copy screenshots are `/bin/ls`.
 
 ### Open a binary
 File > Open Binary… (`Cmd+O`), or reopen a program from the start screen's **Programs in this project** list (each with its size, analysis state, last opening and import options; **Delete** removes it). Before anything is analysed, an import card shows what the file is: format, architecture, entry point, size, an entropy strip over the whole file and every section with its size and entropy, so packed or encrypted regions stand out. Loader, language, compiler, base address and the Full/Fast analysis profile sit behind **Advanced options…** (Fast skips switch analysis, call-convention ID and stack analysis; it is the default above 20 MB). Analysis is stored per file (sha256), so reopening skips it.
@@ -62,8 +62,23 @@ File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` 
 
 ![Two coverage runs compared in listing and decompiler](screenshots/coverage.png)
 
+### Calls: callers and callees (`Cmd+Shift+J`)
+View > Calls lists the callers and callees of the function at the cursor as a table (the Call Graph shows the same neighbourhood as a picture). An import stub shows what it forwards to and is marked *thunk to external*; externals have no address to go to. Click a row to navigate the listing and decompiler.
+
+![Calls panel with three callers, five callees and a thunk to an external](screenshots/calls.png)
+
+### Bookmarks (`Cmd+D`)
+Edit > Add Bookmark… (`Cmd+D`) adds a note with a category at the cursor row or decompiler line; it shows as a marker in the listing. View > Bookmarks (`Cmd+Shift+B`) lists them, sortable by address, type or category, with a text filter and a type filter: it shows your own notes by default, and Ghidra's analyzer bookmarks (Analysis, Warning, Error, Info) are one dropdown away. × removes one. Adding and removing are undoable like any edit and are saved with the program.
+
+![Bookmarks panel with three notes and their markers in the listing](screenshots/bookmarks.png)
+
+### Copy
+Right-click a listing row for **Copy Address**, **Copy Bytes (Hex)** and **Copy Bytes (C Array)**; the function list and the decompiler have Copy Address, and the decompiler also **Copy Decompiled Function**. The same actions are in the Edit menu (`Cmd+Shift+C` copies the address, `Cmd+Alt+C` the bytes) and the command bar. `Cmd+C` stays the plain copy of a text selection.
+
+![Right-click menu on a listing row](screenshots/copy.png)
+
 ### Save and export
-`Cmd+S` saves; edits are also saved when you open another program, close it or quit, and unsaved changes are snapshotted every two minutes so a crash loses little. Saving ends Ghidra's undo history. File > Export > Symbol Map (JSON)… or C Header… writes your names and types for reports or other tools.
+`Cmd+S` saves; edits are also saved when you open another program, close it or quit, and unsaved changes are snapshotted every two minutes so a crash loses little. Saving ends Ghidra's undo history. File > Export > Symbol Map (JSON)… or C Header… writes your names and types for reports or other tools; **Ghidra Archive (.gzf)…** writes the whole program, unsaved edits included, for Ghidra's own importer (refused while an analysis runs).
 
 ## Getting started
 
