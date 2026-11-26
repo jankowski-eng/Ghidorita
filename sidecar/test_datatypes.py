@@ -1,7 +1,7 @@
 """Data type manager RPCs (tree, detail, struct/enum editors, apply) against real Ghidra on /bin/ls; one analysis copied per test."""
 import asyncio, time
 
-from test_backend import BIN, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, run
+from testlib import BIN, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, run
 from test_persist import base, change, projects  # noqa: F401  (fixtures)
 
 

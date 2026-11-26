@@ -3,7 +3,7 @@ import asyncio, glob, os, shutil, signal, time
 
 import pytest
 
-from test_backend import BIN, INVALID, NO_PROGRAM, Client, Proc, run
+from testlib import BIN, INVALID, NO_PROGRAM, Client, Proc, run
 
 
 @pytest.fixture(scope="module")
