@@ -1,6 +1,6 @@
 import type { FunctionInfo } from "../../../../protocol";
 import { copied } from "../clipboard";
-import { byLabel, press, setSelect, typeInto, waitFor, sleep, type AutotestCtx } from "./autotest";
+import { byLabel, isMock, press, setSelect, typeInto, waitFor, sleep, type AutotestCtx } from "./autotest";
 
 // Round 11 flow: one step per quick win (copy actions, then callers/callees, then bookmarks). Mock and real sidecar.
 const need = (ok: unknown, what: string) => { if (!ok) throw new Error("quick: " + what); };
@@ -85,6 +85,38 @@ async function hexStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any
   other!.click();
   await waitFor(() => cur().length === 1 || cur().some((e) => e === other || (e.closest(".hx-row") === rowEl && [...e.parentElement!.children].indexOf(e) === idx)), 10000, "clicked byte becomes the cursor");
   R.hex = { address: addr, bytes: shown, ok: true };
+}
+
+async function patchStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>, result: Record<string, any>) {
+  need(c.backend.capabilities.has("patch"), "provider has no patch capability");
+  await c.goAddr(fl[0].entry);
+  await waitFor(() => c.topAddr() === fl[0].entry && mainRow(2), 10000, "listing at the first function");
+  const addr = rowAddr(mainRow(2));
+  mainRow(2).click(); document.querySelector<HTMLElement>(".lbox")!.focus(); await sleep(100);
+  const first = (await c.program().listing.bytes({ address: addr, length: 1 })).bytes;
+  const text = first === "90" ? "INT3" : "NOP", bytes = first === "90" ? "cc" : "90";
+  c.command({ type: "edit", action: "patch" });
+  const dlg = await waitFor(() => byLabel("dialog", "Patch instruction"), 5000, "patch dialog");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Instruction"]')!, "frob rax");
+  await waitFor(() => /cannot assemble|FROB|frob/i.test(dlg.querySelector('[aria-label="Preview"]')!.textContent ?? ""), 60000, "an error for a bad instruction in the preview");
+  need(dlg.querySelector<HTMLButtonElement>('button[aria-label="Patch"]')!.disabled, "Patch is disabled while the preview fails");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Instruction"]')!, text);
+  const preview = () => dlg.querySelector('[aria-label="Preview"]')!.textContent ?? "";
+  await waitFor(() => preview() !== "…" && !/frob/i.test(preview()), 60000, "the preview of " + text);
+  need(preview().startsWith(bytes) && !dlg.querySelector<HTMLButtonElement>('button[aria-label="Patch"]')!.disabled, `preview of ${text}: ${preview()}`);
+  dlg.querySelector<HTMLButtonElement>('button[aria-label="Patch"]')!.click();
+  await waitFor(() => !byLabel("dialog", "Patch instruction"), 10000, "dialog closed");
+  need((await c.program().listing.bytes({ address: addr, length: 1 })).bytes === bytes, "the byte is written");
+  const patches = await c.program().patch.list();
+  const p = patches.find((x) => x.address === addr);
+  need(p && p.original === first && p.current.startsWith(bytes), "list_patches has the change with the original: " + JSON.stringify(patches));
+  if (!isMock(fl)) need((await c.program().listing.rows({ address: addr, count: 1 }))[0].mnemonic === text, "the listing re-disassembled the range");
+  c.command({ type: "dock", panel: "hex" });
+  const region = await waitFor(() => byLabel<HTMLElement>("region", "Bytes"), 5000, "bytes pane");
+  const chg = await waitFor(() => [...region.querySelectorAll<HTMLElement>(".hx-b.chg")].find((e) => e.title === `patched, was ${first}`), 10000, "the patched byte marked in the hex pane");
+  need(chg.textContent === bytes, "the marked byte shows the new value");
+  R.patch = { address: addr, original: first, current: bytes };
+  result.quickPersist = { ...(result.quickPersist ?? {}), patch: { address: addr, original: first, current: bytes } };
 }
 
 async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
@@ -203,7 +235,7 @@ async function bookmarkStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string
   c.command({ type: "edit", action: "save" }); // clean for the edit flow, and the bookmark must survive the quit (AUTOTEST_PHASE=2 checks it)
   await waitFor(() => !c.title().startsWith("• "), 10000, "saved");
   R.bookmarks = { address: addr, before: n0 };
-  result.quickPersist = { bookmark: { address: addr, comment: "autotest bookmark" } };
+  result.quickPersist = { ...(result.quickPersist ?? {}), bookmark: { address: addr, comment: "autotest bookmark" } };
 }
 
 export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
@@ -213,6 +245,7 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   await stackStep(fl, c, R);
   await undefinedStep(c, R);
   await hexStep(fl, c, R);
+  await patchStep(fl, c, R, result);
   await bookmarkStep(fl, c, R, result);
   return true;
 }

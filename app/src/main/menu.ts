@@ -66,7 +66,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { id: "bookmark", label: "Add Bookmark…", accelerator: acc("edit:bookmark"), enabled: state.hasProgram && allowsEdit(caps, "bookmark"), click: () => send({ type: "edit", action: "bookmark" }) },
         ...(([["Rename…", "rename"], ["Retype Variable…", "retype"], ["Set Comment…", "comment"], ["Create Function", "createFunction"],
-          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Set Equate…", "setEquate"], ["Mark Function as No Return", "noReturn"], ["Split Out As New Variable…", "splitVariable"], ["Force Field…", "forceField"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"]] as const).map(([label, action]): MenuItemConstructorOptions =>
+          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Set Equate…", "setEquate"], ["Mark Function as No Return", "noReturn"], ["Split Out As New Variable…", "splitVariable"], ["Force Field…", "forceField"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"], ["Patch Instruction…", "patch"]] as const).map(([label, action]): MenuItemConstructorOptions =>
           ({ id: action, label: lab(label, "edit:" + action), enabled: state.hasProgram && allowsEdit(caps, action), click: () => send({ type: "edit", action }) }))),
       ] },
       { label: "View", submenu: [

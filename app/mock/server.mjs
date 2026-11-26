@@ -10,7 +10,7 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map() });
+const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map(), patches: new Map() });
 let S = freshS();
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
@@ -60,6 +60,17 @@ function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mut
   changed(notify, ranges, kinds);
   return result;
 }
+function assembleAt({ address, text }) {
+    if (typeof text !== "string" || !text.trim()) bad("text");
+    const f = segOf(address), at = parseAddr(address);
+    if (!f) nf();
+    const r = f[0].row(f[1]);
+    if (at !== Number(f[0].base) + f[1] * STRIDE) bad("address is inside an instruction");
+    const bytes = { nop: "90", int3: "cc" }[text.trim().toLowerCase()];
+    if (!bytes) bad(`cannot assemble '${text.trim()}'`);
+    const old = (r.bytes + " 00 00 00 00 00 00 00 00").split(" ").slice(0, r.length).join(" ");
+    return { address, bytes, length: 1, oldBytes: old, oldLength: r.length, overwrites: 0 };
+  }
 const MNEMS = ["push", "mov", "lea", "call", "add", "sub", "cmp", "jne", "xor", "ret"];
 
 const hexb = (h, n) => Array.from({ length: n }, (_, k) => (((h >>> ((k % 4) * 8)) + k) & 255).toString(16).padStart(2, "0")).join(" ");
@@ -422,8 +433,22 @@ const handlers = {
       const r = f[0].row(i), b = r.bytes.split(" ");
       for (let k = skip; k < r.length && out.length < length; k++) out.push(b[k] ?? "00");
     }
-    return { address, length, bytes: out.join(" ") };
+    const at = parseAddr(address);
+    return { address, length, bytes: out.map((b, i) => S.patches.get(at + i)?.cur ?? b).join(" ") };
   },
+  // patching: the mock assembles only NOP (90) and INT3 (cc); patched bytes show in get_bytes and list_patches, not in the listing rows
+  assemble_instruction: assembleAt,
+  patch_instruction({ address, bytes, overwriteFollowing }, notify) {
+    const a = assembleAt({ address, text: { "90": "nop", cc: "int3" }[bytes] ?? "?" });
+    const at = parseAddr(address), orig = handlers.get_bytes({ address, length: a.oldLength }).bytes.split(" ");
+    void overwriteFollowing;
+    return edit(`Patch instruction at ${address}`, notify, [{ start: address, end: hex(Number(at) + a.oldLength - 1) }], ["code", "data"], () => {
+      const was = S.patches.get(Number(at));
+      S.patches.set(Number(at), { orig: was?.orig ?? orig[0], cur: bytes });
+      return { address, length: 1, replaced: a.oldLength, overwritten: 0 };
+    });
+  },
+  list_patches() { return [...S.patches].filter(([, p]) => p.orig !== p.cur).sort((x, y) => x[0] - y[0]).map(([n, p]) => ({ address: hex(n), length: 1, original: p.orig, current: p.cur })); },
   get_function_at: ({ address }) => funcAt(parseAddr(address)),
   export_symbols({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, functions: NFUNC, labels: 3, data: 2, comments: 1 }; },
   export_header({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, types: 2, functions: NFUNC, skipped: 0 }; },

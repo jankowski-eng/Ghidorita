@@ -212,6 +212,11 @@ export class WebSocketBackend implements ApplicationBackend {
         set: (p) => edit("bookmarks", "setBookmark", "set_bookmark", p),
         remove: (p) => edit("bookmarks", "removeBookmark", "remove_bookmark", p),
       },
+      patch: {
+        assemble: (p) => job("patch", "assemble_instruction", p, "cancel_search"),
+        apply: (p) => edit("patch", "patchInstruction", "patch_instruction", p),
+        list: () => read("list_patches", {}, "patch"),
+      },
       edits: {
         getComments: (p) => read("get_comments", p, "editing"),
         renameSymbol: (p) => edit("editing", "renameSymbol", "rename_symbol", p),

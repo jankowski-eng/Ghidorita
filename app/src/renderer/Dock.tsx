@@ -2,7 +2,7 @@ import type { Capability } from "../../../protocol";
 import type { Searches } from "./backend";
 import { dockCapability } from "../capabilities";
 import { useState } from "react";
-import type { Address, FunctionInfo } from "../../../protocol";
+import type { Address, FunctionInfo, PatchedRange } from "../../../protocol";
 import { StringsPanel } from "./StringsPanel";
 import { SymbolsPanel } from "./SymbolsPanel";
 import { MemSearchPanel } from "./MemSearchPanel";
@@ -25,7 +25,7 @@ const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defi
 
 /** Bottom dock with the navigate-and-find windows. A panel keeps its filter/results while another tab is shown (hidden, not unmounted). */
 export function Dock({ searches, capabilities, active, onActivate, onClose, version, onGo, onError, cov, calls, stack, bookmarks, hex }: {
-  hex: { read: ListingReads["bytes"]; unit: (a: Address) => Promise<{ address: Address; length: number } | null>; map: AddrMap; cursor: Address | null };
+  hex: { read: ListingReads["bytes"]; patches?: () => Promise<PatchedRange[]>; unit: (a: Address) => Promise<{ address: Address; length: number } | null>; map: AddrMap; cursor: Address | null };
   stack: { read: FunctionNavigation["stackFrame"]; entry: Address | null; name: string; onRename?: (entry: Address, s: StackSlot) => void; onRetype?: (entry: Address, s: StackSlot) => void };
   bookmarks: Bookmarks;
   calls: { op: References["calls"]; entry: Address | null; name: string };

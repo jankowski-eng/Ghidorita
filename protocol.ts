@@ -146,7 +146,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -275,10 +275,21 @@ export interface Methods {
   create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
   // Ghidra's Auto Create Structure on a decompiler variable: infers a struct from the field accesses through it, retypes the variable to a pointer to it; one transaction. structName default: Ghidra's unique name in /auto_structs.
   auto_create_structure: { params: { entry: Address; name: string; structName?: string; timeoutSecs?: number }; result: { path: string } };
+  // ---- patching (capability "patch", protocol.md "Patching") ----
+  // Assembles one instruction with Ghidra's assembler for the program's language; nothing is written. Scan lane (the first call per language builds the grammar), cancellable with cancel_search. InvalidArgument names what was rejected.
+  assemble_instruction: { params: { address: Address; text: string }; result: AssembledInstruction };
+  // Writes the bytes over the code unit at `address`: one transaction "Patch instruction at <address>", range re-disassembled, original bytes kept in a program property map. Longer than the unit = InvalidArgument unless overwriteFollowing.
+  patch_instruction: { params: { address: Address; bytes: string; overwriteFollowing?: boolean }; result: { address: Address; length: number; replaced: number; overwritten: number } };
+  // The bytes that differ from what the file had, as runs of adjacent addresses (address order, at most 10000 runs).
+  list_patches: { params: {}; result: PatchedRange[] };
   // ---- persistence ----
   // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
   save: { params: {}; result: { saved: boolean; undoHistoryCleared: boolean } };
 }
+
+/** oldLength/oldBytes: the code unit at `address` that a patch replaces; overwrites: the following instructions or defined data a longer patch would also overwrite (0 when the bytes fit). bytes/oldBytes: hex like "48 89 e5". */
+export interface AssembledInstruction { address: Address; bytes: string; length: number; oldBytes: string; oldLength: number; overwrites: number }
+export interface PatchedRange { address: Address; length: number; original: string; current: string } // hex of the bytes the file had / the program has now
 
 /** All optional. Omit all = Ghidra's default import (preferred LoadSpec); programId stays the plain sha256. Any field present = explicit import, programId = sha256 + "-" + 12 hex of the options hash (protocol.md). */
 export interface ImportOptions {

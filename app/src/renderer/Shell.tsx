@@ -48,7 +48,7 @@ export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown
   const map = useProgram((p) => p.map), here = useViews((v) => v.nav.current?.address ?? null);
   const cov = useMemo(() => coverageActions(s), [s]);
   if (!program || !dock || !map) return null;
-  const hex = { read: program.api.listing.bytes, map, cursor: cursorAt ?? here,
+  const hex = { read: program.api.listing.bytes, patches: s.caps.has("patch") ? program.api.patch.list : undefined, map, cursor: cursorAt ?? here,
     unit: async (address: Address) => (await program.api.listing.rows({ address, count: 1 }))[0] ?? null };
   // a slot is edited through the decompiler's variable edits (rename_variable / retype_variable): the same dialogs as the decompiler's L and Cmd+L
   const ask = (spec: { title: string; label: string; field: "text" | "datatype"; initial: string; submit: string }, go: (v: string) => Promise<unknown>) =>

@@ -12,12 +12,13 @@ from .domains.edits import Edits
 from .domains.exports import Exports
 from .domains.highvars import HighVars
 from .domains.listing import Listing
+from .domains.patch import Patch
 from .domains.program import Program
 from .domains.project import Project
 from .domains.search import Search
 from .domains.xrefs import Xrefs
 
-DOMAINS = (Listing, Decompile, Edits, HighVars, Search, Xrefs, DataTypes, Exports, Bookmarks, Debug)  # Project and Program are built first, the others only need ctx
+DOMAINS = (Listing, Decompile, Edits, HighVars, Search, Xrefs, DataTypes, Exports, Bookmarks, Debug, Patch)  # Project and Program are built first, the others only need ctx
 
 
 class App:

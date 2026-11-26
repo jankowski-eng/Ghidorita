@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
+  AssembledInstruction, PatchedRange, BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -119,6 +119,13 @@ export interface ProgramEdits {
   autoCreateStructure(params: { entry: Address; name: string; structName?: string }): Promise<{ path: string }>;
 }
 
+/** `patch` capability: one instruction at a time. `assemble` writes nothing (a scan, cancel it when the text changes); `apply` is one undo step. */
+export interface Patching {
+  assemble(params: { address: Address; text: string }): Job<AssembledInstruction>;
+  apply(params: { address: Address; bytes: string; overwriteFollowing?: boolean }): Promise<{ address: Address; length: number; replaced: number; overwritten: number }>;
+  list(): Promise<PatchedRange[]>;
+}
+
 export interface ProgramHistory {
   state(): Promise<UndoState>;
   undo(): Promise<UndoState>;
@@ -180,6 +187,7 @@ export interface ProgramOperations {
   typeEdits: TypeEdits;
   edits: ProgramEdits;
   bookmarks: Bookmarks;
+  patch: Patching;
   history: ProgramHistory;
   coverage: CoverageReads;
   exports: Exports;

@@ -86,6 +86,8 @@ Listing rows show function headers, plate/pre/post/EOL/repeatable comments, all 
 
 Bytes (hex view): View > Bytes (Hex View) or "Bytes (Hex View)" in the command bar opens a dock tab (capability `bytes`; Ghidra has no default key for opening its Bytes window, so none is bound). It follows the shared cursor (listing row, decompiler token, any navigation), highlights the bytes of the code unit under it and pages `get_bytes` in 4 KiB requests as it scrolls; unmapped ranges are gap rows. Click a byte to move the cursor. `AUTOTEST_FLOW=shot-hex` takes its screenshot.
 
+Patching (capability `patch`): Edit > Patch Instruction… (also the listing's context menu and "Patch Instruction" in the command bar) on a listing row. The dialog assembles what you type with Ghidra's assembler for the program's language and previews the bytes (and what they replace) before Patch is enabled; bytes longer than the instruction need the "also overwrite the following instructions" box. One undo step "Patch instruction at <address>"; the Bytes tab marks changed bytes (tooltip: the original). Ghidra's own key for it, Ctrl+Shift+G, is already the call graph here, so no key is bound. Originals live in the program (user property map `ghidorita.patch.original`), so they survive save and reopen. Tests: `sidecar/test_patch.py` (in-process), and the quick autotest flow (`AUTOTEST_FLOW=shot-patch` for the screenshot); the two-phase edit autotest checks the patch after relaunch.
+
 ## Packaging (macOS, Apple Silicon)
 
 ```bash

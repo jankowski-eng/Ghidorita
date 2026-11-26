@@ -20,6 +20,7 @@ export function describe(method: string, p: any): { label: string; address?: Add
     case "clearCode": return { label: "Clear code", address: p.address };
     case "createStructFromData": return { label: `Structure ${p.name} from data`, address: p.address };
     case "autoCreateStructure": return { label: `Auto structure ${p.structName ?? ""}`.trim(), address: p.entry };
+    case "patchInstruction": return { label: `Patch ${p.bytes}`, address: p.address };
     case "setBookmark": return { label: `Bookmark ${p.category ? p.category : "(no category)"}`, address: p.address };
     case "removeBookmark": return { label: `Remove bookmark${p.category ? " " + p.category : ""}`, address: p.address };
     case "createDataType": return { label: `Create ${p.kind}${p.name ? " " + p.name : ""}` };

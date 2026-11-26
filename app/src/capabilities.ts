@@ -16,6 +16,7 @@ export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCo
     case "defineData": case "defineArray": case "definePointer": case "repeatData": case "createStruct": return caps.has("typeEditing");
     case "setEquate": case "noReturn": case "splitVariable": case "forceField": return caps.has("decompile") && caps.has("decompilerEdits");
     case "bookmark": return caps.has("bookmarks");
+    case "patch": return caps.has("patch");
     default: return caps.has("editing");
   }
 }

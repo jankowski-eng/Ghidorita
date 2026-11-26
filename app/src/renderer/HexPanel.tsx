@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Address } from "../../../protocol";
+import type { Address, PatchedRange } from "../../../protocol";
 import type { ListingReads } from "./backend";
 import type { AddrMap } from "./addrmap";
 import { fmtAddr, parseAddr } from "./address";
@@ -13,14 +13,28 @@ type Chunk = { lo: bigint; bytes: number[] | null };
  * Hex view (read-only): offset, 16 bytes per row, ASCII; follows the shared cursor and highlights the bytes of the code unit under it.
  * Rows come from `get_bytes` in 4 KiB pages as the view scrolls; only mapped ranges are requested, the rest shows as gaps. Clicking a byte moves the cursor.
  */
-export function HexPanel({ read, unit, map, cursor, version, onGo, onError }: {
-  read: ListingReads["bytes"]; unit: (a: Address) => Promise<{ address: Address; length: number } | null>; map: AddrMap; cursor: Address | null; version: number;
+export function HexPanel({ read, patches, unit, map, cursor, version, onGo, onError }: {
+  read: ListingReads["bytes"]; patches?: () => Promise<PatchedRange[]>; unit: (a: Address) => Promise<{ address: Address; length: number } | null>; map: AddrMap; cursor: Address | null; version: number;
   onGo: (a: Address) => void; onError: (e: unknown) => void;
 }) {
   const layout = useMemo(() => hexLayout(map.ranges), [map]);
   const box = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0), [view, setView] = useState(24), [tick, setTick] = useState(0);
   const [mark, setMark] = useState<{ space: string; lo: bigint; hi: bigint } | null>(null);
+  const [changed, setChanged] = useState(() => new Map<string, string>()); // "space|offset" -> the byte the file had (patch capability)
+  useEffect(() => {
+    let live = true;
+    if (!patches) return;
+    patches().then((runs) => {
+      const m = new Map<string, string>();
+      for (const r of runs) {
+        const p = parseAddr(r.address), was = r.original.split(" ");
+        if (p) for (let i = 0; i < was.length && m.size < 200_000; i++) m.set(p.space + "|" + (p.off + BigInt(i)), was[i]);
+      }
+      if (live) setChanged(m);
+    }, () => { if (live) setChanged(new Map()); });
+    return () => { live = false; };
+  }, [version, layout]); // eslint-disable-line
   const cache = useRef(new Map<string, Chunk>()), asked = useRef(new Set<string>()), gen = useRef(0);
   const spacer = Math.min(layout.rows * RH, MAX_H), scaled = layout.rows * RH > MAX_H;
   const rowAtScroll = (st: number, ch: number) => {
@@ -96,10 +110,11 @@ export function HexPanel({ read, unit, map, cursor, version, onGo, onError }: {
     const on = (i: number) => !!mark && mark.space === s.space && line.base + BigInt(i) >= mark.lo && line.base + BigInt(i) < mark.hi;
     const inRange = (i: number) => line.cells[i] !== "  ";
     const go = (i: number) => { if (inRange(i)) onGo(fmtAddr(s.space, line.base + BigInt(i))); };
+    const was = (i: number) => changed.get(s.space + "|" + (line.base + BigInt(i)));
     lines.push(
       <div key={r} className="hx-row" role="row" aria-rowindex={r + 1}>
         <span className="hx-off">{line.address}</span>
-        <span className="hx-bytes">{line.cells.map((t, i) => <span key={i} role="gridcell" className={"hx-b" + (on(i) ? " cur" : "") + (t === "??" ? " bad" : "") + (i === 8 ? " mid" : "")} onClick={() => go(i)}>{t}</span>)}</span>
+        <span className="hx-bytes">{line.cells.map((t, i) => <span key={i} role="gridcell" className={"hx-b" + (on(i) ? " cur" : "") + (t === "??" ? " bad" : "") + (i === 8 ? " mid" : "") + (was(i) ? " chg" : "")} title={was(i) ? `patched, was ${was(i)}` : undefined} onClick={() => go(i)}>{t}</span>)}</span>
         <span className="hx-ascii">{[...line.ascii].map((t, i) => <span key={i} className={on(i) ? "cur" : undefined} onClick={() => go(i)}>{t}</span>)}</span>
       </div>,
     );

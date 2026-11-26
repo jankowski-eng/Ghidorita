@@ -4,7 +4,7 @@ import type { FuncAt } from "../symbols";
 import type { DockId } from "../Dock";
 import type { PaneId } from "../Layout";
 import type { EditSpec } from "../EditDialog";
-import type { FormField } from "../FormDialog";
+import type { FormField, FormPreview } from "../FormDialog";
 import type { XrefTarget } from "../editActions";
 import type { CommentKind } from "../../../../protocol";
 import { emptyNav } from "../nav";
@@ -12,7 +12,7 @@ import { createStore } from "./createStore";
 
 export type RangeList = { start: Address; end: Address }[] | null;
 export interface EditDialogState { spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> }
-export interface FormDialogState { title: string; submit: string; fields: FormField[]; go: (v: Record<string, string>) => Promise<void> }
+export interface FormDialogState { title: string; submit: string; fields: FormField[]; preview?: FormPreview; go: (v: Record<string, string>) => Promise<void> }
 
 /** What the panes show about the open program (position, panels, dialogs). Everything but `visible`, `graphOn`, `callGraphOn`, `covVersion`, `dataVersion`, `typesVersion` and `importFor` is dropped on a reset. */
 export interface Views {

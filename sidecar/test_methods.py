@@ -11,7 +11,7 @@ GOLDEN = {
     "open_binary": "open", "open_program": "open",
     "close_program": "project", "import_candidates": "project", "list_programs": "project", "delete_program": "project",
     "list_languages": "project+busy_ok",
-    "search_symbols": "scan", "export_symbols": "scan", "export_header": "scan", "export_gzf": "R", "function_calls": "scan", "top_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "list_undefined_refs": "scan", "search_memory": "scan", "list_data_types": "scan", "list_bookmarks": "scan", "call_graph": "scan", "debug_values": "scan",
+    "search_symbols": "scan", "export_symbols": "scan", "export_header": "scan", "export_gzf": "R", "function_calls": "scan", "top_symbols": "scan", "list_symbols": "scan", "list_strings": "scan", "list_undefined_refs": "scan", "search_memory": "scan", "list_data_types": "scan", "list_bookmarks": "scan", "call_graph": "scan", "debug_values": "scan", "assemble_instruction": "scan",
     "decompile": "decomp", "variable_uses": "decomp", "function_graph": "decomp",
     "rename_variable": "edit", "retype_variable": "edit", "auto_create_structure": "edit", "split_variable": "edit", "force_union_field": "edit", "load_coverage": "file",
     **{m: "R" for m in (
@@ -20,7 +20,7 @@ GOLDEN = {
         "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment", "create_function",
         "set_function_signature", "set_equate", "set_function_no_return", "undo", "redo", "define_data", "clear_code", "save", "start_analysis", "dt_sources", "dt_children",
         "get_data_type", "create_data_type", "delete_data_type", "rename_data_type", "edit_struct", "edit_enum",
-        "create_struct_from_data")},
+        "create_struct_from_data", "patch_instruction", "list_patches")},
 }
 
 

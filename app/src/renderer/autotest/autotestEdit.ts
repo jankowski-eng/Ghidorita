@@ -176,7 +176,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { equate?: { entry: string; name: string }; entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; data?: { arr: string; ptr: string; rep: string }; auto?: string } };
+  const x = c.expect as { equate?: { entry: string; name: string }; entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; patch?: { address: string; original: string; current: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; data?: { arr: string; ptr: string; rep: string }; auto?: string } };
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
   const f = await c.program().functions.containing({ address: x.entry });
@@ -211,6 +211,12 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
   if (x.equate) { // the equate set with E survived save + quit + relaunch
     result.phase2.equate = (await c.program().decompiler.decompile({ entry: x.equate.entry }).result).text.includes(x.equate.name);
     typesOk = typesOk && result.phase2.equate;
+  }
+  if (x.patch) { // the patch (bytes and stored original) survived save + quit + relaunch
+    const now = (await c.program().listing.bytes({ address: x.patch.address, length: 1 })).bytes;
+    const p = (await c.program().patch.list()).find((i) => i.address === x.patch!.address);
+    result.phase2.patch = { now, listed: p ?? null };
+    typesOk = typesOk && now === x.patch.current && p?.original === x.patch.original;
   }
   result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty && typesOk;
 }

@@ -231,3 +231,5 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 .hx-b { display: inline-block; width: 2ch; margin-right: 1ch; cursor: pointer; } .hx-b.mid { margin-left: 1ch; } .hx-b.bad { color: #c66; }
 .hx-bytes .cur, .hx-ascii .cur { background: #094771; color: #fff; } .hx-ascii span { cursor: pointer; }
 .hx-gap { color: #777; font-style: italic; }
+.hx-b.chg { color: #f48771; font-weight: 700; }
+.dlg .pv { font-size: 12px; color: #9cdcfe; min-height: 1.4em; } .dlg .pv.wait { color: #888; } .dlg label.chk { flex-direction: row; align-items: center; gap: 6px; }

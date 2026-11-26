@@ -45,6 +45,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
     setCursor((on.find((t) => col1 - 1 >= t.colStart && col1 - 1 < t.colEnd) ?? on[0])?.address ?? null);
   };
   const rowMenu = () => [
+    ...(caps.has("patch") ? [{ label: "Patch Instruction…", run: () => void editing.edit("patch") }] : []),
     { label: "Copy Address", run: () => void copy.copy("address") },
     ...(caps.has("bytes") ? [{ label: "Copy Bytes (Hex)", run: () => void copy.copy("bytes") }, { label: "Copy Bytes (C Array)", run: () => void copy.copy("carray") }] : []),
   ];

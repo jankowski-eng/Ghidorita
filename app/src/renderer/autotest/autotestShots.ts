@@ -20,6 +20,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
   if (name === "shot-warnings") return warningsShot(fl!, c, result);
   if (name === "shot-hex") return hexShot(fl!, c, result);
+  if (name === "shot-patch") return patchShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
   if (name === "shot-actions") return actionsShot(fl!, c);
@@ -321,6 +322,22 @@ async function hexShot(fl: { entry: string }[], c: AutotestCtx, result: Record<s
   const region = await waitFor(() => byLabel<HTMLElement>("region", "Bytes"), 5000, "bytes pane");
   await waitFor(() => region.querySelectorAll(".hx-b.cur").length > 0 && ![...region.querySelectorAll(".hx-b")].some((e) => e.textContent === "··"), 10000, "bytes loaded");
   result.hex = { rows: region.querySelectorAll(".hx-row").length, cursorBytes: region.querySelectorAll(".hx-bytes .hx-b.cur").length };
+  await sleep(300);
+  return true;
+}
+
+async function patchShot(fl: { entry: string }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  need(c.backend.capabilities.has("patch"), "provider has no patch capability");
+  await c.goAddr(fl[0].entry);
+  const row = await waitFor(() => document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")[4], 10000, "listing rows");
+  row.click(); document.querySelector<HTMLElement>(".lbox")!.focus(); await sleep(100);
+  c.command({ type: "dock", panel: "hex" });
+  c.command({ type: "edit", action: "patch" });
+  const dlg = await waitFor(() => byLabel("dialog", "Patch instruction"), 5000, "patch dialog");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Instruction"]')!, "NOP");
+  const preview = () => dlg.querySelector('[aria-label="Preview"]')!.textContent ?? "";
+  await waitFor(() => /replaces/.test(preview()), 60000, "the preview");
+  result.patch = { preview: preview() };
   await sleep(300);
   return true;
 }

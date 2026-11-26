@@ -23,6 +23,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Split Out As New Variable", cmd: { type: "edit", action: "splitVariable" } },
   { label: "Force Field", cmd: { type: "edit", action: "forceField" } },
   { label: "Auto Create Structure", cmd: { type: "edit", action: "autoStruct" } },
+  { label: "Patch Instruction", cmd: { type: "edit", action: "patch" } },
   { label: "Clear Code", cmd: { type: "edit", action: "clear" } },
   { label: "Copy Address", cmd: { type: "copy", what: "address" } },
   { label: "Copy Bytes (Hex)", cmd: { type: "copy", what: "bytes" } },

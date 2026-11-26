@@ -4,6 +4,7 @@ import { allowsEdit } from "../../capabilities";
 import { arrayPlan, arrayType, equateTarget, fieldTarget, noReturnTarget, splitTarget, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
 import type { EditSpec } from "../EditDialog";
 import type { Program } from "../store/program";
+import { patchPreview } from "../patch";
 import { useSession } from "../store/session";
 import type { TabsApi } from "../useTabs";
 
@@ -83,6 +84,17 @@ export function useEditing(tabs: TabsApi) {
     }
     else if (a === "createStruct") views.dispatch({ type: "set", patch: { formDlg: { title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
       go: async (v) => { await ops.edits.createStructFromData({ address: at, length: Number(v.length), name: v.name.trim() }); } } } });
+    else if (a === "patch") views.dispatch({ type: "set", patch: { formDlg: { title: "Patch instruction", submit: "Patch",
+      fields: [{ key: "text", label: "Instruction", initial: `${row.mnemonic} ${row.operands}`.trim() }, { key: "over", label: "Also overwrite the following instructions when the bytes are longer", kind: "check" }],
+      preview: (v) => {
+        if (!v.text.trim()) return { cancel() {}, result: Promise.resolve({ message: "Type an instruction", ok: false }) };
+        const job = ops.patch.assemble({ address: at, text: v.text.trim() });
+        return { cancel: job.cancel, result: job.result.then((r) => patchPreview(r, v.over === "1")) };
+      },
+      go: async (v) => {
+        const r = await ops.patch.assemble({ address: at, text: v.text.trim() }).result;
+        await ops.patch.apply({ address: at, bytes: r.bytes, overwriteFollowing: v.over === "1" });
+      } } } });
     else if (a === "signature") { const f = await current.lookup.containing(at); if (f) await editSignature(current, f.entry); else session.flash("No function here."); }
     else if (a === "retype") session.flash("Retype works on a variable in the decompiler.");
     else if (a === "setEquate" || a === "noReturn" || a === "splitVariable" || a === "forceField") session.flash("This edit works on a token in the decompiler.");
