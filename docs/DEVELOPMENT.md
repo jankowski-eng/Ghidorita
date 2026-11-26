@@ -37,7 +37,7 @@ export GHIDRA_INSTALL_DIR=$PWD/ghidra-install/ghidra_12.3_DEV
 cd app && npm start
 ```
 
-`npm start` spawns the sidecar itself. Then "Open binary…", pick a file, wait for analysis.
+`npm start` launches the PyGhidra sidecar itself (`GHIDRETTE_PROVIDER=fixture` launches the read-only fixture provider instead; see [PROVIDERS.md](../PROVIDERS.md)). Then "Open binary…", pick a file, wait for analysis.
 
 Other modes:
 
@@ -45,7 +45,8 @@ Other modes:
 MOCK=1 npm start                    # fake sidecar, 2M fake rows (MOCK_LOCKED=1: every project call answers ProjectLocked)
 AUTOTEST=/bin/ls npm start          # scripted flow, prints AUTOTEST_RESULT, writes app/out/screenshot.png
 cd ../sidecar && .venv/bin/python -m pytest -s   # sidecar tests on /bin/ls: test_smoke.py (timings.json) + one test_<domain>.py per sidecar module (layout: sidecar/ARCHITECTURE.md)
-cd ../app && npm test                                          # address map unit test
+cd ../app && npm test                                          # renderer unit tests, incl. the provider-boundary import check
+cd ../sidecar && .venv/bin/python -m pytest -q test_provider_contract.py test_provider_ui.py   # one browsing suite against the fixture and PyGhidra, the built Electron app against fixture, PyGhidra and mock
 BENCH=1 AUTOTEST=<binary> npm start                            # listing/decompile measurements in the renderer
 ../sidecar/.venv/bin/python ../bench/bench_sidecar.py <binary> /tmp/bench-projects out.json   # sidecar-level measurements
 ../sidecar/.venv/bin/python ../bench/bench_navfind.py <binary> <projects dir with the analyzed program> out.json   # symbol table / strings / memory search (row 6)

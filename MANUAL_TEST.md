@@ -53,7 +53,7 @@ Do not touch the mouse from step 4.1 on (except where noted).
 ## 5. Language picker with hundreds of entries (5 min)
 | # | Step | Expected | Pass | Fail |
 |---|---|---|---|---|
-| 5.1 | Type any path to a small non-executable file (for example a `.txt` file) into the path box, Enter. In the import dialog choose loader **Raw Binary**. | A language list appears with hundreds of entries (scroll to the bottom to see how many). The dialog does not freeze while it fills. | ☐ | ☐ |
+| 5.1 | Choose a small non-executable file (for example a `.txt` file) with File > Open Binary… (or Cmd+K, then pick it). In the import dialog choose loader **Raw Binary**. | A language list appears with hundreds of entries (scroll to the bottom to see how many). The dialog does not freeze while it fills. | ☐ | ☐ |
 | 5.2 | Type `x86` in the language filter. | List shrinks to x86 variants at once (no lag you can feel). | ☐ | ☐ |
 | 5.3 | Clear the filter, type `6502`, pick the entry with the keyboard (Down, Enter or Tab to the Open button). | The entry is selected and the compiler spec follows; Open becomes enabled. | ☐ | ☐ |
 | 5.4 | Scroll the full list with the trackpad and with PageUp/PageDown. | Smooth; the selected entry stays highlighted; no duplicate or missing rows when you filter and clear again. | ☐ | ☐ |
@@ -64,6 +64,6 @@ Do not touch the mouse from step 4.1 on (except where noted).
 |---|---|---|---|---|
 | 6.1 | Open `/bin/ls` and, while it is analysing for the first time (fresh projects dir), click Cancel in the progress dialog. | Dialog closes, the welcome pane shows "Open cancelled." (not an error). | ☐ | ☐ |
 | 6.2 | Start a second copy of the app against the same projects dir (`SIDECAR_PROJECTS_DIR=<same> npm start` in another terminal). | The second window's "Programs in this project" shows the red text `projects dir in use by another Ghidrette (<dir>)`. | ☐ | ☐ |
-| 6.3 | Open a file that does not exist through the path box (`/nope`). | An error/notice "Could not open /nope", and no program is open afterwards (the welcome pane). | ☐ | ☐ |
+| 6.3 | Open a program you opened before, rename its file, then choose it under File > Open Recent. | An error/notice "Could not open <path>". A failed open leaves the previously open program (and its unsaved edits) as it was; with none open you stay on the welcome pane. | ☐ | ☐ |
 
 ## Notes

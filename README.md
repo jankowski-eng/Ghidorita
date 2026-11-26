@@ -33,7 +33,8 @@ cd app && npm install && npm start
 |---|---|
 | `app/` | Electron app (main, preload, renderer) |
 | `sidecar/` | Python JSON-RPC sidecar around PyGhidra, with pytest suite |
-| `protocol.md`, `protocol.ts` | The wire protocol between the two |
+| `protocol.md`, `protocol.ts` | The wire protocol between the app and any provider |
+| `PROVIDERS.md`, `app/providers/` | Running either provider, the read-only fixture format, how to add a provider |
 | `bench/` | Benchmark scripts and results |
 | `packaging/` | macOS bundle preparation (`npm run dist`) |
 | `SPIKE_REPORT.md` | Design decisions and measurements per round |

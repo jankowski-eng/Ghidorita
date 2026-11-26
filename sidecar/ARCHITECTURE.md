@@ -1,6 +1,6 @@
 # Sidecar architecture
 
-The wire contract is `../protocol.md` / `../protocol.ts` (read "Concurrency", "Errors", "Persistence"). This page is the code layout.
+The wire contract is `../protocol.md` / `../protocol.ts` (read "Process contract", "Discovery and sessions", "Concurrency", "Errors", "Persistence"); this sidecar is the PyGhidra implementation of it, and `../PROVIDERS.md` explains how to add another. This page is the code layout.
 `sidecar/main.py` stays the entry point (Electron, the tests and `bench/*.py` spawn it): environment checks, JVM launch, `App()`, serve.
 
 ## Layout
@@ -14,19 +14,20 @@ sidecar/
       errors.py        RpcError, error codes, INVALID_JAVA, java_error(), log()
       args.py          hx, lim, text_arg, name_arg
       lanes.py         Job, Scan, Opening, Worker; Lanes = the queues and threads, run(), on_r(), scanning(), cancel()
-      session.py       Session = the open program: program, epoch, program_id, undo snapshot, need(), addr(), edit(), cmd(), function()
+      session.py       Session = the open program: program, epoch, program_id, session_id (fresh per open, via publish()), undo snapshot, need(), addr(), edit(), cmd(), function()
       events.py        Events = DomainObjectListener, coalescing -> program_changed, subscribe(fn(kinds, ranges, broad)), record(), reset()
       context.py       Ctx = the object every domain gets (below)
       rpc.py           @rpc(lane=...), Registry, Dispatcher (the rules formerly in handle())
       server.py        Server: websocket conn(), one-client rule, auth guard, serve(), shutdown()
     domains/           one module per feature area; each is a class taking ctx, with @rpc methods
       project.py       Ghidra project, programs.json, list_programs, delete_program, list_languages, import_candidates, program_key
-      program.py       open_binary (import/analyze/profile), cancel_open, close_program, save, undo, redo, undo_state
+      program.py       provider_info, active_session, open_binary (import/analyze/profile; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
       listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments
       decompile.py     decompile and variable_uses (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
       highvars.py      rename_variable, retype_variable, auto_create_structure
       search.py        search_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache
+      layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates)
       xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from
       datatypes.py     list_data_types and the data-type-manager RPCs
   test_*.py, testlib.py, conftest.py    tests: one file per domain, black box over WebSocket against real Ghidra on /bin/ls
