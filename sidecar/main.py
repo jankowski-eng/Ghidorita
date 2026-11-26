@@ -15,6 +15,7 @@ from ghidrette.core.rpc import Dispatcher, Registry, rpc
 from ghidrette.core.server import Server
 from ghidrette.core.session import undo_state
 from ghidrette.domains.search import Search
+from ghidrette.domains.listing import Listing
 from ghidrette.domains.xrefs import Xrefs
 from ghidrette.core.errors import (BUSY, CANCELLED, INTERNAL, INVALID, INVALID_JAVA, NO_PROGRAM, NOT_FOUND,
                                    PROJECT_LOCKED, TIMEOUT, RpcError, log)
@@ -47,7 +48,7 @@ class Sidecar:
         ctx.shutdown_hooks += [lambda: self._close(), self._close_project]
         self.registry = Registry()
         self.registry.register(self)
-        for dom in (Search, Xrefs):
+        for dom in (Listing, Search, Xrefs):
             self.registry.register(dom(ctx))
         self.server = Server(ctx, Dispatcher(ctx, self.registry).handle)
         ctx.lanes.start()
@@ -589,30 +590,6 @@ class Sidecar:
                 del self.cache[k]
             self.cache_ver += 1  # also stops in-flight decompiles from storing a pre-edit result
 
-    # ---- reads (thread R) ----
-    @rpc(lane="R")
-    def list_functions(self):
-        out = []
-        dspace = self.need().getAddressFactory().getDefaultAddressSpace()
-        for f in self.program.getFunctionManager().getFunctions(True):
-            if f.isExternal():
-                continue
-            ea = f.getEntryPoint()
-            if ea.getAddressSpace() != dspace:  # shortcut: functions in other spaces are not listed (the listing shows them), upgrade with qualified entries
-                continue
-            out.append((ea.getOffset() & MASK64, str(f.getName()), f.getBody().getNumAddresses()))
-        out.sort()
-        return [{"name": n, "entry": hx(o), "size": int(s)} for o, n, s in out]
-
-    @rpc(lane="R")
-    def get_function_at(self, address):
-        prog = self.need()
-        f = prog.getFunctionManager().getFunctionContaining(self.addr(address))
-        if f is None:
-            return None
-        return {"name": str(f.getName()), "entry": self.fmt(f.getEntryPoint()),
-                "size": int(f.getBody().getNumAddresses()), "signature": str(f.getSignature().getPrototypeString())}
-
     @rpc(lane="R")
     def list_data_types(self, query, limit=100):
         from ghidra.program.model.data import BuiltInDataTypeManager
@@ -962,87 +939,6 @@ class Sidecar:
     def undo_state(self, prog=None):
         return undo_state(prog or self.need())
 
-    @rpc(lane="R")
-    def listing_info(self):
-        prog = self.need()
-        f = self.fmtr(prog)
-        # all spaces, in Ghidra's address order: listing_rows walks the same order. size as a JS-safe number (shortcut: ranges of 2^53+ bytes, never)
-        ranges = [{"start": f(r.getMinAddress()), "size": int(r.getLength())} for r in prog.getMemory().getLoadedAndInitializedAddressSet().getAddressRanges(True)]
-        return {"ranges": ranges, "totalBytes": sum(r["size"] for r in ranges)}
-
-    @rpc(lane="R")
-    def listing_rows(self, address, count, direction="forward"):
-        """Walk code units from an anchor address; no index. See protocol.md."""
-        from ghidra.program.model.listing import CommentType, Instruction
-        from jpype import JArray, JByte
-        prog = self.need()
-        fwd = direction != "backward"
-        count = max(0, min(int(count), 1000))
-        listing, st, mem, fa = prog.getListing(), prog.getSymbolTable(), prog.getMemory(), self.fmtr(prog)
-        loaded = mem.getLoadedAndInitializedAddressSet()
-        a = self.addr(address)
-        cu = listing.getCodeUnitContaining(a)
-        a = cu.getMinAddress() if cu is not None else a
-        if count == 0:
-            return []
-        cus = []
-        for cu in listing.getCodeUnits(self._view(loaded, a, fwd), fwd):
-            if len(cus) >= count:
-                break
-            cus.append(cu)
-        if not cus:
-            return []
-        if not fwd:
-            cus.reverse()
-        marks, rm, rows = self._row_marks(prog, cus, fa), prog.getReferenceManager(), []
-        for cu in cus:
-            ca = cu.getMinAddress()
-            n = int(cu.getLength())
-            key = fa(ca)
-            is_ins = isinstance(cu, Instruction)
-            if is_ins:
-                ops = ", ".join(str(cu.getDefaultOperandRepresentation(i)) for i in range(cu.getNumOperands()))
-            else:
-                ops = str(cu.getDefaultValueRepresentation())
-            if n <= 16:
-                b = bytes(x & 0xFF for x in cu.getBytes())
-            else:  # shortcut: the first 16 bytes only (bytesMore says how many are left), upgrade with a get_bytes RPC
-                buf = JArray(JByte)(16)
-                mem.getBytes(ca, buf)
-                b = bytes(x & 0xFF for x in buf)
-            row = {"address": key, "length": n, "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
-            if n > 16:
-                row["bytesMore"] = n - 16
-            if key in marks["sym"]:
-                syms = sorted(st.getSymbols(ca), key=lambda x: not x.isPrimary())
-                names = [str(x.getName()) for x in syms]
-                row["label"] = names[0]
-                if len(names) > 1:
-                    row["labels"] = names
-            for k, out in ROW_COMMENT_KINDS.items():
-                if key in marks["cm"][k]:
-                    c = cu.getComment(getattr(CommentType, k.upper()))
-                    if c:
-                        row[out] = str(c)
-            f = marks["fn"].get(key)
-            if f is not None:
-                row["header"] = self._row_header(f)
-            if key in marks["ref"]:
-                refs = []
-                for r in rm.getReferencesTo(ca):
-                    refs.append({"from": fa(r.getFromAddress()), "kind": self._ref_kind(r.getReferenceType())})
-                    if len(refs) >= self.ROW_XREFS_SHOWN:
-                        break
-                refs.sort(key=lambda o: _akey(o["from"]))  # shortcut: the first 5 Ghidra returns, not the 5 lowest; the full list is xrefs_to
-                row["xrefs"] = {"count": int(rm.getReferenceCountTo(ca)), "items": refs}
-            if not is_ins and cu.isDefined() and cu.getNumComponents() > 0:
-                parts, total = self._row_parts(cu)
-                row["parts"] = parts
-                if total > len(parts):
-                    row["partsTotal"] = total
-            rows.append(row)
-        return rows
-
     _name_arg = staticmethod(name_arg)
 
     @rpc(lane="R")
@@ -1074,20 +970,6 @@ class Sidecar:
         cmd = SetCommentCmd(cu.getMinAddress(), kinds[kind], text or None)
         self.edit(("Clear %s comment" if not text else "Set %s comment") % kind, self._cmd(cmd))
         return {}
-
-    @rpc(lane="R")
-    def get_comments(self, address):
-        from ghidra.program.model.listing import CommentType
-        cu = self.need().getListing().getCodeUnitContaining(self.addr(address))
-        if cu is None:
-            raise RpcError(NOT_FOUND, "no code unit at %s" % address)
-        out = {}
-        for k, t in (("eol", CommentType.EOL), ("pre", CommentType.PRE), ("post", CommentType.POST),
-                     ("plate", CommentType.PLATE), ("repeatable", CommentType.REPEATABLE)):
-            c = cu.getComment(t)
-            if c:
-                out[k] = str(c)
-        return out
 
     @rpc(lane="R")
     def create_label(self, address, name):
