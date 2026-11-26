@@ -11,11 +11,11 @@ from .args import hx
 from .errors import log
 
 # program_changed kinds, see protocol.md. Everything not listed is "other".
-ALL_KINDS = ["symbol", "comment", "function", "data", "code", "type", "other"]
+ALL_KINDS = ["symbol", "comment", "function", "data", "code", "type", "bookmark", "other"]
 KIND_PREFIX = [("SYMBOL_", "symbol"), ("EXTERNAL_", "symbol"), ("REFERENCE_", "symbol"), ("REFERNCE_", "symbol"), ("EQUATE_", "symbol"),
                ("COMMENT_", "comment"), ("FUNCTION_", "function"), ("VARIABLE_REFERENCE_", "function"),
                ("CODE_UNIT_PROPERTY_", "data"), ("MEMORY_BYTES_", "data"), ("CODE_", "code"), ("FALLTHROUGH_", "code"),
-               ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
+               ("FLOW_OVERRIDE_", "code"), ("LENGTH_OVERRIDE_", "code"), ("BOOKMARK_", "bookmark"), ("DATA_TYPE_", "type"), ("SOURCE_ARCHIVE_", "type")]
 
 
 class Events:
@@ -76,6 +76,8 @@ class Events:
                 continue
             kinds.add(next((k for p, k in KIND_PREFIX if name.startswith(p)), "other"))
             s, e = r.getStart(), r.getEnd()
+            if s is None and name.startswith("BOOKMARK_"):  # Ghidra's bookmark events carry no address: set/remove_bookmark announce theirs with record()
+                continue
             if s is None or not s.isMemoryAddress() or (e is not None and e.getAddressSpace() != s.getAddressSpace()):
                 broad = True  # type events, stack/register/external addresses, a range across spaces: no usable range
             else:

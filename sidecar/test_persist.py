@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from ghidrette.core.errors import INTERNAL
-from testlib import BASE, BIN, INVALID, NO_PROGRAM, X86, Client, Proc, blob, run
+from testlib import BASE, BIN, INVALID, NOT_FOUND, NO_PROGRAM, X86, Client, Proc, blob, run
 
 
 @pytest.fixture(scope="module")
@@ -334,3 +334,55 @@ def test_save_without_program(tmp_path):
         run(go())
     finally:
         proc.stop()
+
+
+def test_bookmarks_add_list_undo_redo_save_reopen(projects):
+    """A Note bookmark: listed (and on its listing row), one undo step each way, announced with its address, survives save + reopen; remove is an edit too."""
+    async def go():
+        proc = Proc(projects)
+        try:
+            async with Client(proc.port) as c:
+                await c.ok("open_binary", path=BIN)
+                a = await fn5(c)
+                before = await c.ok("list_bookmarks")  # analyzers' bookmarks, every type
+                notes0 = await c.ok("list_bookmarks", type="Note")
+                assert notes0["total"] == 0 and all(i["type"] != "Note" for i in before["items"])
+                since = len(c.notes)
+                await c.ok("set_bookmark", address=a, category="triage", comment="look at this")
+                ch = await change(c, since, "Set bookmark")
+                assert "bookmark" in ch["kinds"] and ch["ranges"] and ch["ranges"][0]["start"] == a, ch
+                notes = await c.ok("list_bookmarks", type="Note")
+                assert notes["items"] == [{"address": a, "type": "Note", "category": "triage", "comment": "look at this"}] and notes["total"] == 1
+                assert {"type": "Note", "count": 1} in notes["types"] and (await c.ok("list_bookmarks"))["total"] == before["total"] + 1
+                assert (await c.ok("list_bookmarks", query="LOOK AT"))["total"] == 1 and (await c.ok("list_bookmarks", type="Note", query="nope"))["total"] == 0
+                assert (await c.ok("listing_rows", address=a, count=1))[0]["bookmarks"] == [{"category": "triage", "comment": "look at this"}]
+                await c.ok("set_bookmark", address=a, category="triage", comment="replaced")  # same address + category: replaces
+                assert (await c.ok("list_bookmarks", type="Note"))["items"][0]["comment"] == "replaced"
+                await c.ok("set_bookmark", address=a, category="other", comment="second")
+                items = (await c.ok("list_bookmarks", type="Note", sort="category", desc=True))["items"]
+                assert [i["category"] for i in items] == ["triage", "other"]
+                await c.err("set_bookmark", INVALID, address="0x1", category="c", comment="x")
+                await c.err("set_bookmark", INVALID, address=a, category=1, comment="x")
+                await c.err("list_bookmarks", INVALID, sort="nonsense")
+                # undo / redo: each set is one step
+                await c.ok("undo"); await c.ok("undo")  # the second category, then the replaced comment is the first set again
+                await c.ok("undo")
+                assert (await c.ok("list_bookmarks", type="Note"))["total"] == 0
+                assert "bookmarks" not in (await c.ok("listing_rows", address=a, count=1))[0]
+                await c.ok("redo")
+                assert (await c.ok("list_bookmarks", type="Note"))["items"][0]["comment"] == "look at this"
+                await c.ok("redo"); await c.ok("redo")
+                assert (await c.ok("list_bookmarks", type="Note"))["total"] == 2
+                assert (await c.ok("save"))["saved"] is True
+                await c.ok("close_program")
+                await c.ok("open_binary", path=BIN)
+                items = (await c.ok("list_bookmarks", type="Note"))["items"]
+                assert sorted((i["category"], i["comment"]) for i in items) == [("other", "second"), ("triage", "replaced")]
+                await c.ok("remove_bookmark", address=a, type="Note")  # every category at that address
+                assert (await c.ok("list_bookmarks", type="Note"))["total"] == 0
+                await c.err("remove_bookmark", NOT_FOUND, address=a, type="Note")
+                await c.ok("undo")
+                assert (await c.ok("list_bookmarks", type="Note"))["total"] == 2
+        finally:
+            proc.stop()
+    run(go())

@@ -105,7 +105,15 @@ class Listing:
             for cu in cus:
                 win.add(cu.getMinAddress(), cu.getMaxAddress())
         rm = prog.getReferenceManager()
+        lo, hi = win.getMinAddress(), win.getMaxAddress()
+        notes = {}
+        for b in prog.getBookmarkManager().getBookmarksIterator(lo, True):  # the user's own bookmarks (Note) mark a row; the analyzers' do not
+            if b.getAddress().compareTo(hi) > 0:
+                break
+            if str(b.getTypeString()) == "Note" and win.contains(b.getAddress()):
+                notes.setdefault(fa(b.getAddress()), []).append({"category": str(b.getCategory() or ""), "comment": str(b.getComment() or "")})
         return {
+            "bm": notes,
             "sym": {fa(x.getAddress()) for x in prog.getSymbolTable().getPrimarySymbolIterator(win, True)},
             "fn": {fa(f.getEntryPoint()): f for f in prog.getFunctionManager().getFunctions(win, True)},
             "ref": {fa(x): x for x in rm.getReferenceDestinationIterator(win, True)},
@@ -182,6 +190,8 @@ class Listing:
             row = {"address": key, "length": n, "bytes": b.hex(" "), "mnemonic": str(cu.getMnemonicString()), "operands": ops}
             if n > 16:
                 row["bytesMore"] = n - 16
+            if key in marks["bm"]:
+                row["bookmarks"] = marks["bm"][key]
             if key in marks["sym"]:
                 syms = sorted(st.getSymbols(ca), key=lambda x: not x.isPrimary())
                 names = [str(x.getName()) for x in syms]

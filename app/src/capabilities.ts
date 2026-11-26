@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks",
 } as const;
 
 export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCommand, { type: "edit" }>["action"]): boolean {
@@ -11,6 +11,7 @@ export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCo
     case "undo": case "redo": return caps.has("undo");
     case "retype": case "autoStruct": return caps.has("decompile") && caps.has("variableEditing");
     case "defineData": case "createStruct": return caps.has("typeEditing");
+    case "bookmark": return caps.has("bookmarks");
     default: return caps.has("editing");
   }
 }

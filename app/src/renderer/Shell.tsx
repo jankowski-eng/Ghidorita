@@ -46,7 +46,7 @@ export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown
   const cov = useMemo(() => coverageActions(s), [s]);
   if (!program || !dock) return null;
   return <Dock searches={program.api.searches} capabilities={s.caps} active={dock} onActivate={(d) => s.views.dispatch({ type: "set", patch: { dock: d } })} onClose={() => s.views.dispatch({ type: "set", patch: { dock: null } })}
-    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
+    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} bookmarks={program.api.bookmarks} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
 }
 
 export function TypeManager() {

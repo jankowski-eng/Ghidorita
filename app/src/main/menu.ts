@@ -60,6 +60,7 @@ export function createMenu({ getWin, pick }: Deps) {
         ...(([["Copy Address", "CmdOrCtrl+Shift+C", "address"], ["Copy Bytes (Hex)", "CmdOrCtrl+Alt+C", "bytes"], ["Copy Bytes (C Array)", "", "carray"], ["Copy Decompiled Function", "", "decompiled"]] as const).map(([label, accelerator, what]): MenuItemConstructorOptions =>
           ({ id: "copy-" + what, label, accelerator: accelerator || undefined, enabled: state.hasProgram && allowsCommand(caps, { type: "copy", what }), click: () => send({ type: "copy", what }) }))),
         { type: "separator" },
+        { id: "bookmark", label: "Add Bookmark…", accelerator: "CmdOrCtrl+D", enabled: state.hasProgram && allowsEdit(caps, "bookmark"), click: () => send({ type: "edit", action: "bookmark" }) },
         ...(([["Rename…", "L", "rename"], ["Retype Variable…", "CmdOrCtrl+L", "retype"], ["Set Comment…", ";", "comment"], ["Create Function", "F", "createFunction"],
           ["Define Data…", "T", "defineData"], ["Create Structure from Data…", "", "createStruct"], ["Auto Create Structure (variable)…", "", "autoStruct"], ["Clear Code Bytes", "C", "clear"], ["Edit Function Signature…", "", "signature"]] as const).map(([label, key, action]): MenuItemConstructorOptions =>
           // the key is only a hint in the label: a real accelerator could swallow plain letters typed into text inputs
@@ -75,6 +76,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "strings", label: "Defined Strings", enabled: state.hasProgram && caps.has(dockCapability.strings), accelerator: "CmdOrCtrl+Shift+E", click: () => send({ type: "dock", panel: "strings" }) },
         { id: "changes", label: "Changes", enabled: state.hasProgram && caps.has(dockCapability.changes), accelerator: "CmdOrCtrl+Shift+H", click: () => send({ type: "dock", panel: "changes" }) },
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: "CmdOrCtrl+Shift+J", click: () => send({ type: "dock", panel: "calls" }) },
+        { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: "CmdOrCtrl+Shift+B", click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
         { id: "memsearch", label: "Search Memory…", enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: "CmdOrCtrl+Shift+F", click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: "CmdOrCtrl+Shift+T", click: () => send({ type: "datatypes" }) },

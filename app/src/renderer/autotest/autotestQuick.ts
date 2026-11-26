@@ -1,11 +1,11 @@
 import type { FunctionInfo } from "../../../../protocol";
 import { copied } from "../clipboard";
-import { waitFor, sleep, type AutotestCtx } from "./autotest";
+import { byLabel, setSelect, typeInto, waitFor, sleep, type AutotestCtx } from "./autotest";
 
 // Round 11 flow: one step per quick win (copy actions, then callers/callees, then bookmarks). Mock and real sidecar.
 const need = (ok: unknown, what: string) => { if (!ok) throw new Error("quick: " + what); };
 const mainRow = (nth = 0) => document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")[nth];
-const rowAddr = (el: HTMLElement) => el.querySelector(".a")!.textContent!.replace(/[▸▾]/g, "").trim();
+const rowAddr = (el: HTMLElement) => el.querySelector(".a")!.textContent!.replace(/[▸▾▪]/g, "").trim();
 
 async function copyStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
   const caps = c.backend.capabilities;
@@ -85,9 +85,55 @@ async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   R.calls = { entry: f.entry, callers: r.callers.length, callees: r.callees.length, clicked: target.name, thunks: [...r.callers, ...r.callees].filter((e) => e.thunk).length };
 }
 
+async function bookmarkStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>, result: Record<string, any>) {
+  need(c.backend.capabilities.has("bookmarks"), "provider has no bookmarks capability");
+  await c.goAddr(fl[0].entry);
+  await waitFor(() => c.topAddr() === fl[0].entry && mainRow(3), 10000, "listing at the first function");
+  const row = mainRow(3), addr = rowAddr(row);
+  const rowNow = () => [...document.querySelectorAll<HTMLElement>(".lbox .lrow.k-main")].find((r) => rowAddr(r) === addr);
+  row.click(); document.querySelector<HTMLElement>(".lbox")!.focus(); await sleep(100);
+  const notes = async () => (await c.program().bookmarks.list({ type: "Note" })).total;
+  const n0 = await notes();
+  c.command({ type: "edit", action: "bookmark" });
+  const dlg = await waitFor(() => byLabel("dialog", "Add bookmark"), 5000, "add bookmark dialog");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Category (optional)"]')!, "triage");
+  typeInto(dlg.querySelector<HTMLInputElement>('input[aria-label="Comment"]')!, "autotest bookmark");
+  dlg.querySelector<HTMLButtonElement>('button[aria-label="Add"]')!.click();
+  await waitFor(() => !byLabel("dialog", "Add bookmark"), 10000, "dialog closed");
+  await waitFor(() => rowNow()?.querySelector(".bm"), 10000, "bookmark marker in the listing");
+  need(await notes() === n0 + 1, "one more Note bookmark");
+  c.command({ type: "dock", panel: "bookmarks" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Bookmarks"]'), 5000, "bookmarks panel");
+  const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
+  await waitFor(() => region.textContent!.includes(`${n0 + 1} bookmarks`) && rows().some((r) => r.textContent!.includes("autotest bookmark")), 10000, "the bookmark in the panel");
+  region.querySelector<HTMLButtonElement>('button[aria-label="Sort by Category"]')!.click();
+  await sleep(300);
+  setSelect(region.querySelector<HTMLSelectElement>('select[aria-label="Bookmark type"]')!, "");
+  await waitFor(() => /\d+ bookmarks/.test(region.textContent!) && !region.textContent!.includes(`${n0 + 1} bookmarks`) || n0 + 1 === (+(/(\d+) bookmarks/.exec(region.textContent!)?.[1] ?? 0)), 10000, "all types listed");
+  setSelect(region.querySelector<HTMLSelectElement>('select[aria-label="Bookmark type"]')!, "Note");
+  await waitFor(() => region.textContent!.includes(`${n0 + 1} bookmarks`), 10000, "Note filter back");
+  await c.goAddr(fl[0].entry); await waitFor(() => c.topAddr() === fl[0].entry, 10000, "away from the row");
+  const hit = await waitFor(() => rows().find((r) => r.textContent!.includes("autotest bookmark")), 10000, "panel row");
+  hit.click();
+  await waitFor(() => (window as any).__listing?.rowAt(addr) && c.topAddr() === (window as any).__listing.rowAt(addr).address, 10000, "panel click navigates the listing");
+  // one undo step each way
+  document.querySelector<HTMLElement>(".lbox")!.focus();
+  c.command({ type: "edit", action: "undo" });
+  await waitFor(() => !rowNow()?.querySelector(".bm"), 10000, "marker gone after undo");
+  need(await notes() === n0, "undo removed it");
+  c.command({ type: "edit", action: "redo" });
+  await waitFor(() => rowNow()?.querySelector(".bm"), 10000, "marker back after redo");
+  need(await notes() === n0 + 1, "redo restored it");
+  c.command({ type: "edit", action: "save" }); // clean for the edit flow, and the bookmark must survive the quit (AUTOTEST_PHASE=2 checks it)
+  await waitFor(() => !c.title().startsWith("• "), 10000, "saved");
+  R.bookmarks = { address: addr, before: n0 };
+  result.quickPersist = { bookmark: { address: addr, comment: "autotest bookmark" } };
+}
+
 export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
   const R: Record<string, any> = (result.quick = {});
   await copyStep(fl, c, R);
   await callsStep(fl, c, R);
+  await bookmarkStep(fl, c, R, result);
   return true;
 }

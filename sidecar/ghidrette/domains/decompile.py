@@ -12,7 +12,7 @@ from ..core.rpc import rpc
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
-RANGE_ONLY_KINDS = {"comment", "code"}
+RANGE_ONLY_KINDS = {"comment", "code", "bookmark"}
 GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 

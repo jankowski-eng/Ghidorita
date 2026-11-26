@@ -31,6 +31,8 @@ export function useEditing(tabs: TabsApi) {
     ask(current, { title: "Edit function signature", label: "Signature", field: "text", initial: f.signature, submit: "Apply" },
       async (v) => { await current.api.edits.setFunctionSignature({ entry: f.entry, signature: v.trim() }); });
   };
+  const askBookmark = (at: Address) => views.dispatch({ type: "set", patch: { formDlg: { title: "Add bookmark", submit: "Add", fields: [{ key: "category", label: "Category (optional)" }, { key: "comment", label: "Comment" }],
+    go: async (v) => { await session.program()?.api.bookmarks.set({ address: at, category: v.category.trim(), comment: v.comment.trim() }); } } } });
   const listingEdit = async (current: Program, a: EditAction) => {
     const ops = current.api;
     const row = refs.listingRow.current?.();
@@ -47,6 +49,7 @@ export function useEditing(tabs: TabsApi) {
       ask(current, { title: "Set comment", label: "Comment", field: "comment", initial: comments.eol ?? "", submit: "Set comment", kind: "eol", comments },
         async (v, kind) => { await ops.edits.setComment({ address: at, kind, text: v }); });
     } else if (a === "createFunction") await ops.edits.createFunction({ address: at });
+    else if (a === "bookmark") askBookmark(at);
     else if (a === "clear") await ops.edits.clearCode({ address: at });
     else if (a === "defineData") ask(current, { title: "Define data", label: "Data type", field: "datatype", initial: "", submit: "Define" },
       async (v) => { await ops.edits.defineData({ address: at, dataType: v.trim() }); });
@@ -80,6 +83,10 @@ export function useEditing(tabs: TabsApi) {
       if (!name) return session.flash("Put the cursor on a variable to auto create a structure for it.");
       views.dispatch({ type: "set", patch: { formDlg: { title: "Auto create structure", submit: "Create", fields: [{ key: "name", label: "Structure name (empty = automatic)" }],
         go: async (v) => { await ops.edits.autoCreateStructure({ entry, name, structName: v.name.trim() || undefined }); } } } });
+    } else if (a === "bookmark") {
+      const at = d.tokens.find((t) => t.line === (pos?.lineNumber ?? 1) - 1 && t.address)?.address;
+      if (!at) return session.flash("No address on this line.");
+      askBookmark(at);
     } else if (a === "signature") await editSignature(current, entry);
     else if (a === "comment") {
       const line0 = (pos?.lineNumber ?? 1) - 1;

@@ -10,7 +10,7 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set() });
+const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map() });
 let S = freshS();
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
@@ -89,6 +89,7 @@ const row = (idx) => {
     if (r.length > 16) { r.bytes = hexb(h, 16); r.bytesMore = r.length - 16; }
     if (dd.ref) Object.assign(r, partsOf(dd));
   }
+  for (const b of S.bookmarks.values()) if (b.n === a) (r.bookmarks ??= []).push({ category: b.category, comment: b.comment });
   if (S.created.has(a)) { r.label = S.created.get(a); r.header = { signature: `void ${r.label}(void)`, params: 0, paramBytes: 0, localBytes: 0 }; }
   if (S.labels.has(a)) r.label = S.labels.get(a);
   for (const [k, f] of [["eol", "comment"], ["pre", "pre"], ["post", "post"], ["plate", "plate"], ["repeatable", "repeatable"]]) { const t = S.comments.get(`${a}|${k}`); if (t) r[f] = t; }
@@ -210,7 +211,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "analysis"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -736,6 +737,29 @@ const handlers = {
     const n = parseAddr(address);
     if (!COMMENT_KINDS.includes(kind) || typeof text !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("kind/text/address");
     return edit("Set comment", notify, [{ start: hex(n), end: hex(n) }], ["comment"], () => { S.comments.set(`${n}|${kind}`, text); });
+  },
+  list_bookmarks({ type, query, offset, limit, sort, desc }) { // your Note bookmarks plus a few "analyzer" ones to exercise the type filter
+    const all = [...S.bookmarks.values()].map((b) => ({ address: hex(b.n), type: "Note", category: b.category, comment: b.comment }));
+    for (let i = 0; i < 40; i++) all.push({ address: hex(BASE + (i * 7 + 1) * STRIDE), type: i % 4 ? "Analysis" : "Warning", category: i % 4 ? "Found Code" : "Bad Instruction", comment: `analyzer ${i}` });
+    const counts = new Map();
+    for (const b of all) counts.set(b.type, (counts.get(b.type) ?? 0) + 1);
+    const q = (query ?? "").toLowerCase();
+    const items = all.filter((b) => (type === undefined || b.type === type) && (!q || b.category.toLowerCase().includes(q) || b.comment.toLowerCase().includes(q)));
+    const key = { address: (b) => parseInt(b.address, 16), type: (b) => b.type.toLowerCase(), category: (b) => b.category.toLowerCase() }[sort ?? "address"];
+    if (!key) bad("sort");
+    items.sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : parseInt(x.address, 16) - parseInt(y.address, 16)) * (desc ? -1 : 1));
+    return { total: items.length, types: [...counts].sort().map(([t, count]) => ({ type: t, count })), items: items.slice(offset ?? 0, (offset ?? 0) + Math.min(limit ?? 100, 1000)) };
+  },
+  set_bookmark({ address, category, comment }, notify) {
+    const n = parseAddr(address);
+    if (typeof category !== "string" || typeof comment !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("category/comment/address");
+    return edit("Set bookmark", notify, [{ start: hex(n), end: hex(n) }], ["bookmark"], () => { S.bookmarks.set(`${n}|${category}`, { n, category, comment }); });
+  },
+  remove_bookmark({ address, type }, notify) {
+    const n = parseAddr(address);
+    const keys = type === "Note" ? [...S.bookmarks].filter(([, b]) => b.n === n).map(([k]) => k) : [];
+    if (!keys.length) nf();
+    return edit("Remove bookmark", notify, [{ start: hex(n), end: hex(n) }], ["bookmark"], () => { for (const k of keys) S.bookmarks.delete(k); });
   },
   create_function({ address, name }, notify) {
     const n = parseAddr(address);

@@ -302,7 +302,7 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
       case "part": return (<><span className="a">+{l.part!.offset.toString(16)}</span><span className="m pt">{l.part!.type}</span><span>{l.part!.name} = {l.part!.value}</span></>);
       case "more": return <span className="c">{l.text}</span>;
       default: return (<>
-        <span className="a">{r.parts ? <b className="fold" role="button" aria-label={st.unfolded.has(r.address) ? "Fold components" : "Unfold components"} onClick={(e) => { e.stopPropagation(); toggleFold(r); }}>{st.unfolded.has(r.address) ? "▾" : "▸"}</b> : null}{r.address}</span>
+        <span className="a">{r.parts ? <b className="fold" role="button" aria-label={st.unfolded.has(r.address) ? "Fold components" : "Unfold components"} onClick={(e) => { e.stopPropagation(); toggleFold(r); }}>{st.unfolded.has(r.address) ? "▾" : "▸"}</b> : null}{r.bookmarks && <i className="bm" aria-label="Bookmarked" title={r.bookmarks.map((b) => [b.category, b.comment].filter(Boolean).join(": ") || "bookmark").join("\n")}>▪</i>}{r.address}</span>
         <span className="b" title={bytesText(r)}>{bytesText(r)}</span><span className="m">{r.mnemonic}</span>
         <span>{r.operands}</span>{r.comment && <span className="c">; {r.comment}</span>}{r.repeatable && <span className="c rp">; {r.repeatable}</span>}
       </>);

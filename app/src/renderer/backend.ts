@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  CallGraph, ChangeKind, FunctionCalls, FunctionGraph, TopSymbol,
+  BookmarkItem, CallGraph, ChangeKind, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "connection" | "protocol" | "internal";
@@ -83,6 +83,13 @@ export interface TypeEdits {
   editEnum(params: { path: string; op: EnumOp }): Promise<{}>;
 }
 
+export interface Bookmarks {
+  list(params: ListBookmarksParams): Promise<{ total: number; types: { type: string; count: number }[]; items: BookmarkItem[] }>;
+  /** a Note bookmark; one undo step */
+  set(params: { address: Address; category: string; comment: string }): Promise<{}>;
+  remove(params: { address: Address; type: string }): Promise<{}>;
+}
+
 export interface ProgramEdits {
   getComments(params: { address: Address }): Promise<Partial<Record<CommentKind, string>>>;
   renameSymbol(params: { address: Address; newName: string }): Promise<{}>;
@@ -143,6 +150,7 @@ export interface ProgramOperations {
   types: TypeReads;
   typeEdits: TypeEdits;
   edits: ProgramEdits;
+  bookmarks: Bookmarks;
   history: ProgramHistory;
   coverage: CoverageReads;
   exports: Exports;

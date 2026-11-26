@@ -90,6 +90,7 @@ export interface ListingRow {
   xrefs?: RowXrefs;        // set when something references this address
   parts?: DataPart[];      // defined struct/array/union data: its components (the row shows them folded, the client may unfold)
   partsTotal?: number;     // component count when parts is cut (shortcut: first PARTS_MAX = 64)
+  bookmarks?: { category: string; comment: string }[]; // the user's own bookmarks (type Note) on this unit; the analyzers' bookmarks are not marked
   bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16; get_bytes has them all)
 }
 
@@ -130,7 +131,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "analysis",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -186,6 +187,10 @@ export interface Methods {
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   // Callers and callees of one function (Ghidra's getCallingFunctions / getCalledFunctions). Scan lane, cancellable with cancel_search. Capability "calls".
   function_calls: { params: { entry: Address }; result: FunctionCalls };
+  // Bookmarks (Ghidra's BookmarkManager). Reads on lane R; set/remove are edits (one undo step each) that announce program_changed kind "bookmark" with the address. Capability "bookmarks".
+  list_bookmarks: { params: ListBookmarksParams; result: { total: number; types: { type: string; count: number }[]; items: BookmarkItem[] } };
+  set_bookmark: { params: { address: Address; category: string; comment: string }; result: {} };
+  remove_bookmark: { params: { address: Address; type: string }; result: {} };
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
   // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.
@@ -277,6 +282,9 @@ export interface ListSymbolsParams { offset?: number; limit?: number; query?: st
 export interface CallRef { name: string; entry: Address | null; external: boolean }
 export interface CallEdge extends CallRef { thunk: boolean; target?: CallRef }
 export interface FunctionCalls { callers: CallEdge[]; callees: CallEdge[] }
+export interface BookmarkItem { address: Address; type: string; category: string; comment: string } // type: "Note" (the user's), "Analysis", "Warning", "Error", "Info", ...
+/** type omitted = every type; query = substring of category or comment; sort default address; limit <= 1000. `types` of the result counts every type before filtering. */
+export interface ListBookmarksParams { type?: string; query?: string; offset?: number; limit?: number; sort?: "address" | "type" | "category"; desc?: boolean }
 export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other";
 export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
 /** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */
@@ -324,7 +332,7 @@ export type EnumOp =
 export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty = unsaved changes since open or last save
 
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */
-export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "other";
+export type ChangeKind = "symbol" | "comment" | "function" | "data" | "code" | "type" | "bookmark" | "other";
 
 /** What is persisted for a program in programs.json. */
 export type AnalysisRecord = "none" | "partial" | "done";

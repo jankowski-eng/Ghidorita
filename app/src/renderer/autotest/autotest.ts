@@ -271,7 +271,7 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       if (result.ok) {
         const ed = await runEditFlow(fl, c, result);
         let ok = ed.ok;
-        if (ok) { const ty = await runTypesFlow(c, result, ed.persist as { entry: string } | undefined); ok = ty.ok; persist = ed.persist && { ...(ed.persist as object), types: ty.persist }; }
+        if (ok) { const ty = await runTypesFlow(c, result, ed.persist as { entry: string } | undefined); ok = ty.ok; persist = ed.persist && { ...(ed.persist as object), types: ty.persist, ...(result.quickPersist as object) }; }
         result.ok = ok && c.errors.length === 0;
       }
     } catch (e) { c.fail(e); result.ok = false; }

@@ -146,7 +146,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; auto?: string } };
+  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; auto?: string } };
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
   const f = await c.program().functions.containing({ address: x.entry });
@@ -167,6 +167,11 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
       result.phase2.types.auto = { size: as.size, inDecompiler: ad.text.includes("AutotestAuto") };
       typesOk = typesOk && as.size > 0 && ad.text.includes("AutotestAuto");
     }
+  }
+  if (x.bookmark) { // the bookmark from the quick-wins flow survived save + quit + relaunch
+    const b = await c.program().bookmarks.list({ type: "Note" });
+    result.phase2.bookmark = b.items.find((i) => i.address === x.bookmark!.address) ?? null;
+    typesOk = typesOk && result.phase2.bookmark?.comment === x.bookmark.comment;
   }
   result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty && typesOk;
 }

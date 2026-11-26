@@ -41,7 +41,7 @@ const row = shape({
   header: optional(shape({ signature: str, convention: optional(str), params: count, paramBytes: integer, localBytes: integer, noReturn: optional(bool), thunk: optional(bool) })),
   xrefs: optional(shape({ count, items: array(shape({ from: address, kind })) })),
   parts: optional(array(shape({ offset: count, length: count, type: str, name: str, value: str }))),
-  partsTotal: optional(count), bytesMore: optional(count),
+  partsTotal: optional(count), bytesMore: optional(count), bookmarks: optional(array(shape({ category: str, comment: str }))),
 });
 
 export const results = {
@@ -58,6 +58,9 @@ export const results = {
   cancel_decompile: shape({ cancelled: bool }),
   listing_info: shape({ totalBytes: count, ranges: array(shape({ start: address, size: positive })) }),
   listing_rows: array(row),
+  list_bookmarks: shape({ total: count, types: array(shape({ type: str, count })), items: array(shape({ address, type: str, category: str, comment: str })) }),
+  set_bookmark: object,
+  remove_bookmark: object,
   get_bytes: shape({ address, length: positive, bytes: str }),
   list_functions: array(shape({ ...labelFields, source: optional(source) })),
   get_function_at: nullable(shape({ ...labelFields, signature: str })),
@@ -122,7 +125,7 @@ export const results = {
 export const notifications = {
   progress: shape({ openId: positive, phase: oneOf("import", "analysis", "saving", "ready"), pct: number, message: str, analyzer: optional(str), done: optional(count), total: optional(count) }),
   program_changed: shape({ sessionId: nonempty, ranges: nullable(array(range)), undo,
-    kinds: array(oneOf("symbol", "comment", "function", "data", "code", "type", "other")),
+    kinds: array(oneOf("symbol", "comment", "function", "data", "code", "type", "bookmark", "other")),
   }),
   analysis_state: shape({ sessionId: nonempty, ...analysisFields }),
   error: shape({ message: str }),
