@@ -6,12 +6,19 @@ export type Pane = "functions" | "listing" | "decompiler";
 export type MenuCommand =
   | { type: "open-path"; path: string }
   | { type: "search" } | { type: "nav-back" } | { type: "nav-forward" } | { type: "goto" } | { type: "close-tab" }
-  | { type: "toggle-pane"; pane: Pane; visible: boolean };
+  | { type: "toggle-pane"; pane: Pane; visible: boolean }
+  | { type: "edit"; action: "rename" | "retype" | "comment" | "createFunction" | "defineData" | "clear" | "signature" | "undo" | "redo" | "save" };
 /** renderer -> main, "menu-state": enables/disables Go > Back / Forward and File > Open Binary / Open Recent (disabled while an open runs). */
-export interface MenuState { canBack: boolean; canForward: boolean; canOpen: boolean }
+export interface MenuState {
+  canBack: boolean; canForward: boolean; canOpen: boolean;
+  canEdit: boolean;                 // an open program and no open in progress
+  undoLabel: string | null;         // "Undo Rename symbol"; null = nothing to undo
+  redoLabel: string | null;
+  dirty: boolean;                   // unsaved edits: macOS document-edited dot
+}
 
 export interface Host {
-  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null }>;
+  getConfig(): Promise<{ port: number; token: string; autotest: string | null; bench: boolean; cancelFile: string | null; expect: unknown }>;
   pickFile(): Promise<string | null>;
   autotestDone(result: unknown): Promise<void>;
   /** Subscribe to menu commands; returns the unsubscribe function. */
@@ -19,6 +26,14 @@ export interface Host {
   /** renderer -> main, "recent-add": record a successfully opened path in Open Recent (absolute path string, <= 4096 chars). */
   recentAdd(path: string): Promise<void>;
   setMenuState(state: MenuState): Promise<void>;
+  /** main -> renderer, "quit-requested": save the program (show "Saving…"), then call quitReady. */
+  onQuitRequested(cb: () => void): () => void;
+  /** renderer -> main: the save finished (ok) or failed (error text); main then stops the sidecar and quits. */
+  quitReady(r: { ok: boolean; error?: string }): Promise<void>;
+  /** autotest only: end the run through the real before-quit path. */
+  autotestQuit(result: unknown): Promise<void>;
+  /** autotest only: click an application-menu item by id (save, undo, redo). */
+  autotestMenu(id: string): Promise<void>;
 }
 
 const host: Host = {
@@ -32,5 +47,13 @@ const host: Host = {
   },
   recentAdd: (path) => ipcRenderer.invoke("recent-add", path),
   setMenuState: (state) => ipcRenderer.invoke("menu-state", state),
+  onQuitRequested: (cb) => {
+    const h = () => cb();
+    ipcRenderer.on("quit-requested", h);
+    return () => { ipcRenderer.removeListener("quit-requested", h); };
+  },
+  quitReady: (r) => ipcRenderer.invoke("quit-ready", r),
+  autotestQuit: (result) => ipcRenderer.invoke("autotest-quit", result),
+  autotestMenu: (id) => ipcRenderer.invoke("autotest-menu", id),
 };
 contextBridge.exposeInMainWorld("host", host);

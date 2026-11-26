@@ -1,6 +1,7 @@
 import type { Address, FunctionInfo } from "../../../protocol";
 import { AddrMap } from "./addrmap";
 import { rpc } from "./client";
+import { runEditFlow, runPhase2 } from "./autotestEdit";
 
 /** What the scripted modes need from the running app. */
 export interface AutotestCtx {
@@ -14,28 +15,38 @@ export interface AutotestCtx {
   selected(): Address | null;
   topAddr(): Address;
   editorText(): string;
+  editor(): any;
+  menu(id: string): Promise<void>;
+  expect: any;
+  funcCount(): number;
   errors: string[];
   fail(e: unknown): void;
   setPath(p: string): void;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export async function waitFor<T>(f: () => T | null | undefined | false, ms: number, what: string): Promise<T> {
   const t0 = Date.now();
   for (;;) { const v = f(); if (v) return v; if (Date.now() - t0 > ms) throw new Error("timeout waiting for " + what); await sleep(50); }
 }
 // real-UI helpers: find by role/label, set a React-controlled input the way a user's typing does, dispatch real key events
-const byLabel = <E extends HTMLElement>(role: string, label: string) => document.querySelector<E>(`[role="${role}"][aria-label="${label}"]`);
+export const byLabel = <E extends HTMLElement>(role: string, label: string) => document.querySelector<E>(`[role="${role}"][aria-label="${label}"]`);
 const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-const typeInto = (el: HTMLInputElement, text: string) => {
+export const typeInto = (el: HTMLInputElement | HTMLTextAreaElement, text: string) => {
   el.focus();
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, text);
+  Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(el, text);
   el.dispatchEvent(new Event("input", { bubbles: true }));
 };
-const press = (el: HTMLElement, key: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+export const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
 
 export async function runAutotest(file: string, c: AutotestCtx) {
     const result: Record<string, unknown> = { ok: false };
+    if (c.expect) { // second launch of the edit autotest: did the saved edit survive the quit?
+      try { await runPhase2(file, c, result); } catch (e) { c.fail(e); }
+      result.errors = c.errors; if (c.errors.length) result.ok = false;
+      return window.host.autotestDone(result);
+    }
+    let persist: unknown;
     try {
       c.setPath(file);
       if (c.cancelFile) { // cancel during analysis of a never-seen binary, then open it again, all through the UI
@@ -99,9 +110,10 @@ export async function runAutotest(file: string, c: AutotestCtx) {
       result.searchOk = c.topAddr() === hit && document.activeElement === sbtn;
       result.navOk = result.afterBackTop === startEntry && result.afterForwardTop === result.expectedEntry;
       result.ok = result.navOk && result.searchOk && (!c.cancelFile || result.cancelOk === true) && result.expectedEntry !== fl.find((f) => f.name === result.startFunction)?.entry && result.selectedEntry === result.expectedEntry && result.listingTopAddress === result.selectedEntry && c.errors.length === 0;
-    } catch (e) { c.fail(e); }
+      if (result.ok) { const ed = await runEditFlow(fl, c, result); persist = ed.persist; result.ok = ed.ok && c.errors.length === 0; }
+    } catch (e) { c.fail(e); result.ok = false; }
     result.errors = c.errors;
-    window.host.autotestDone(result);
+    if (persist && result.ok) { (result as any).persist = persist; window.host.autotestQuit(result); } else window.host.autotestDone(result); // quit through the real before-quit path (saves, stops the sidecar)
 }
 
 // BENCH=1 AUTOTEST=<file>: listing scroll + decompile measurements in the real renderer (step 6 of the spike)

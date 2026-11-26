@@ -69,3 +69,12 @@ body { background: #1e1e1e; color: #ddd; font: 13px system-ui, sans-serif; }
 .notice { padding: 16px; color: #ccc; }
 .funcs-col { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .funcs-col > .funcs { flex: 1; min-height: 0; }
+.lrow.cursor { background: #094771; }
+.dlg { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-start; justify-content: center; padding-top: 90px; z-index: 20; }
+.dlg .card { width: 480px; }
+.dlg label { display: flex; flex-direction: column; gap: 3px; }
+.dlg input, .dlg select, .dlg textarea { background: #1e1e1e; color: #ddd; border: 1px solid #555; padding: 4px 6px; font: inherit; }
+.dlg .btns { display: flex; gap: 8px; justify-content: flex-end; }
+.dlg .ac { max-height: 160px; overflow: auto; border: 1px solid #555; }
+.dlg .ac div { padding: 1px 6px; cursor: pointer; font: 12px ui-monospace, Menlo, monospace; } .dlg .ac div.cur { background: #094771; }
+.dirty { color: #ffd866; }
