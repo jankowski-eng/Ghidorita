@@ -55,7 +55,7 @@ export interface References {
   xrefsToVariable(params: { entry: Address; name: string; limit?: number }): Promise<XrefTo[]>;
   variableUses(params: { entry: Address; name: string; timeoutSecs?: number }): Job<XrefTo[]>;
   /** Callers and callees around `entry`, or every route to `to` (callGraph capability). */
-  callGraph(params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }): Promise<CallGraph>;
+  callGraph(params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }): Job<CallGraph>; // a scan: cancel it when the view's target changes
   /** callers and callees of a function; capability "calls" */
   calls(params: { entry: Address }): Job<FunctionCalls>;
 }
@@ -85,10 +85,12 @@ export interface TypeEdits {
 }
 
 export interface Bookmarks {
-  list(params: ListBookmarksParams): Promise<{ total: number; types: { type: string; count: number }[]; items: BookmarkItem[] }>;
+  /** a scan: cancel it when the query changes (cancel_search) */
+  list(params: ListBookmarksParams): Job<{ total: number; types: { type: string; count: number }[]; items: BookmarkItem[] }>;
   /** a Note bookmark; one undo step */
   set(params: { address: Address; category: string; comment: string }): Promise<{}>;
-  remove(params: { address: Address; type: string }): Promise<{}>;
+  /** category omitted = every category of that type at the address; a row always passes its own (one undo step) */
+  remove(params: { address: Address; type: string; category?: string }): Promise<{}>;
 }
 
 export interface ProgramEdits {

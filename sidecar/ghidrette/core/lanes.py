@@ -2,7 +2,7 @@
 
   asyncio loop  dispatch, cancel_* (they only flip flags), reply delivery
   R             `jobs` queue, one thread: ALL program reads that are not slow, and ALL writes (edits, undo/redo, save, close)
-  S (scan)      `sjobs` queue, SIDECAR_SCAN_WORKERS threads: symbol table, strings, memory search, variable-edit preparation. Never run on R, so a long scan
+  S (scan)      `sjobs` queue, SIDECAR_SCAN_WORKERS threads: symbol table, strings, memory search, bookmarks, call graph, variable-edit preparation. Never run on R, so a long scan
                 cannot delay listing fetches
   D (decomp)    `djobs` queue, SIDECAR_DECOMP_WORKERS threads, each owns one DecompInterface (created, used and disposed on that thread)
   O             one thread per open_binary (import + analysis + save); started by the open lane, at most one at a time (`opening`)

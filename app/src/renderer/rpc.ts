@@ -187,7 +187,7 @@ export class WebSocketBackend implements ApplicationBackend {
         xrefsFrom: (p) => read("xrefs_from", p, "references"),
         xrefsToVariable: (p) => read("xrefs_to_variable", p, "variableReferences"),
         variableUses: (p) => job("variableReferences", "variable_uses", p, "cancel_decompile"),
-        callGraph: (p) => read("call_graph", p, "callGraph"),
+        callGraph: (p) => job("callGraph", "call_graph", p, "cancel_search"),
         calls: (p) => job("calls", "function_calls", p, "cancel_search"),
       },
       searches: {
@@ -211,7 +211,7 @@ export class WebSocketBackend implements ApplicationBackend {
         editEnum: (p) => edit("typeEditing", "editEnum", "edit_enum", p),
       },
       bookmarks: {
-        list: (p) => read("list_bookmarks", p, "bookmarks"),
+        list: (p) => job("bookmarks", "list_bookmarks", p, "cancel_search"),
         set: (p) => edit("bookmarks", "setBookmark", "set_bookmark", p),
         remove: (p) => edit("bookmarks", "removeBookmark", "remove_bookmark", p),
       },

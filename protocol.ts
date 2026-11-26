@@ -158,7 +158,7 @@ export interface Methods {
   // Starts (or resumes) the analysis of the open program. profile omitted = the program's recorded profile. fast -> full on a finished fast program runs only the three analyzers the fast profile skipped; the programId does not change. No-op (returns the state) if the program is already analyzed with that profile or better. Busy while an analysis runs.
   start_analysis: { params: { profile?: "full" | "fast" }; result: AnalysisState };
   // Stops the running analysis at the next monitor check; what it found so far is kept (recorded analysis becomes "partial"). cancelled=false if none runs.
-  cancel_analysis: { params: {}; result: { cancelled: boolean } };
+  cancel_analysis: { params: {}; result: { cancelled: boolean } }; // session-scoped (StaleSession), unlike the cancels by request id
   import_candidates: { params: { path: string }; result: ImportChoices };
   list_languages: { params: {}; result: LanguageInfo[] };
   close_program: { params: {}; result: {} };
@@ -168,7 +168,7 @@ export interface Methods {
   decompile: { params: { entry: Address; timeoutSecs?: number }; result: DecompileResult };
   // Control-flow graph of one function: basic blocks (C lines where the decompiler maps them, else assembly) and edges. Decompiler lane, cancellable with cancel_decompile.
   function_graph: { params: { entry: Address; timeoutSecs?: number }; result: FunctionGraph };
-  // Call graph (thread R): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
+  // Call graph (scan lane, cancel_search; bounded by visited functions and time, `truncated` says a bound hit): without `to` the functions within `depth` calls of `entry` (callers and callees); with `to` the routes from entry to `to` at most one call longer than the shortest (and at most maxDepth calls).
   call_graph: { params: { entry: Address; depth?: number; to?: Address; maxDepth?: number }; result: CallGraph };
   // Debugger (thread R; the new state arrives as `debug_state`, results are empty except debug_status). debug_attach connects to a GDB remote stub (QEMU's -gdb), reads its register description, stops there and installs the breakpoints; Target error if refused, lost or of another architecture than the program. Breakpoint toggles, continue, step and pause need the target stopped (resp. running for pause): Busy otherwise.
   debug_attach: { params: { host?: string; port?: number; offset?: string }; result: {} }; // offset: hex, runtime address minus program address (default "0x0")
@@ -201,10 +201,10 @@ export interface Methods {
   list_symbols: { params: ListSymbolsParams; result: { total: number; items: SymbolRow[] } };
   // Callers and callees of one function (Ghidra's getCallingFunctions / getCalledFunctions). Scan lane, cancellable with cancel_search. Capability "calls".
   function_calls: { params: { entry: Address }; result: FunctionCalls };
-  // Bookmarks (Ghidra's BookmarkManager). Reads on lane R; set/remove are edits (one undo step each) that announce program_changed kind "bookmark" with the address. Capability "bookmarks".
+  // Bookmarks (Ghidra's BookmarkManager). list_bookmarks on the scan lane (cancel_search); set/remove are edits on R (one undo step each) that announce program_changed kind "bookmark" with the address. Capability "bookmarks".
   list_bookmarks: { params: ListBookmarksParams; result: { total: number; types: { type: string; count: number }[]; items: BookmarkItem[] } };
   set_bookmark: { params: { address: Address; category: string; comment: string }; result: {} };
-  remove_bookmark: { params: { address: Address; type: string }; result: {} };
+  remove_bookmark: { params: { address: Address; type: string; category?: string }; result: {} }; // category omitted = every category of that type at the address (explicit "remove all here"; a row passes its own)
   xrefs_to: { params: { address: Address; limit?: number }; result: XrefTo[] };
   xrefs_to_variable: { params: { entry: Address; name: string; limit?: number }; result: XrefTo[] };
   // Uses of a decompiler local variable (iVar1, unaff_RDI...) inside one function: kind "write" = definition, "read" = use. Decompiler lane, cancellable with cancel_decompile.
@@ -358,7 +358,7 @@ export interface AnalysisState {
   analyzer: string;
   done: number;
   pct: number;
-  error?: string;               // state "failed"
+  error?: string;               // state "failed": the run broke, or could not start (the program stays open; `analysis` is the record as written)
 }
 
 /** State of the debugger (also the `debug_state` notification). Addresses are program addresses (runtime address minus `offset`); register values stay runtime values. */

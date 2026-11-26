@@ -192,3 +192,126 @@ def test_raw_blob_background(tmp_path):
             assert (await c.ok("listing_info"))["totalBytes"] == 1024
     run(go())
     proc.stop()
+
+
+# ---- in-process (one JVM, the `sc` fixture): failures injected with monkeypatch ----
+
+import contextlib, threading
+
+import pytest
+
+from ghidrette.core.errors import RpcError
+from ghidrette.domains import analysis as analysis_mod, highvars
+from testlib import BASE, CANCELLED, X86, inproc
+
+STALE = -32007
+
+
+async def wait_done(call, sid=None, timeout=300):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        st = await call("analysis_status", sid)
+        if st["state"] != "running":
+            return st
+        await asyncio.sleep(0.1)
+    raise AssertionError("analysis still running")
+
+
+async def code(call, sid=None):
+    with pytest.raises(RpcError) as caught:
+        await call
+    return caught.value.code
+
+
+class NoThread(threading.Thread):
+    def start(self):
+        if self.name == "analysis":
+            raise RuntimeError("can't start new thread")
+        super().start()
+
+
+def test_start_failure_leaves_the_program_usable(sc, tmp_path, monkeypatch):
+    async def usable(ctx, call, n):
+        a = (await call("listing_info"))["ranges"][0]["start"]
+        assert await asyncio.wait_for(call("listing_rows", address=a, count=20), 5)
+        await call("create_label", address="0x%x" % (int(a, 16) + 4 + n), name="after_failure_%d" % n)  # not Busy
+        assert (await asyncio.wait_for(call("save"), 10))["saved"]  # does not wait for a run that never existed
+        assert ctx.analysis.stop(0) and not ctx.session.analyzing and not ctx.events.bulk
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            real_update = ctx.project.meta_update
+
+            def boom(key, **fields):  # only the analysis start's record (the import writes its own through the same call)
+                if fields.get("analysis") == "partial":
+                    raise OSError("disk full")
+                return real_update(key, **fields)
+            with monkeypatch.context() as patch:
+                patch.setattr(ctx.project, "meta_update", boom)
+                r = await call("open_binary", path=BIN, analysis="background", profile="fast")
+            st = r["analysis"]
+            assert st["state"] == "failed" and "disk full" in st["error"] and st["analysis"] == "none", st  # not a failed open
+            assert (await call("active_session"))["sessionId"] == r["sessionId"]
+            await usable(ctx, call, 0)
+            with monkeypatch.context() as patch:
+                patch.setattr(analysis_mod.threading, "Thread", NoThread)
+                st = await call("start_analysis", profile="fast")
+            assert st["state"] == "failed" and "can't start" in st["error"] and st["analysis"] == "partial", st  # the record was written
+            assert (await call("analysis_status")) == st
+            await usable(ctx, call, 1)
+            assert (await call("start_analysis", profile="fast"))["state"] == "running"
+            st = await wait_done(call)
+            assert st["state"] == "done" and st["analysis"] == "done", st
+            assert await asyncio.wait_for(call("close_program"), 30) == {}
+    run(go())
+
+
+def test_analysis_rpcs_are_session_scoped(sc, tmp_path, monkeypatch):
+    blob_a = tmp_path / "a.bin"
+    blob_a.write_bytes(bytes.fromhex("5589e5b8010000005dc3"))
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            a = await call("open_binary", path=str(blob_a), loader="Raw Binary", language=X86, baseAddress=BASE, analysis="blocking")
+            b = await call("open_binary", path=BIN, analysis="background", profile="fast")
+            assert b["analysis"]["state"] == "running"
+            assert await code(call("cancel_analysis", a["sessionId"])) == STALE
+            assert await code(call("analysis_status", a["sessionId"])) == STALE
+            assert (await call("analysis_status", b["sessionId"]))["state"] == "running"  # B untouched
+            st = await wait_done(call, b["sessionId"])
+            assert st["state"] == "done", st
+            assert await call("cancel_analysis") == {"cancelled": False}  # unversioned path unchanged
+    run(go())
+
+
+def test_variable_edit_prepared_across_an_analysis_is_cancelled(sc, tmp_path, monkeypatch):
+    binary = tmp_path / "callee.bin"
+    binary.write_bytes(bytes.fromhex("5589e5ff7508e81500000083c4045dc3").ljust(32, b"\x90") + bytes.fromhex("5589e58b45088b40105dc3"))
+    entered, release = threading.Event(), threading.Event()
+    real = highvars.decompile_for_edit
+
+    @contextlib.contextmanager
+    def gated(*a, **k):  # the revision is already read: hold the prepare here while the analysis runs
+        entered.set()
+        assert release.wait(120)
+        with real(*a, **k) as x:
+            yield x
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            await call("open_binary", path=str(binary), loader="Raw Binary", language=X86, baseAddress=BASE, analysis="blocking", profile="fast")
+            if BASE not in {f["entry"] for f in await call("list_functions")}:
+                await call("create_function", address=BASE, name="caller")
+            await call("set_function_signature", entry=BASE, signature="int caller(void *p)")
+            await call("save")
+            with monkeypatch.context() as patch:
+                patch.setattr(highvars, "decompile_for_edit", gated)
+                edit = asyncio.create_task(call("rename_variable", entry=BASE, name="p", newName="q"))
+                assert await asyncio.to_thread(entered.wait, 10)
+                assert (await call("start_analysis", profile="full"))["state"] == "running"
+                assert (await wait_done(call))["state"] == "done"
+                release.set()
+                assert await code(edit) == CANCELLED
+            assert (await call("undo_state"))["canUndo"] is False  # nothing written
+            await call("rename_variable", entry=BASE, name="p", newName="q")  # the variable is still there under its old name
+    run(go())

@@ -33,8 +33,8 @@ sidecar/
       search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidretteScans)
       exports.py       export_symbols (JSON symbol map), export_header (C header), export_gzf (Ghidra archive, lane R)
       layout.py        file_layout(): entry point and sections from ELF/PE/Mach-O headers, shannon() (used by import_candidates; no RPCs)
-      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from, call_graph, function_calls (scan lane)
-      bookmarks.py     list_bookmarks, set_bookmark, remove_bookmark (BookmarkManager; set/remove are edits that announce their address)
+      xrefs.py         xrefs_to, xrefs_to_variable, xrefs_from (R); function_calls, call_graph (scan lane; call_graph is bounded by visited functions and seconds as well as output nodes, checks cancel in its loops, `truncated` says a bound hit)
+      bookmarks.py     list_bookmarks (scan lane, snapshot of plain dicts dropped on program_changed), set_bookmark, remove_bookmark {address, type, category?} (BookmarkManager; set/remove are edits on R that announce their address)
       debug.py         debug_attach, debug_detach, debug_status, debug_breakpoint, debug_continue, debug_step, debug_pause: GDB remote client (core/gdb.py) to QEMU's gdbstub, `debug_state` notifications; one reader thread, a worker per stop
       datatypes.py     list_data_types and the data-type-manager RPCs
   jscans/              GhidretteScans.java (strings scan, symbol kind filter/sort), StructureInference.java; compiled to jscans/out/
@@ -51,13 +51,13 @@ A method declares where it runs: `@rpc(lane=...)`. The dispatcher (`core/rpc.py`
 |---|---|---|
 | `R` | R, one thread, queue `lanes.jobs` | all reads that are not slow and ALL writes (edits, undo/redo, save, close). NoProgram "open_binary in progress" fail-fast during an open |
 | `edit` | S pool, then R | variable edits decompile and infer structure fields on S, then queue the write on R. A `Job` is registered under the request id and can be cancelled with `cancel_decompile`. Structure inference shares a deadline across the initial decompile, direct callees, and pointer tracing. The commit checks program epoch and write revision |
-| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
+| `scan` | S pool (`SIDECAR_SCAN_WORKERS`, default 2), queue `lanes.sjobs` | `search_symbols`, `top_symbols`, `list_symbols`, `list_strings`, `search_memory`, `list_data_types`, `list_bookmarks`, `function_calls`, `call_graph`, `export_symbols`, `export_header`. Gets `scan=` (unique id, cancellable via `cancel_search`). Never on R, so a scan cannot delay listing fetches |
 | `decomp` | D pool (`SIDECAR_DECOMP_WORKERS`, default 2), queue `lanes.djobs` | `decompile`, `variable_uses`, `function_graph`. Each worker owns one `DecompInterface`, created, used and disposed on its own thread (disposed when the program epoch moves on). Gets `job=` (unique id) |
 | `file` | asyncio file thread | `load_coverage` parses its file without occupying R and checks the program epoch before returning |
 | `project` | R | `list_programs`, `delete_program`, `import_candidates`, `list_languages`, `close_program`. `Busy` instead of NoProgram during an open; `busy_ok=True` (`list_languages`) is answered anyway |
-| `loop` | the asyncio loop | `cancel_*`, `provider_info`, `active_session`, `analysis_status`: quick, no Ghidra work |
+| `loop` | the asyncio loop | `cancel_*`, `provider_info`, `active_session`, `analysis_status`: quick, no Ghidra work. `scoped=True` (`analysis_status`, `cancel_analysis`): the dispatcher checks the request's sessionId (StaleSession) under `session.lock` before running them, on protocol-v1 connections; the cancels by request id stay unscoped |
 | `open` | O, one thread per `open_binary`, at most one at a time (`lanes.opening`) | validate, load or import the replacement, then call back onto R with `lanes.on_r()` to save and swap the current program |
-| A | one `analysis` thread per run (`domains/analysis.py`), at most one at a time | Ghidra's AutoAnalysisManager inside the program's one "Analysis" transaction, then clearUndo + save. Never waits for R, so `close()` on R can wait for it. `analysis_status`/`cancel_analysis` are `loop` lane, `start_analysis` is `R` |
+| A | one `analysis` thread per run (`domains/analysis.py`), at most one at a time | Ghidra's AutoAnalysisManager inside the program's one "Analysis" transaction, then clearUndo + save. Never waits for R, so `close()` on R can wait for it. `analysis_status`/`cancel_analysis` are `loop` lane (scoped), `start_analysis` is `R` |
 
 One more thread: the recovery snapshot loop (`program.py`, every `SIDECAR_SNAPSHOT_SECS`) only sleeps; the snapshot itself runs on R via `lanes.on_r()` and preserves undo history. The three worker queues are bounded at 128 items each. A connection admits at most 64 outstanding requests and a 2 MiB message; disconnect cancels queued requests and cancellable work.
 
@@ -71,7 +71,7 @@ checks that every method in `protocol.ts` is registered.
 
 ## Analysis (background)
 
-While thread A runs, `ses.analyzing` is true: `Session.edit()`, `undo` and `redo` fail `Busy` ("analysis running") because a second transaction would join the analysis one (protocol.md "Analysis"). Reads (R, S, D lanes) are unaffected. `Events.bulk` is on: the listener does not parse records (it would be millions of JPype calls), it announces "everything changed" about once a second. `close()`, `save` and shutdown call `analysis.stop()` first (cancel, wait for the thread, which saves what it found). The monitor is Ghidra's `BasicTaskMonitor` polled by `analysis.Poller`; a Python callback monitor (`PyGhidraTaskMonitor`) doubled the first-open time (SPIKE_REPORT, Round 7).
+While thread A runs, `ses.analyzing` is true: `Session.edit()`, `undo` and `redo` fail `Busy` ("analysis running") because a second transaction would join the analysis one (protocol.md "Analysis"). **One owner:** `Analysis.start()` owns `ses.analyzing`, `events.bulk`, the state and the `ended` event from the moment it runs (program.py publishes with `analyzing` already set, start() takes over). If the monitor, the `programs.json` record or the thread cannot be created, it rolls all of it back and the program stays open with state `failed` + `error` (not a failed open); `stop(0)` is True and edits are not Busy again. The thread's `finally` does the same on the way out and also bumps `ses.revision`: a run (cancelled ones too) mutates the program and clears undo without an edit, so a variable edit prepared before it (`highvars`: prepare on S, commit on R if epoch and revision match) answers Cancelled. Reads (R, S, D lanes) are unaffected. `Events.bulk` is on: the listener does not parse records (it would be millions of JPype calls), it announces "everything changed" about once a second. `close()`, `save` and shutdown call `analysis.stop()` first (cancel, wait for the thread, which saves what it found). The monitor is Ghidra's `BasicTaskMonitor` polled by `analysis.Poller`; a Python callback monitor (`PyGhidraTaskMonitor`) doubled the first-open time (SPIKE_REPORT, Round 7).
 
 ## The context object
 
@@ -83,7 +83,7 @@ other's attributes.
 
 `Events` owns the Ghidra listener (it runs on Ghidra's event thread, only copies data, never touches the DB), coalesces changes for 50 ms
 and emits `program_changed`. Everything derived from the program subscribes: `ctx.events.subscribe(fn(kinds, ranges, broad))`.
-`fn` runs on whatever thread caused the change and must be quick and thread-safe. Today: the decompile cache (`decompile.py`: comment/code
+`fn` runs on whatever thread caused the change and must be quick and thread-safe. Today: the bookmark snapshot (`bookmarks.py`, cleared on every change), the decompile cache (`decompile.py`: comment/code
 changes invalidate by range, anything else clears) and the snapshot cache behind symbols/strings (`search.py`: cleared on every change).
 `events.record(kinds, ranges)` is how an edit that knows its range announces it (define_data, clear_code, create_struct_from_data);
 `events.reset()` is the program swap/close: every subscriber gets a broad invalidation, nothing is announced. It advances a generation so old listener callbacks and coalescing timers are ignored. The listener itself is

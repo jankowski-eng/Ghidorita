@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { scanner } from "./scan";
 import type { Address, CallGraph, FunctionInfo } from "../../../protocol";
 import type { References } from "./backend";
 import { coverage } from "./coverage";
@@ -21,9 +22,10 @@ export function CallGraphView({ source, entry, funcs, version, covVersion, onGo 
   const byEntry = useMemo(() => new Map(funcs.map((f) => [f.entry, f])), [funcs]);
   useEffect(() => {
     let live = true;
+    const sc = scanner();
     setErr("");
-    source(to ? { entry, to } : { entry }).then((r) => { if (live) setG(r); }, (e) => { if (live) { setG(null); setErr(e instanceof Error ? e.message : String(e)); } });
-    return () => { live = false; };
+    sc.run(source(to ? { entry, to } : { entry })).then((r) => { if (live) setG(r); }, (e) => { if (live) { setG(null); setErr(e instanceof Error ? e.message : String(e)); } });
+    return () => { live = false; sc.cancelAll(); }; // the function, the target or the program changed: the sidecar stops walking for the obsolete request
   }, [source, entry, to, version]);
   const L = useMemo(() => {
     if (!g) return null;
@@ -57,7 +59,7 @@ export function CallGraphView({ source, entry, funcs, version, covVersion, onGo 
         {to && <button className="gbtn" onPointerDown={stop} onClick={() => { setTo(null); setText(""); }}>Clear</button>}
         <button className="gbtn" onPointerDown={stop} onClick={() => show(true)} title="Show the whole graph">Fit</button>
         <button className="gbtn" onPointerDown={stop} onClick={() => show(false)} title="Actual size at this function">1:1</button>
-        {g?.truncated && <span className="dim">(first 300 functions)</span>}
+        {g?.truncated && <span className="dim">(partial: size or time limit)</span>}
       </div>
       {!g && !err && <div className="empty">Building call graph…</div>}
       {err && <div className="empty err">{err}</div>}
