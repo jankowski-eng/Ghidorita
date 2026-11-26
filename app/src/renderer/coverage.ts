@@ -65,7 +65,7 @@ export interface Run { id: number; name: string; cov: Coverage }
 
 /**
  * Named coverage runs. Up to two are shown at once: A alone tints what A executed (green); A and B together tint what both executed (green),
- * only A (orange) and only B (blue), which is the difference between two runs. One set per program; cleared when a program opens or closes.
+ * only A (attention colour, solid bar, letter A) and only B (hatched bar, letter B), which is the difference between two runs. One set per program; cleared when a program opens or closes.
  */
 export class CoverageRuns {
   runs: Run[] = [];

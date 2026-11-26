@@ -64,7 +64,7 @@ export function AppStatusBar({ nav }: { nav: Navigation }) {
   const dirty = useProgram((p) => p.undo.dirty);
   return (
     <>
-      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} onAnalysis={(a) => void session.analysisAction(a)}
+      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
         back={[...nav.nav.back].reverse().map((l) => l.address)} forward={[...nav.nav.forward].reverse().map((l) => l.address)} onBack={nav.back} onForward={nav.forward} />
     </>
   );

@@ -24,7 +24,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
     const g = c.getContext("2d")!;
     g.fillStyle = "#1b1b1c"; g.fillRect(0, 0, w, h);
     const img = g.getImageData(0, 0, w, h);
-    fills.forEach((f, li) => { const [r, gg, b] = all[li].color; for (let y = 0; y < h; y++) if (f[y] > 0) for (let x = 0; x < w; x++) { const o = (y * w + x) * 4, a = 0.15 + 0.85 * f[y]; img.data[o] = img.data[o] * (1 - a) + r * a; img.data[o + 1] = img.data[o + 1] * (1 - a) + gg * a; img.data[o + 2] = img.data[o + 2] * (1 - a) + b * a; } });
+    fills.forEach((f, li) => { const [r, gg, b] = all[li].color, hatch = !!all[li].hatched; for (let y = 0; y < h; y++) if (f[y] > 0) for (let x = 0; x < w; x++) { if (hatch && (x + y) % 4 > 1) continue; /* diagonal stripes: B is hatched */ const o = (y * w + x) * 4, a = 0.15 + 0.85 * f[y]; img.data[o] = img.data[o] * (1 - a) + r * a; img.data[o + 1] = img.data[o + 1] * (1 - a) + gg * a; img.data[o + 2] = img.data[o + 2] * (1 - a) + b * a; } });
     g.putImageData(img, 0, 0);
     g.fillStyle = "#777"; for (const cum of map.cum.slice(1)) g.fillRect(0, Math.floor((cum / map.total) * h), w, 1); // boundaries between loaded ranges
     if (pos >= 0 && map.total > 0) { g.fillStyle = "#fff"; g.fillRect(0, Math.min(h - 2, Math.floor((pos / map.total) * h)), w, 2); }
@@ -44,7 +44,7 @@ export function BinaryMap({ map, funcs, here, covVersion, onGo }: { map: AddrMap
       <canvas ref={cv} />
       {tip && <div className="bmap-tip" style={{ top: tip.y }}>{tip.text}</div>}
     </div>
-    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed", "pink marks functions you named; blue is every function")}{toggle("coverage", "Coverage", "green = executed (in both runs when two are compared), orange = only run A, blue = only run B", !coverage.shown)}</div>
+    <div className="bmap-layers" role="group" aria-label="Map layers">{toggle("renamed", "Renamed", "off-white marks functions you named; blue is every function")}{toggle("coverage", "Coverage", "green = executed (in both runs when two are compared), orange-red = only one run (solid = A, hatched = B)", !coverage.shown)}</div>
     </div>
   );
 }
