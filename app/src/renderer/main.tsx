@@ -20,6 +20,7 @@ async function start() {
   const backend = new WebSocketBackend({
     onEdit: (command, params, result) => changeLog.record(command, params, result),
     onSessionChanged: () => changeLog.clear(),
+    onHistory: (undo) => changeLog.reconcile(undo),
     onRequest: cfg.autotest && !cfg.bench ? (method, params) => requests.push({ method, params }) : undefined,
   });
   await backend.connect(cfg.port, cfg.token);

@@ -1,4 +1,4 @@
-import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type Methods, type Notifications } from "../../../protocol";
+import { ErrorCode, type ActiveSession, type AnalysisState, type Capability, type Methods, type Notifications, type UndoState } from "../../../protocol";
 import {
   BackendError, type AnalysisMode, type ApplicationBackend, type Failure, type ImportSelection, type Job, type OpenJob, type OpenProgress, type ProgramChange,
   type ProgramLifecycle, type ProgramOperations, type ProjectCatalog, type ProviderEvents,
@@ -17,6 +17,7 @@ type Pending = { sessionId?: string; accept(value: unknown): void; reject(error:
 type Hooks = {
   onEdit?(command: string, params: unknown, result: unknown): void;
   onSessionChanged?(): void;
+  onHistory?(undo: UndoState): void; // the undo state every program_changed of the current session carries
   onRequest?(method: string, params: unknown): void;
 };
 
@@ -75,7 +76,7 @@ export class WebSocketBackend implements ApplicationBackend {
         this.progress.get(p.openId)?.(p);
       } else if (reply.method === "program_changed" && notifications.program_changed(reply.params)) {
         const { sessionId, ...event } = reply.params as Notifications["program_changed"];
-        if (sessionId === this.sessionId) for (const listener of this.changes) listener(sessionId, event);
+        if (sessionId === this.sessionId) { this.hooks.onHistory?.(event.undo); for (const listener of this.changes) listener(sessionId, event); }
       } else if (reply.method === "analysis_state" && notifications.analysis_state(reply.params)) {
         const { sessionId, ...state } = reply.params as Notifications["analysis_state"];
         if (sessionId === this.sessionId) for (const listener of this.analyses) listener(sessionId, state);

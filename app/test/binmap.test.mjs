@@ -51,3 +51,10 @@ test("mapLayers: renamed functions, coverage in both/only A/only B, switches", a
   // pixel mapping: 0x100 bytes into 8 rows of 0x20: the "only A" layer fills row 0 only
   assert.deepEqual([...binmod.fill(m.total, L[3].spans, 8)], [1, 0, 0, 0, 0, 0, 0, 0]);
 });
+
+test("goAddr: an empty program has nowhere to go (a click on its map used to throw from AddrMap.addr)", () => {
+  const { goAddr } = binmod;
+  assert.throws(() => new AddrMap([]).addr(0));
+  assert.equal(goAddr(new AddrMap([]), 0), null);
+  assert.equal(goAddr(new AddrMap([{ start: "0x1000", size: 0x100 }]), 0x10), "0x1010");
+});

@@ -1,6 +1,6 @@
 import type { Address } from "../../../protocol";
 
-export interface Change { id: number; label: string; address?: Address; undone: boolean; saved: boolean; at: number }
+export interface Change { id: number; label: string; address?: Address; undone: boolean; saved: boolean; locked?: boolean; at: number } // locked: unsaved, but the provider's undo history no longer holds it
 
 /** One line per edit command; null = not an edit. Params are the request's own. */
 export function describe(method: string, p: any): { label: string; address?: Address } | null {
@@ -39,10 +39,21 @@ export class ChangeLog {
   getSnapshot = () => this.items;
   private set(items: Change[]) { this.items = items; this.subs.forEach((f) => f()); }
   clear() { this.redo = []; this.set([]); }
+  /**
+   * The provider's history is the truth. When it holds nothing (an analysis cleared it and saved: the edits are in the file; or it cleared it and
+   * the save failed: they are not) no listed edit can be undone or redone any more.
+   */
+  reconcile(u: { canUndo: boolean; canRedo: boolean; dirty: boolean }) {
+    if (u.canUndo || u.canRedo) return;
+    const next = this.items.filter((c) => !c.undone).map((c) => (c.saved || c.locked ? c : u.dirty ? { ...c, locked: true } : { ...c, saved: true }));
+    if (next.length === this.items.length && next.every((c, i) => c === this.items[i])) return;
+    this.redo = [];
+    this.set(next);
+  }
   record(method: string, p: any, result: any) {
     if (method === "save") { if (result?.undoHistoryCleared) { this.redo = []; this.set(this.items.filter((c) => !c.undone).map((c) => ({ ...c, saved: true }))); } return; }
     if (method === "undo") {
-      const c = [...this.items].reverse().find((x) => !x.undone && !x.saved);
+      const c = [...this.items].reverse().find((x) => !x.undone && !x.saved && !x.locked);
       if (c) { this.redo.push(c.id); this.set(this.items.map((x) => (x === c ? { ...x, undone: true } : x))); }
       return;
     }

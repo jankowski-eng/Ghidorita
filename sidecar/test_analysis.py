@@ -315,3 +315,19 @@ def test_variable_edit_prepared_across_an_analysis_is_cancelled(sc, tmp_path, mo
             assert (await call("undo_state"))["canUndo"] is False  # nothing written
             await call("rename_variable", entry=BASE, name="p", newName="q")  # the variable is still there under its old name
     run(go())
+
+
+def test_failed_analysis_save_reports_the_cleared_history_and_the_unsaved_edit(sc, monkeypatch):
+    """The analysis clears the undo history before it saves. If the save fails the edit is still unsaved but can no longer be undone: the
+    announced undo state must say so (it used to keep the pre-analysis state, offering an undo that fails)."""
+    from inproc import build
+    from ghidrette.domains import analysis as an
+    p = build(sc, "t_nosave", [("b", 0x1000, bytes([0xC3]) * 16, False)])  # no project file: saving raises
+    tx = p.startTransaction("edit")
+    p.getListing().setComment(p.getAddressFactory().getDefaultAddressSpace().getAddress(0x1000), 0, "x")
+    p.endTransaction(tx, True)
+    assert sc.ses.refresh_undo(p) == {"canUndo": True, "canRedo": False, "dirty": True, "undoName": sc.ses.undo_snap["undoName"]}
+    monkeypatch.setattr(an, "execute", lambda *a, **k: None)
+    monkeypatch.setattr(sc.app.ctx.project, "meta_update", lambda *a, **k: None)
+    sc.app.ctx.analysis._run(p, "k", sc.ses.epoch, an.new_monitor(), [], "full", False)
+    assert sc.ses.undo_snap == {"canUndo": False, "canRedo": False, "dirty": True}
