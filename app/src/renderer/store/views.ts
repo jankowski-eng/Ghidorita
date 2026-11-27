@@ -9,7 +9,8 @@ import type { XrefTarget } from "../editActions";
 import type { CommentKind, ValueTrail } from "../../../../protocol";
 import { emptyNav } from "../nav";
 import { createStore } from "./createStore";
-import { layoutNames, readLayouts, startupLayout, type Sizes } from "../layouts";
+import { fitLayout, layoutNames, readLayouts, startupLayout, type Sizes } from "../layouts";
+import { dockCapability } from "../../capabilities";
 
 export type RangeList = { start: Address; end: Address }[] | null;
 export interface EditDialogState { spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> }
@@ -57,8 +58,8 @@ export function viewsReducer(v: Views, a: ViewsAction): Views {
 /** Patch that clears the value trail and invalidates any request still in flight for it. */
 export const clearTrail = (v: Views): Partial<Views> => ({ trail: null, trailSeq: v.trailSeq + 1 });
 
-/** The views store; the pane sizes and order start from the stored Default layout and the sizes last dragged to (storage read in try/catch, the built-in sizes if it fails). */
-export function createViews() {
-  const start = startupLayout();
-  return createStore(viewsReducer, { ...initialViews, paneOrder: start.order, paneSizes: start.sizes, layoutNames: layoutNames(readLayouts()) });
+/** The views store, started from the stored Default layout (panes, order, sizes, centre view, dock) as far as the provider's capabilities allow; the sizes last dragged to win (storage read in try/catch, the built-in layout if it fails). */
+export function createViews(caps: { has(c: string): boolean } = { has: () => false }) {
+  const start = fitLayout(startupLayout(), caps, dockCapability);
+  return createStore(viewsReducer, { ...initialViews, paneOrder: start.order, paneSizes: start.sizes, visible: start.visible, graphOn: start.center === "graph", callGraphOn: start.center === "callgraph", pcodeOn: start.center === "pcode", dock: start.dock, layoutNames: layoutNames(readLayouts()) });
 }

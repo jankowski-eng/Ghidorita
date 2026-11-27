@@ -69,3 +69,10 @@ test("stepByte moves over mapped bytes only: across a gap it lands on the next m
   assert.deepEqual(stepByte(L, "", 0x104fn, 1), null);                         // last byte of the last range in that space
   assert.equal(stepByte(L, "", 0x1030n, 1), null);                             // not on a mapped byte
 });
+
+test("stepByte past the last or before the first mapped byte of the space clamps to it, not to the current range's end", () => {
+  assert.deepEqual(stepByte(L, "", 0x1020n, 64), { space: "", off: 0x104fn });
+  assert.deepEqual(stepByte(L, "", 0x1048n, -64), { space: "", off: 0x1008n });
+  assert.equal(stepByte(L, "", 0x104fn, 1), null);
+  assert.equal(stepByte(L, "", 0x1008n, -1), null);
+});

@@ -26,7 +26,8 @@ export interface ViewRefs {
 export function createSession(backend: ApplicationBackend, opts: { autotest: boolean }) {
   const { capabilities: caps, lifecycle } = backend;
   const store = createStore(programReducer, initialProgram);
-  const views = createViews();
+  const views = createViews(caps);
+  let startDock = views.getState().dock; // the Default layout's dock tab: the reset of the first program open would drop it, so it is put back once
   const { dispatch } = store;
   const get = () => store.getState();
   const errors: string[] = [];
@@ -62,6 +63,7 @@ export function createSession(backend: ApplicationBackend, opts: { autotest: boo
     const api = session ? backend.program(session) : null;
     const current: Program | null = session && api ? { session, api, lookup: functionLookup(api.functions) } : null;
     dispatch({ type: "program", program: current });
+    if (current && startDock) { views.dispatch({ type: "set", patch: { dock: startDock } }); startDock = null; }
     if (current && caps.has("undo")) void current.api.history.state().then((u) => {
       if (get().program === current) dispatch({ type: "undo", u });
     }, (e) => { if (get().program === current) fail(e); });

@@ -48,9 +48,10 @@ class Patch:
     def assemble_instruction(self, address, text, scan=None):
         """Assembles `text` at `address` with Ghidra's assembler for the program's language (the first call per language builds its grammar,
         seconds on x86: scan lane, cancellable with cancel_search). Nothing is written. Result {address, bytes, length, oldBytes, oldLength,
-        overwrites}: `oldLength` is the unit at `address` that a patch replaces, `overwrites` the following instructions a longer patch would also
+        overwrites} (`oldBytes` is the first 16 bytes only, followed by " …" when the unit is longer): `oldLength` is the unit at `address` that a patch replaces, `overwrites` the following instructions a longer patch would also
         overwrite (0 when the bytes fit). InvalidArgument names what Ghidra rejected (syntax, an operand, an unknown mnemonic)."""
         import jpype
+        from jpype import JArray, JByte
         from ghidra.app.plugin.assembler import Assemblers
         text_arg(text, "text")
         if not text.strip() or "\n" in text:
@@ -58,7 +59,10 @@ class Patch:
         with self.ctx.lanes.scanning(scan) as prog:
             a = self.ses.addr(address, prog)
             cu = self._unit(prog, a, address)
-            old = cu.getBytes()
+            n_old = int(cu.getLength())
+            buf = JArray(JByte)(min(n_old, MAX_BYTES))  # a defined array can be megabytes: preview its first bytes only
+            prog.getMemory().getBytes(a, buf)
+            old = _hex(buf) + (" …" if n_old > MAX_BYTES else "")
             try:
                 with self.asm_lock:
                     scan.check()  # cancelled while waiting for an earlier (slow, first-time) assembly
@@ -69,7 +73,7 @@ class Patch:
                 raise RpcError(INVALID, "cannot assemble %r: %s" % (text.strip(), str(e.getMessage() or e.getClass().getSimpleName()).strip()))
             scan.check()
             n, _ = self._overwrites(prog, a, cu.getLength(), len(out))
-            return {"address": address, "bytes": _hex(out), "length": len(out), "oldBytes": _hex(old), "oldLength": int(cu.getLength()), "overwrites": n}
+            return {"address": address, "bytes": _hex(out), "length": len(out), "oldBytes": old, "oldLength": n_old, "overwrites": n}
 
     @rpc(lane="R")
     def patch_instruction(self, address, bytes, overwriteFollowing=False):

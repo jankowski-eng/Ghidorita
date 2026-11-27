@@ -53,7 +53,7 @@ export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   else if (c.type === "pcode") { if (opened()) set({ pcodeOn: !views.getState().pcodeOn, graphOn: false, callGraphOn: false }); }
   else if (c.type === "layout") { if (c.op === "apply") applyLayout(s, c.name); else removeLayout(s, c.name); }
   else if (c.type === "pane-move") movePane(s, c.pane, c.dir);
-  else if (c.type === "layout-save") set({ formDlg: { title: "Save layout", submit: "Save", fields: [{ key: "name", label: "Layout name" }], go: async (v) => saveCurrentLayout(s, v.name) } });
+  else if (c.type === "layout-save") { if (!views.getState().dlg && !views.getState().formDlg) set({ formDlg: { title: "Save layout", submit: "Save", fields: [{ key: "name", label: "Layout name" }], go: async (v) => saveCurrentLayout(s, v.name) } }); }
   else if (c.type === "datatypes") { if (opened()) set({ typesOpen: !views.getState().typesOpen }); }
   else if (c.type === "toggle-pane") set({ visible: { ...views.getState().visible, [c.pane]: c.visible } });
 }

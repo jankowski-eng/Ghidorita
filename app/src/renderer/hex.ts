@@ -92,7 +92,7 @@ export function stepByte(l: HexLayout, space: string, off: bigint, delta: number
   if (i < 0) return null;
   const want = off + BigInt(delta), s = data[i];
   if (want >= s.lo && want < s.hi) return { space, off: want };
-  if (delta > 0) { const n = data.slice(i + 1).find((x) => x.space === space && x.hi > want); return n ? { space, off: n.lo > want ? n.lo : want } : off === s.hi - 1n ? null : { space, off: s.hi - 1n }; }
+  if (delta > 0) { const n = data.slice(i + 1).find((x) => x.space === space && x.hi > want); if (n) return { space, off: n.lo > want ? n.lo : want }; const end = data.filter((x) => x.space === space).at(-1)!.hi - 1n; return off === end ? null : { space, off: end }; }
   const p = [...data.slice(0, i)].reverse().find((x) => x.space === space && x.lo <= want);
-  return p ? { space, off: p.hi - 1n < want ? p.hi - 1n : want } : off === s.lo ? null : { space, off: s.lo };
+  if (p) return { space, off: p.hi - 1n < want ? p.hi - 1n : want }; const start = data.find((x) => x.space === space)!.lo; return off === start ? null : { space, off: start };
 }

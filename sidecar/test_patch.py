@@ -88,3 +88,11 @@ def test_errors_and_busy(sc):
     finally:
         sc.ses.analyzing = False
     assert sc.get_bytes("0x401000", 1)["bytes"] == "55"
+
+
+def test_preview_of_a_long_data_unit_is_cut_to_the_first_bytes(sc):
+    from ghidra.program.model.data import ArrayDataType, ByteDataType
+    p = build(sc, "t_patch_long", [("ram", 0x401000, bytes(range(64)), False)])
+    sc.edit("array", lambda q: q.getListing().createData(sc.addr("0x401000"), ArrayDataType(ByteDataType.dataType, 64, 1)) and True)
+    a = sc.assemble_instruction("0x401000", "NOP", scan=scan(sc))
+    assert a["oldLength"] == 64 and a["oldBytes"] == " ".join("%02x" % i for i in range(16)) + " …"

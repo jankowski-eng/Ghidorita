@@ -301,7 +301,7 @@ export interface Methods {
   save: { params: {}; result: { saved: boolean; undoHistoryCleared: boolean } };
 }
 
-/** oldLength/oldBytes: the code unit at `address` that a patch replaces; overwrites: the following instructions or defined data a longer patch would also overwrite (0 when the bytes fit). bytes/oldBytes: hex like "48 89 e5". */
+/** oldLength/oldBytes: the code unit at `address` that a patch replaces; overwrites: the following instructions or defined data a longer patch would also overwrite (0 when the bytes fit). bytes/oldBytes: hex like "48 89 e5"; oldBytes is cut to its first 16 bytes and ends with " …" when the unit is longer. */
 export interface AssembledInstruction { address: Address; bytes: string; length: number; oldBytes: string; oldLength: number; overwrites: number }
 export interface PatchedRange { address: Address; length: number; original: string; current: string } // hex of the bytes the file had / the program has now
 

@@ -68,10 +68,10 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
       if (hit) { e.preventDefault(); e.stopPropagation(); api().handleMenu(hit[1]); }
     };
     window.addEventListener("keydown", hintKey, true);
-    // Esc clears the value trail (not while a dialog or the command bar is up: their Esc closes them)
+    // Esc clears the value trail, or the request still loading it (not while a dialog or the command bar is up: their Esc closes them)
     const trailEsc = (e: KeyboardEvent) => {
       const v = s.views.getState();
-      if (e.key === "Escape" && v.trail && !v.dlg && !v.formDlg && !v.searchOpen && !v.gotoOpen && !v.importFor) s.views.dispatch({ type: "set", patch: clearTrail });
+      if (e.key === "Escape" && !v.dlg && !v.formDlg && !v.searchOpen && !v.gotoOpen && !v.importFor) s.views.dispatch({ type: "set", patch: clearTrail });
     };
     window.addEventListener("keydown", trailEsc);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") refs.lastPane.current = k; };
