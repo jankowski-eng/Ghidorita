@@ -185,11 +185,11 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   await waitFor(() => xr().querySelector(".xh")?.textContent?.startsWith(`References from ${crFrom}`) && xrows().some((r) => r.querySelector(".xk")?.textContent === "call"), 15000, "references from the call instruction");
   const callsOut = xrows().filter((r) => r.querySelector(".xk")?.textContent === "call").map((r) => r.querySelector(".a")!.textContent);
   click("Show references from"); // back to "to"
-  // X in the listing: pin the cursor row
+  // Show References To (Cmd+Shift+F) in the listing: pin the cursor row
   const lb = document.querySelector<HTMLElement>(".lbox")!;
   const lrow = [...document.querySelectorAll<HTMLElement>(".lrow:not(.lbl)")][2];
   const lAddr = lrow.querySelector(".a")!.textContent!;
-  lrow.click(); lb.focus(); press(lb, "x");
+  lrow.click(); lb.focus(); c.command({ type: "xrefs" });
   await waitFor(() => xr().querySelector(".xh")?.textContent?.startsWith(`References to ${lAddr}`) && xr().querySelector('button[aria-label="Follow cursor"]'), 10000, "listing X pins " + lAddr);
   click("Follow cursor");
   await waitFor(() => !xr().querySelector('button[aria-label="Follow cursor"]'), 5000, "follow cursor unpins");
@@ -208,7 +208,7 @@ export async function runNavFlow(fl: FunctionInfo[], c: AutotestCtx, result: Rec
   ed.setPosition({ lineNumber: tokPick!.line, column: tokPick!.col }); ed.focus();
   await sleep(200);
   const ta = document.querySelector<HTMLElement>(".monaco-editor textarea")!; ta.focus();
-  ta.dispatchEvent(new KeyboardEvent("keydown", { key: "x", code: "KeyX", keyCode: 88, which: 88, bubbles: true, cancelable: true } as KeyboardEventInit));
+  c.command({ type: "xrefs" }); // Cmd+Shift+F is a menu accelerator; the menu sends this command
   await waitFor(() => xr().querySelector(".xh")?.textContent?.startsWith(`References to ${tokPick!.label}`) && xr().querySelector('button[aria-label="Follow cursor"]'), 10000, "decompiler X pins " + tokPick!.label);
   const tokRows = xrows().length;
   click("Follow cursor");

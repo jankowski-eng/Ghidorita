@@ -10,8 +10,8 @@ type Row = { go: Address | null; where: string; kind: string; type: string; fn?:
 export type UseHit = { name: string };
 
 /**
- * References to the current address (follows the cursor), or to a pinned target: the row under the listing cursor (X), or a decompiler token
- * (X on a variable/param -> references to that program variable, or the decompiler's writes and reads of a temporary; on a global -> references to its address, on a call target / function name / label -> to its address).
+ * References to the current address (follows the cursor), or to a pinned target: the row under the listing cursor (Cmd+Shift+F), or a decompiler token
+ * (Cmd+Shift+F on a variable/param -> references to that program variable, or the decompiler's writes and reads of a temporary; on a global -> references to its address, on a call target / function name / label -> to its address).
  * "From" lists what the instruction at the current address references (also stack, register and external references, which have no address).
  * Click or Enter navigates to the referencing / referenced address.
  */

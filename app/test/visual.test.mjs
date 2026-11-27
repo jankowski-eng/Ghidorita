@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 
 const load = async (file) => import("data:text/javascript," + encodeURIComponent((await build({ entryPoints: [new URL(file, import.meta.url).pathname], bundle: true, format: "esm", write: false })).outputFiles[0].text));
-const { KEYS, keyId, keyOf, isHint, showKey, hintLine } = await load("../src/keys.ts");
+const { KEYS, keyId, keyOf, isHint, showKey, hintLine, matchesKey } = await load("../src/keys.ts");
 const { dotOf, covStyle, COLORS } = await load("../src/renderer/palette.ts");
 const { isBackEdge } = await load("../src/renderer/graphLayout.ts");
 const { ACTIONS } = await load("../src/renderer/commandActions.ts");
@@ -18,9 +18,16 @@ test("key table: Ghidra defaults, shown the same on both platforms' syntax", () 
   assert.equal(showKey("CmdOrCtrl+Alt+C", true), "⌘⌥C");
   assert.equal(keyOf({ type: "edit", action: "rename" }), "L");
   assert.equal(keyOf({ type: "edit", action: "save" }), KEYS.save);
-  assert.equal(keyOf({ type: "dock", panel: "strings" }), "CmdOrCtrl+Shift+E");
-  assert.equal(keyOf({ type: "edit", action: "createStruct" }), undefined);
-  assert.ok(isHint("edit:retype") && isHint("edit:rename") && isHint("graph") && !isHint("goto"));
+  assert.equal(keyOf({ type: "dock", panel: "strings" }), undefined); // Ghidra uses Ctrl+Shift+E for Edit Field
+  assert.equal(keyOf({ type: "dock", panel: "symbols" }), "CmdOrCtrl+T");
+  assert.equal(keyOf({ type: "xrefs" }), "CmdOrCtrl+Shift+F");
+  assert.equal(keyOf({ type: "dock", panel: "memsearch" }), "S");
+  assert.equal(keyOf({ type: "goto" }), "G");
+  assert.equal(showKey("Alt+Left", true), "⌥←");
+  assert.ok(isHint("edit:retype") && isHint("edit:rename") && isHint("goto") && isHint("nav-back") && isHint("dock:memsearch") && !isHint("graph") && !isHint("xrefs"));
+  const ev = (key, m = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...m });
+  assert.ok(matchesKey("G", ev("g")) && matchesKey("G", ev("G")) && !matchesKey("G", ev("g", { metaKey: true })) && !matchesKey("G", ev("g", { shiftKey: true })));
+  assert.ok(matchesKey("Alt+Left", ev("ArrowLeft", { altKey: true })) && !matchesKey("Alt+Left", ev("ArrowLeft")));
 });
 
 test("key table: every key is used once, and every command-bar action with a key resolves to a table entry", () => {
@@ -34,13 +41,13 @@ test("key table: every key is used once, and every command-bar action with a key
 });
 
 test("hint bar lists the keys of the focused view and only what the capabilities allow", () => {
-  assert.equal(hintLine("listing", ALL, true), "L rename · X refs · Space graph · ; comment · F function · T data · C clear");
-  assert.equal(hintLine("decompiler", ALL, true), "L rename · X refs · Space graph · ⌘L retype · ; comment");
-  assert.equal(hintLine("decompiler", ALL, false), "L rename · X refs · Space graph · Ctrl+L retype · ; comment");
-  assert.equal(hintLine("graph", ALL, true), "Space back · wheel zoom · drag pan · Fit · 1:1");
-  assert.equal(hintLine("other", ALL, true), "⌘K commands · ⌘G go to");
-  assert.equal(hintLine("listing", caps("decompile", "references"), true), "X refs");
-  assert.equal(hintLine("decompiler", caps("decompile", "editing", "references"), true), "L rename · X refs · ; comment");
+  assert.equal(hintLine("listing", ALL, true), "L rename · ⌘⇧F refs · ⌘Space graph · ; comment · F function · T data · [ array · P pointer · C clear");
+  assert.equal(hintLine("decompiler", ALL, true), "L rename · ⌘⇧F refs · ⌘Space graph · ⌘L retype · ; comment");
+  assert.equal(hintLine("decompiler", ALL, false), "L rename · Ctrl+Shift+F refs · Ctrl+Space graph · Ctrl+L retype · ; comment");
+  assert.equal(hintLine("graph", ALL, true), "⌘Space back · wheel zoom · drag pan · Fit · 1:1");
+  assert.equal(hintLine("other", ALL, true), "⌘K commands · G go to");
+  assert.equal(hintLine("listing", caps("decompile", "references"), true), "⌘⇧F refs");
+  assert.equal(hintLine("decompiler", caps("decompile", "editing", "references"), true), "L rename · ⌘⇧F refs · ; comment");
   assert.equal(hintLine("listing", caps(), true), "");
 });
 

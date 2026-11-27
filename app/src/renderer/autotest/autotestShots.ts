@@ -18,6 +18,7 @@ export async function runShotFlow(name: string, file: string, c: AutotestCtx, re
   if (name === "shot-bar") return barShot(c, result);
   if (name === "shot-calls") return callsShot(fl!, c, result);
   if (name === "shot-bookmarks") return bookmarksShot(fl!, c, result);
+  if (name === "shot-warnings") return warningsShot(fl!, c, result);
   if (name === "shot-copy") return copyShot(fl!, c, result);
   if (name === "shot-overview") return overviewShot(fl!, c);
   if (name === "shot-actions") return actionsShot(fl!, c);
@@ -34,7 +35,7 @@ async function graphShot(fl: { name: string; entry: string; size: number }[], c:
   need(g.blocks.length >= 3, "function with at least three blocks");
   await c.select(f.entry);
   await waitFor(() => document.querySelector(".editor")?.getBoundingClientRect().height, 10000, "decompiler visible");
-  press(document.body, " ");
+  c.command({ type: "graph" }); // the graph key is a menu accelerator
   const nodes = () => [...document.querySelectorAll<SVGGElement>('.graph g[role="button"]')];
   await waitFor(() => nodes().length === g.blocks.length, 15000, "one node per block");
   need(nodes().some((n) => n.getAttribute("aria-current")), "the block at the cursor is highlighted");
@@ -293,3 +294,20 @@ async function coverageShot(fl: Fn[], files: string[], c: AutotestCtx): Promise<
 
 // the "Coverage … loaded" notice in the status bar has gone
 const quiet = () => waitFor(() => !/loaded/.test(document.querySelector(".status")?.textContent ?? ""), 30000, "status bar notice gone");
+
+// the warnings bar above the C: a function whose decompile carries warnings
+async function warningsShot(fl: { name: string; entry: string; size: number }[], c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
+  let pick: { entry: string; name: string; warnings: string[] } | undefined;
+  for (const f of [...fl].sort((a, b) => b.size - a.size).slice(0, 150)) {
+    if (f.size > 30000) continue;
+    const d = await c.program().decompiler.decompile({ entry: f.entry, timeoutSecs: 60 }).result.catch(() => null);
+    if (d?.warnings?.length) { pick = { entry: f.entry, name: f.name, warnings: d.warnings }; break; }
+  }
+  need(pick, "a function with decompiler warnings");
+  await c.select(pick!.entry);
+  const bar = await waitFor(() => document.querySelector<HTMLElement>(".dwarn"), 15000, "warnings bar");
+  need(bar!.querySelectorAll(".dw").length >= 1, "a warning line");
+  result.warnings = { function: pick!.name, shown: [...bar!.querySelectorAll(".dw")].map((e) => e.textContent) };
+  await sleep(300);
+  return true;
+}

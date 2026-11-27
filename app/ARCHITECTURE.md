@@ -4,7 +4,7 @@ The wire contract is `../protocol.md` / `../protocol.ts`; the backend's layering
 
 ## Layout
 
-`src/keys.ts` (shared with the main process) is the one table of keys: the application menu (`main/menu.ts`) reads accelerators and label hints from it, the command bar (`SearchPanel`) shows the key of each action, and `StatusBar` builds the key hint line for the focused view (`hintLine`, filtered by `allowsCommand`). `renderer/palette.ts` holds the colour language (naming dots, coverage marks) that the function list, call graph, binary map and coverage views share.
+`src/keys.ts` (shared with the main process) is the one table of keys: the application menu (`main/menu.ts`) reads accelerators and label hints from it (keys are Ghidra 12.3's defaults; hint-only keys such as G, S and Alt+arrows are matched in `bootstrap.ts` with `matchesKey`), the command bar (`SearchPanel`) shows the key of each action, and `StatusBar` builds the key hint line for the focused view (`hintLine`, filtered by `allowsCommand`). `renderer/palette.ts` holds the colour language (naming dots, coverage marks) that the function list, call graph, binary map and coverage views share.
 
 ```
 src/renderer/
@@ -29,13 +29,13 @@ src/renderer/
     copy.ts            useCopy: copy address / bytes (hex, C array) / decompiled text from the focused pane; clipboard.ts has the writer (navigator.clipboard, then the validated IPC)
     debug.ts           useDebug: jump to every stop, resolve the function of a stop and fetch its variables (checked against the stop and pc), the first address F9 uses, the attach dialog, `stepStatement` (F7/F10/Shift+F10: the statement starts come from the decompiler's line mapping, revalidated before the step goes out); the pure helpers are in ../debug.ts (line for an address, statement range, values after lines, hexdump rows, changed registers)
     reactions.ts       useProgramReactions: program_changed -> tabs, listing rows, xrefs, function list (the decisions are in changes.ts); tabs reset with the program
-    bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, Space, focus), quit-save, the autotest driver
+    bootstrap.ts       useBootstrap: backend events, window and host handlers (menu, mouse, Cmd+Z, hint-only keys G, S, Alt+arrows, focus), quit-save, the autotest driver
   useTabs.ts tabs.ts   decompiler tabs and their results (tabs.ts is the pure part)
   session.ts           open helpers used by store/session.ts: resolveOpen, readBrowsing (first listing page), windowTitle
   RegistersPanel.tsx LocalsPanel.tsx MemoryPanel.tsx   the debugger's dock tabs (the shown stop's registers, variables with what they were, target memory as a hexdump or through a data type)
   Workbench.tsx        the three panes of the open program; WelcomePane.tsx the program browser; Shell.tsx toolbar, search/go-to bars, dock, status bar, type manager
   autotest/            AUTOTEST=<file> / BENCH=1 scripted modes; a separate chunk, loaded only in those modes
-  *.tsx *.ts           components (Listing, Decompiler, panels, dialogs) and pure logic with unit tests (nav, changes, rowcache, address, addrmap, editActions, openOptions, coverage, ...)
+  *.tsx *.ts           components (Listing, Decompiler, panels, dialogs) and pure logic with unit tests (nav, changes, rowcache, address, addrmap, editActions (listing keys, Define Array plan), rank (the empty command bar's lead score), warnings (decompiler warning wording), openOptions, coverage, ...)
 ```
 
 ## The rules

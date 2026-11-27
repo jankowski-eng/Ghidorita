@@ -13,7 +13,7 @@ export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCo
     case "save": return caps.has("save");
     case "undo": case "redo": return caps.has("undo");
     case "retype": case "autoStruct": return caps.has("decompile") && caps.has("variableEditing");
-    case "defineData": case "createStruct": return caps.has("typeEditing");
+    case "defineData": case "defineArray": case "definePointer": case "repeatData": case "createStruct": return caps.has("typeEditing");
     case "bookmark": return caps.has("bookmarks");
     default: return caps.has("editing");
   }

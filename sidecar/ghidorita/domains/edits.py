@@ -91,6 +91,8 @@ class Edits:
         def go(p):
             dtm = p.getDataTypeManager()
             dt = dtm.getDataType(dataType) if dataType.startswith("/") else None
+            if dt is None and dataType.startswith("/"):
+                dt = self._path_with_suffix(dtm, dataType)  # "/A/S[4]", "/A/S *": the parser takes no category path in front of a suffix
             if dt is None:
                 try:
                     dt = DataTypeParser(dtm, dtm, None, AllowedDataTypes.ALL).parse(dataType)
@@ -104,6 +106,40 @@ class Edits:
         self.ses.edit("Define data", go)
         self.ctx.events.record({"data"}, [out["range"]])
         return {}
+
+    @staticmethod
+    def _path_with_suffix(dtm, text):
+        """`/Category/Name` followed by array (`[n]`) and pointer (`*`) suffixes, resolved by hand; None when it is not that shape or the path is unknown."""
+        import re
+        from ghidra.program.model.data import ArrayDataType, PointerDataType
+        m = re.fullmatch(r"(/[^\[\]*]*?)\s*((?:\[\d+\]|\*\d*|\s)+)", text)
+        base = dtm.getDataType(m.group(1)) if m else None
+        if base is None:
+            return None
+        dt, group = base, []
+
+        def arrays(dt):  # Ghidra's name parser reverses each consecutive run of array suffixes: S[2][3] is two arrays of three
+            for n in reversed(group):
+                if n < 1 or dt.getLength() <= 0:
+                    return None
+                dt = ArrayDataType(dt, n, dt.getLength())
+            group.clear()
+            return dt
+        for s in re.findall(r"\[\d+\]|\*\d*", m.group(2)):
+            if s[0] == "[":
+                group.append(int(s[1:-1]))
+                continue
+            dt = arrays(dt)
+            if dt is None:
+                return None
+            if len(s) > 1:  # "*32": an explicit width in bits, as Ghidra's parser accepts it
+                bits = int(s[1:])
+                if bits % 8 or not 8 <= bits <= 64:
+                    raise RpcError(INVALID, "pointer width %d is not a multiple of 8 bits between 8 and 64" % bits)
+                dt = PointerDataType(dt, bits // 8)
+            else:
+                dt = PointerDataType(dt)
+        return arrays(dt)
 
     @rpc(lane="R")
     def clear_code(self, address, length=None):

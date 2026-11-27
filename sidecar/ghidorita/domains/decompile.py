@@ -2,7 +2,7 @@
 
 The cache is shared by the pool and invalidated through events.subscribe (comment/code changes by range, anything else clears it).
 decompile_for_edit is the one function other domains may call (highvars): a decompile for an edit, run on the caller's scan worker."""
-import contextlib, threading
+import contextlib, re, threading
 from collections import OrderedDict
 
 from ..core.args import MASK64, akey, lim, text_arg
@@ -13,6 +13,10 @@ KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5:
          6: "param", 7: "variable", 8: "default", 9: "default", 10: "default"}
 # kinds whose cache effect is fully described by their ranges (everything else clears the whole decompile cache)
 RANGE_ONLY_KINDS = {"comment", "code", "bookmark"}
+# the decompiler's auto-generated comments (Funcdata::warning: "WARNING: ..." or "WARNING (jumptable): ..."); a whole line of them
+WARNING_ONE = re.compile(r"/\*\s*(WARNING(?:(?!\*/).)*?)\s*\*/")  # the body never crosses a "*/"
+WARNING_LINE = re.compile(r"(?:/\*\s*WARNING(?:(?!\*/).)*\*/\s*)+")
+WARNINGS_MAX = 50
 GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 
@@ -122,7 +126,7 @@ class Decompile:
         blocks.sort(key=lambda b: akey(fa(b.getMinAddress())))
         starts = {fa(b.getMinAddress()): i for i, b in enumerate(blocks)}
         c_lines = [[] for _ in blocks]
-        parsed = self._tokens(prog, res)
+        parsed = self._tokens(prog, res, keep_warnings=True)  # the graph has no warnings bar: the comments stay in the blocks
         first = {}
         for t in parsed["tokens"]:
             if "address" in t:
@@ -233,13 +237,19 @@ class Decompile:
             out.setdefault(str(sym.getName()), rows)
         return out
 
-    def _tokens(self, prog, res):
+    def _tokens(self, prog, res, keep_warnings=False):
         from ghidra.app.decompiler import ClangFuncNameToken, ClangFieldToken, ClangLabelToken
         from ghidra.app.decompiler.component import DecompilerUtils
         from ghidra.program.model.pcode import PcodeOp
         fm, fa, hf = prog.getFunctionManager(), self.ses.fmtr(prog), res.getHighFunction()
-        lines_out, tokens = [], []
-        for ln, line in enumerate(DecompilerUtils.toLines(res.getCCodeMarkup())):
+        lines_out, tokens, warnings = [], [], []
+        # a non-fatal message of a completed decompile (empty when everything is fine), then the decompiler's own WARNING comments
+        msg = str(res.getErrorMessage() or "").strip()
+        if msg:
+            warnings.append(msg)
+        for line in DecompilerUtils.toLines(res.getCCodeMarkup()):
+            ln = len(lines_out)
+            line_tokens = []
             indent = str(line.getIndentString())
             col = len(indent)
             text = indent
@@ -270,9 +280,17 @@ class Decompile:
                         f = fm.getFunctionAt(op.getInput(0).getAddress())
                         if f is not None:
                             tok["targetFunction"] = fa(f.getEntryPoint())
-                tokens.append(tok)
+                line_tokens.append(tok)
+            found = WARNING_LINE.fullmatch(text.strip()) and WARNING_ONE.findall(text)
+            if found and not keep_warnings:  # a line of nothing but WARNING comments moves to `warnings` (shown once, above the code)
+                warnings += [w for w in found if w not in warnings]
+                continue
+            tokens += line_tokens
             lines_out.append(text)
-        return {"text": "\n".join(lines_out), "tokens": tokens}
+        out = {"text": "\n".join(lines_out), "tokens": tokens}
+        if warnings:
+            out["warnings"] = warnings[:WARNINGS_MAX]
+        return out
 
     @staticmethod
     def _global_addr(t, hf, fa):

@@ -99,3 +99,50 @@ def test_parts_and_xref_caps(sc):
     x = sc.listing_rows("0x500000", 1)[0]["xrefs"]
     assert x["count"] == 8 and len(x["items"]) == 5 and all(i["kind"] == "data" for i in x["items"])
     assert [i["from"] for i in x["items"]] == sorted((i["from"] for i in x["items"]), key=lambda s: int(s, 16))
+
+
+def test_row_data_type(sc):
+    build(sc, "t_dtype", [("ram", 0x600000, bytes(range(64)), False)])
+    sc.define_data("0x600000", "char[4]")
+    sc.define_data("0x600008", "dword")
+    sc.define_data("0x600010", "pointer")
+    rows = {r["address"]: r for r in sc.listing_rows("0x600000", 32)}
+    assert rows["0x600000"]["dataType"] == "char[4]"
+    assert rows["0x600008"]["dataType"] == "dword" and rows["0x600010"]["dataType"] == "pointer"
+    assert rows["0x600004"]["dataType"] == "undefined"  # an undefined byte
+
+
+def test_row_data_type_same_name_in_two_categories(sc):
+    from ghidra.program.model.data import CategoryPath, StructureDataType, DataTypeConflictHandler
+    build(sc, "t_dtype2", [("ram", 0x610000, bytes(256), False)])
+
+    def mk(p):
+        dtm = p.getDataTypeManager()
+        for cat in ("/A", "/B"):
+            s = StructureDataType(CategoryPath(cat), "S", 0)
+            s.add(__import__("ghidra.program.model.data", fromlist=["ByteDataType"]).ByteDataType.dataType, "x", None)
+            dtm.resolve(s, DataTypeConflictHandler.REPLACE_HANDLER)
+        return True
+    sc.edit("mk", mk)
+    sc.define_data("0x610000", "/A/S")
+    sc.define_data("0x610008", "/B/S")
+    rows = {r["address"]: r for r in sc.listing_rows("0x610000", 20)}
+    assert rows["0x610000"]["dataType"] == "/A/S" and rows["0x610008"]["dataType"] == "/B/S"
+    sc.define_data("0x610010", "/A/S[3]")  # the client builds `<dataType>[n]`
+    assert sc.listing_rows("0x610010", 1)[0]["length"] == 3
+    assert sc.listing_rows("0x610010", 1)[0]["dataType"] == "/A/S[3]"  # the wrapper keeps the element's category
+    sc.define_data("0x610020", "/B/S *")
+    assert sc.listing_rows("0x610020", 1)[0]["dataType"] == "/B/S *"
+    # consecutive array suffixes reverse like Ghidra's name parser: qualified and unqualified give the same layout
+    sc.define_data("0x6100a0", "/A/S *32")  # an explicit 4-byte pointer keeps its width in the reference
+    assert sc.listing_rows("0x6100a0", 1)[0]["length"] == 4 and sc.listing_rows("0x6100a0", 1)[0]["dataType"] == "/A/S *32"
+    import pytest
+    from ghidorita.core.errors import RpcError
+    for bad in ("/A/S *33", "/A/S *0", "/A/S *72"):
+        with pytest.raises(RpcError):
+            sc.define_data("0x6100c0", bad)
+    sc.define_data("0x6100b0", "/A/S *32[2]")
+    assert sc.listing_rows("0x6100b0", 1)[0]["length"] == 8
+    sc.define_data("0x610030", "/A/S[2][3]")
+    sc.define_data("0x610050", "byte[2][3]")
+    assert sc.listing_rows("0x610030", 1)[0]["dataType"] == "/A/S[2][3]" and sc.listing_rows("0x610050", 1)[0]["dataType"] == "byte[2][3]"

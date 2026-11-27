@@ -5,6 +5,8 @@ import { isObsolete } from "../backend";
 import { undoRoute, type EditAction } from "../editActions";
 import { useSession } from "../store/session";
 import { focusKind } from "./editing";
+import { KEYS, matchesKey } from "../../keys";
+import type { MenuCommand } from "../../preload/index";
 
 export type TestDriver = Omit<AutotestCtx, "cancelFile" | "only" | "flow" | "expect" | keyof AutotestControls>;
 /** The latest closures of the app's actions: handlers registered once (startup, menu, mouse) call through this. */
@@ -16,7 +18,7 @@ export interface Api {
   selected(): Address | null;
 }
 
-/** Everything registered once on the window and the host: backend events, CSP violations, menu, mouse buttons, Cmd+Z, pane focus, quit-save, and the autotest driver. */
+/** Everything registered once on the window and the host: backend events, CSP violations, menu, mouse buttons, Cmd+Z, hint-only keys, pane focus, quit-save, and the autotest driver. */
 export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => void) {
   const s = useSession();
   useEffect(() => {
@@ -55,13 +57,16 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
       void api().edit(e.shiftKey ? "redo" : "undo");
     };
     window.addEventListener("keydown", undoKey, true);
-    // Space toggles the graph, but only where it types nothing: the listing, the decompiler, the graph or the bare page (never a dialog or text field)
-    const spaceKey = (e: KeyboardEvent) => {
+    // Hint-only keys (G go to, S search memory, Alt+Left/Right back/forward): handled here, not as menu accelerators, so they never fire inside text inputs or dialogs.
+    // Capture phase: Monaco would take Alt+arrows as word movement.
+    const hintKeys: [string, MenuCommand][] = [["goto", { type: "goto" }], ["dock:memsearch", { type: "dock", panel: "memsearch" }], ["nav-back", { type: "nav-back" }], ["nav-forward", { type: "nav-forward" }]];
+    const hintKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey || !s.program() || !(t === document.body || t.closest(".lbox, .editor, .graph"))) return;
-      e.preventDefault(); api().handleMenu({ type: "graph" });
+      if (!s.program() || t.closest('[role="dialog"], .dlg, .modal') || focusKind(t) === "input") return; // anywhere in the program UI except dialogs and text inputs
+      const hit = hintKeys.find(([id]) => matchesKey(KEYS[id], e));
+      if (hit) { e.preventDefault(); e.stopPropagation(); api().handleMenu(hit[1]); }
     };
-    window.addEventListener("keydown", spaceKey);
+    window.addEventListener("keydown", hintKey, true);
     const pane = (e: FocusEvent) => { const k = focusKind(e.target as Element); if (k === "listing" || k === "decompiler") refs.lastPane.current = k; };
     window.addEventListener("focusin", pane);
     // quit: save first (the status bar shows "Saving…"), then main stops the sidecar
@@ -78,6 +83,6 @@ export function useBootstrap(api: () => Api, onReady?: (driver: TestDriver) => v
           return window.host.quitReady({ ok: false, error: e instanceof Error ? e.message : String(e) });
         });
     });
-    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); offDebug(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", spaceKey); window.removeEventListener("focusin", pane); };
+    return () => { off(); offQuit(); offChanged(); offError(); offAnalysis(); offDebug(); window.removeEventListener("securitypolicyviolation", policyViolation); window.removeEventListener("mouseup", mouse); window.removeEventListener("keydown", undoKey, true); window.removeEventListener("keydown", hintKey, true); window.removeEventListener("focusin", pane); };
   }, []); // eslint-disable-line
 }

@@ -146,7 +146,7 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; auto?: string } };
+  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; data?: { arr: string; ptr: string; rep: string }; auto?: string } };
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
   const f = await c.program().functions.containing({ address: x.entry });
@@ -162,6 +162,11 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
     result.phase2.types = { size: st.size, fields: st.components!.filter((c) => !c.undefined).map((c) => c.name), row: row.mnemonic, fromRow: row2.mnemonic, fromFields: fd.components!.filter((c) => !c.undefined).length, inDecompiler: dec.text.includes(t.name) };
     typesOk = st.size === t.size && st.components!.filter((c) => !c.undefined).slice(0, 2).map((c) => c.name).join() === t.fields.join() && row.mnemonic === t.name
       && row2.mnemonic === t.from && fd.components!.filter((c) => !c.undefined).length === 2 && dec.text.includes(t.name);
+    if (t.data) { // the array and pointers defined with [, P and Y survived too
+      const at = async (a: string) => (await c.program().listing.rows({ address: a, count: 1 }))[0]?.dataType;
+      result.phase2.types.data = [await at(t.data.arr), await at(t.data.ptr), await at(t.data.rep)];
+      typesOk = typesOk && result.phase2.types.data.join() === "byte[8],pointer,pointer";
+    }
     if (t.auto) { // the auto-created struct and the variable's new type survived too
       const as = await c.program().types.getDataType({ path: "/auto_structs/AutotestAuto" }), ad = await c.program().decompiler.decompile({ entry: t.auto }).result;
       result.phase2.types.auto = { size: as.size, inDecompiler: ad.text.includes("AutotestAuto") };
@@ -338,9 +343,39 @@ export async function runTypesFlow(c: AutotestCtx, result: Record<string, any>, 
     await c.menu("redo"); await waitFor(() => c.editorText().includes("AutotestAuto"), 15000, "redo auto struct");
   }
 
+  // 8c. Ghidra's data keys on the listing: [ (array, count asked in a dialog), P (pointer), Y (repeat the last type); one undoable edit each
+  let dataAt: { arr: string; ptr: string; rep: string } | undefined;
+  if (isMock(fl)) R.dataKeys = true; // no dataType on the mock listing rows
+  else {
+    const hex = (n: bigint) => "0x" + n.toString(16);
+    const dx = BigInt(a) > BigInt(b) ? BigInt(a) : BigInt(b);
+    const arrAt = hex(dx + 64n), ptrAt = hex(dx + 72n), repAt = hex(dx + 80n);
+    await c.program().edits.clearCode({ address: arrAt, length: 32 }); // undefined bytes to work on
+    const typeAt = async (at: string) => (await c.program().listing.rows({ address: at, count: 1 }))[0]?.dataType;
+    const keyOn = async (at: string, key: string) => {
+      await goTo(at);
+      const row = await waitFor(() => [...document.querySelectorAll<HTMLElement>(".lrow")].find((r) => r.querySelector(".a")?.textContent === at), 5000, "listing row " + at);
+      row.click(); lb().focus(); press(lb(), key);
+    };
+    await keyOn(arrAt, "[");
+    await fillAll("Define byte[]", { "Number of elements": "8" });
+    await until(async () => (await typeAt(arrAt)) === "byte[8]", "array defined by [");
+    R.array = await typeAt(arrAt);
+    await keyOn(ptrAt, "p");
+    await until(async () => (await typeAt(ptrAt)) === "pointer", "pointer defined by P");
+    R.pointer = await typeAt(ptrAt);
+    await keyOn(repAt, "y"); // repeats the last type applied with T or P: the pointer
+    await until(async () => (await typeAt(repAt)) === "pointer", "Y repeats the pointer");
+    R.repeat = await typeAt(repAt);
+    await undo(); await until(async () => (await typeAt(repAt)) === "undefined", "one undo removes the Y edit");
+    await c.menu("redo"); await until(async () => (await typeAt(repAt)) === "pointer", "redo the Y edit");
+    R.dataKeys = (await typeAt(arrAt)) === "byte[8]" && (await typeAt(ptrAt)) === "pointer";
+    dataAt = { arr: arrAt, ptr: ptrAt, rep: repAt };
+  }
+
   // 9. save through File > Save; the dirty marker clears
   await c.menu("save");
   await until(async () => !(await c.program().history.state()).dirty, "save");
-  const ok = R.created && R.fillerFilled && R.listing && R.decompiler && R.undoAll && R.redoAll && R.fromDataUndoRedo;
-  return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b, ...(auto ? { auto: auto.entry } : {}) } };
+  const ok = R.created && R.fillerFilled && R.listing && R.decompiler && R.undoAll && R.redoAll && R.fromDataUndoRedo && R.dataKeys;
+  return { ok: !!ok, persist: { name: NAME, fields: ["f_first", "f_name"], size: 16, addr: a, entry, from: "AutotestFromData", fromAddr: b, ...(dataAt ? { data: dataAt } : {}), ...(auto ? { auto: auto.entry } : {}) } };
 }

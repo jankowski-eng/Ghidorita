@@ -174,3 +174,38 @@ def test_function_graph_blocks_edges_and_c(env):
             assert await c.ok("function_graph", entry=f["entry"]) == g  # cached
             await c.err("function_graph", NOT_FOUND, entry=hex(int(f["entry"], 16) + 1))
     run(go())
+
+
+def test_decompile_warnings(env):
+    """A function whose C holds WARNING comments (found in /bin/ls) returns them in `warnings`, once, not in the text; a clean one has no field."""
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            warned = clean = None
+            for f in sorted(fns, key=lambda f: -f["size"])[:200]:
+                d = await c.ok("decompile", entry=f["entry"], timeoutSecs=60) if f["size"] < 30000 else None
+                if d is None:
+                    continue
+                if d.get("warnings") and warned is None:
+                    warned = d
+                elif not d.get("warnings") and clean is None:
+                    clean = d
+                if warned and clean:
+                    break
+            assert warned, "no function with warnings in the 200 largest of the test binary"
+            for w in warned["warnings"]:
+                assert w.startswith("WARNING"), w
+                assert w not in warned["text"], "warning shown twice: " + w
+            assert len(set(warned["warnings"])) == len(warned["warnings"])
+            n = len(warned["text"].split("\n"))
+            assert all(t["line"] < n for t in warned["tokens"])  # tokens renumbered with the removed lines
+            assert clean is not None and "warnings" not in clean
+    run(go())
+
+
+def test_warning_regex_never_crosses_a_comment_end():
+    from ghidorita.domains.decompile import WARNING_LINE, WARNING_ONE
+    assert WARNING_LINE.fullmatch("/* WARNING: a */ /* WARNING: b */") and WARNING_ONE.findall("/* WARNING: a */ /* WARNING: b */") == ["WARNING: a", "WARNING: b"]
+    for line in ("/* WARNING: a */ /* my note */", "/* WARNING: a */ x = 1; /* my note */", "x = 1; /* WARNING: a */"):
+        assert not WARNING_LINE.fullmatch(line.strip()), line

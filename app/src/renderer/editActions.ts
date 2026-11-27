@@ -1,8 +1,9 @@
-import type { Address, Token } from "../../../protocol";
+import type { Address, ListingRow, Token } from "../../../protocol";
+import { parseAddr } from "./address";
 
-export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "createStruct" | "bookmark" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save";
+export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "clear" | "signature" | "undo" | "redo" | "save";
 export type Focus = "listing" | "decompiler" | "input" | "other";
-export interface KeyLike { key: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
+export interface KeyLike { key: string; code?: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
 
 /**
  * Ghidra's default bindings. Plain letters only fire in the listing (the decompiler registers its own via Monaco's action API);
@@ -13,8 +14,8 @@ export function listingKey(e: KeyLike): EditAction | null {
   if (e.alt) return null;
   const mod = !!(e.meta || e.ctrl), k = e.key.toLowerCase();
   if (mod) return k === "l" && !e.shift ? "retype" : null;
-  if (e.shift) return null;
-  return ({ l: "rename", ";": "comment", f: "createFunction", t: "defineData", c: "clear" } as Record<string, EditAction>)[k] ?? null;
+  if (e.shift) return e.code === "BracketLeft" ? "createStruct" : null; // Shift+[
+  return ({ l: "rename", ";": "comment", f: "createFunction", t: "defineData", "[": "defineArray", p: "definePointer", y: "repeatData", c: "clear" } as Record<string, EditAction>)[k] ?? null;
 }
 
 /** Cmd+Z in a text input is the input's own undo; anywhere else it is the program's. */
@@ -84,4 +85,27 @@ export function mapPos(oldText: string, newText: string, p: Pos): Pos {
   j = Math.max(0, Math.min(b.length - 1, j));
   const same = a[i] === b[j];
   return { line: j + 1, col: Math.max(1, Math.min(same ? p.col : Math.min(p.col, b[j].length + 1), b[j].length + 1)) };
+}
+
+/**
+ * Define Array (`[`): the element type is the data type at the cursor row (`byte` for an undefined byte; null = the row is code), the default element
+ * count is the cursor row plus the undefined, unlabelled bytes right after it, in whole elements. `rows[0]` is the cursor row, the rest follow it in the listing.
+ */
+export function arrayPlan(rows: ListingRow[]): { elem: string; count: number } | null {
+  const row = rows[0], p0 = row && parseAddr(row.address);
+  if (!row?.dataType || !p0) return null;
+  const len = Math.max(row.length, 1);
+  let bytes = len, end = p0.off + BigInt(len);
+  for (const r of rows.slice(1)) {
+    const p = parseAddr(r.address);
+    if (r.dataType !== "undefined" || r.label || !p || p.space !== p0.space || p.off !== end) break;
+    bytes += r.length; end += BigInt(r.length);
+  }
+  return { elem: row.dataType === "undefined" ? "byte" : row.dataType, count: Math.max(1, Math.floor(bytes / len)) };
+}
+
+/** The array type for `count` elements of `elem`. When `elem` is itself an array (`S[4]`) the new dimension goes first, `S[3][4]`: three arrays of four. */
+export function arrayType(elem: string, count: number): string {
+  const m = /^(.*?)((?:\[\d+\])*)$/.exec(elem)!;
+  return `${m[1]}[${count}]${m[2]}`;
 }

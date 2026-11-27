@@ -66,6 +66,7 @@ export interface DecompileResult {
   text: string;
   tokens: Token[];
   cached: boolean;
+  warnings?: string[]; // the decompiler's non-fatal warnings ("WARNING: Unknown calling convention ..."), at most 50, absent when there are none; the C text no longer carries them
 }
 
 export interface GraphBlock { start: Address; end: Address; kind: "c" | "asm"; lines: string[] } // end = last byte of the block; lines: C source lines or "addr  instruction"
@@ -93,6 +94,7 @@ export interface ListingRow {
   partsTotal?: number;     // component count when parts is cut (shortcut: first PARTS_MAX = 64)
   bookmarks?: { category: string; comment: string }[]; // the user's own bookmarks (type Note) on this unit; the analyzers' bookmarks are not marked
   bytesMore?: number;      // bytes of the unit not in `bytes` (bytes shows at most 16; get_bytes has them all)
+  dataType?: string;       // data rows only (absent on instructions): the data type's name as define_data takes it ("dword", "char[20]", "char *"; a structure, union, enum or typedef as its category path, "/A/S"); "undefined" for an undefined byte
 }
 
 export interface FunctionHeader {
@@ -194,7 +196,7 @@ export interface Methods {
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
   search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
-  top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions
+  top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions (the client scores and orders them: kind weight + 10·log2(1 + refs), app/src/renderer/rank.ts)
   // Exports (protocol.md "Exports"): the sidecar writes the file at an absolute `path` the client picked.
   export_symbols: { params: { path: string }; result: { path: string; functions: number; labels: number; data: number; comments: number } };
   export_header: { params: { path: string }; result: { path: string; types: number; functions: number; skipped: number } };
@@ -300,7 +302,7 @@ export interface CallEdge extends CallRef { thunk: boolean; target?: CallRef }
 export interface FunctionCalls { callers: CallEdge[]; callees: CallEdge[] }
 export interface BookmarkItem { address: Address; type: string; category: string; comment: string } // type: "Note" (the user's), "Analysis", "Warning", "Error", "Info", ...
 /** type omitted = every type; query = substring of category or comment; sort default address; limit <= 1000. `types` of the result counts every type before filtering. */
-export interface ListBookmarksParams { type?: string; query?: string; offset?: number; limit?: number; sort?: "address" | "type" | "category"; desc?: boolean }
+export interface ListBookmarksParams { type?: string /* one type, or a comma list: "Error,Warning" */; query?: string; offset?: number; limit?: number; sort?: "address" | "type" | "category"; desc?: boolean }
 export type XrefKind = "call" | "jump" | "read" | "write" | "readwrite" | "data" | "flow" | "other";
 export interface XrefTo { from: Address; type: string; kind: XrefKind; function?: string } // type: Ghidra RefType name, e.g. "UNCONDITIONAL_CALL"; kind: its class; function: name of function containing `from`
 /** target "memory": `to` is the address. stack/register/external references have `to` null and a display `label` ("Stack[-0x10]", "RAX", the external name). */

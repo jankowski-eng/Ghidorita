@@ -2,13 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 const r = await build({ entryPoints: [new URL("../src/renderer/editActions.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false });
-const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
+const { listingKey, undoRoute, renameTarget, retypeTarget, isOwnName, tokenAt, mapPos, xrefTargetOf, arrayPlan, arrayType } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 
 test("listing keys", () => {
   assert.equal(listingKey({ key: "l" }), "rename"); assert.equal(listingKey({ key: "L" }), "rename");
   assert.equal(listingKey({ key: "l", meta: true }), "retype"); assert.equal(listingKey({ key: "l", ctrl: true }), "retype");
   assert.equal(listingKey({ key: ";" }), "comment"); assert.equal(listingKey({ key: "f" }), "createFunction");
-  assert.equal(listingKey({ key: "t" }), "defineData"); assert.equal(listingKey({ key: "c" }), "clear");
+  assert.equal(listingKey({ key: "t" }), "defineData");
+  assert.equal(listingKey({ key: "[" }), "defineArray"); assert.equal(listingKey({ key: "p" }), "definePointer"); assert.equal(listingKey({ key: "y" }), "repeatData");
+  assert.equal(listingKey({ key: "{", code: "BracketLeft", shift: true }), "createStruct");
+  assert.equal(listingKey({ key: "c", meta: true }), null, "Cmd+C is not Clear Code"); assert.equal(listingKey({ key: "x" }), null, "X is IDA's key"); assert.equal(listingKey({ key: "c" }), "clear");
   assert.equal(listingKey({ key: "c", meta: true }), null); // copy must not clear
   assert.equal(listingKey({ key: "f", alt: true }), null); assert.equal(listingKey({ key: "x" }), null);
 });
@@ -53,4 +56,28 @@ test("token -> references target", () => {
 test("a global's token (varAddress) targets its address, with or without a function", () => {
   assert.deepEqual(xrefTargetOf({ kind: "variable", varName: "g_counter", varAddress: "0xffffffff80000100" }, "g_counter", fn), { type: "address", address: "0xffffffff80000100", label: "g_counter" });
   assert.deepEqual(xrefTargetOf({ kind: "variable", varName: "g", varAddress: "OVL1::1000" }, "g", null), { type: "address", address: "OVL1::1000", label: "g" });
+});
+
+test("Define Array: element type and default count", () => {
+  const u = (a, extra = {}) => ({ address: a, length: 1, bytes: "00", mnemonic: "??", operands: "", dataType: "undefined", ...extra });
+  // undefined byte, then 3 more undefined bytes, then a labelled one: byte[4]
+  assert.deepEqual(arrayPlan([u("0x10"), u("0x11"), u("0x12"), u("0x13"), u("0x14", { label: "L" }), u("0x15")]), { elem: "byte", count: 4 });
+  // a defined dword followed by 9 undefined bytes: 13 bytes = 3 whole dwords
+  const rest = Array.from({ length: 9 }, (_, i) => u("0x" + (0x24 + i).toString(16)));
+  assert.deepEqual(arrayPlan([u("0x20", { length: 4, dataType: "dword" }), ...rest]), { elem: "dword", count: 3 });
+  // stops at defined data, at an instruction (no dataType), and at a gap
+  assert.equal(arrayPlan([u("0x10"), u("0x11"), u("0x12", { dataType: "word", length: 2 })]).count, 2);
+  assert.equal(arrayPlan([u("0x10"), u("0x11"), { address: "0x12", length: 1, bytes: "90", mnemonic: "NOP", operands: "" }]).count, 2);
+  assert.equal(arrayPlan([u("0x10"), u("0x12")]).count, 1);
+  assert.equal(arrayPlan([u("0x10", { label: "start" }), u("0x11")]).count, 2); // the cursor row's own label does not stop it
+  assert.equal(arrayPlan([{ address: "0x10", length: 2, bytes: "90 90", mnemonic: "NOP", operands: "" }]), null); // code
+  assert.equal(arrayPlan([]), null);
+});
+
+test("Define Array wraps an array-valued row: the new dimension goes first", () => {
+  assert.equal(arrayType("dword", 3), "dword[3]");
+  assert.equal(arrayType("/A/S", 3), "/A/S[3]");
+  assert.equal(arrayType("/A/S[4]", 3), "/A/S[3][4]");
+  assert.equal(arrayType("char *", 2), "char *[2]");
+  assert.equal(arrayType("int *32[5]", 2), "int *32[2][5]");
 });

@@ -4,6 +4,7 @@ import { bpLines, firstAddress, lineForAddress, lineValues, statementRange } fro
 import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
+import { DecompilerWarnings } from "./DecompilerWarnings";
 import { Decompiler } from "./Decompiler";
 import { FunctionList } from "./FunctionList";
 import { Listing } from "./Listing";
@@ -71,7 +72,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
       decompiler: (centre.decompiler || centre.callGraph) && (
         <div className="dec">
           {centre.decompiler && <><TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
-          {!active && <div className="empty">Select a function, click an address in the listing, or press Cmd+G.</div>}
+          {!active && <div className="empty">Select a function, click an address in the listing, or press G.</div>}
           {ad?.status === "loading" && <div className="empty">Decompiling…{ad.long && <button aria-label="Cancel decompile" onClick={() => tabs.cancel(active!.id)}>Cancel</button>}</div>}
           {ad?.status === "large" && <div className="empty" role="status">This function is {Math.round((ad.size ?? 0) / 1024)} KB: decompiling can take a minute or more.
             <button aria-label="Decompile anyway" onClick={() => tabs.decompileAnyway(active!.id)}>Decompile anyway</button></div>}
@@ -80,7 +81,8 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {centre.decompiler && graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.callGraph && graphEntry && <CallGraphView source={ops.references.callGraph} entry={graphEntry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
-            <Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} />
+            <DecompilerWarnings warnings={ad?.status === "ready" ? ad.warnings ?? [] : []} />
+            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} /></div>
           </div>}
         </div>
       ),

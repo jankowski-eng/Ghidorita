@@ -27,24 +27,24 @@ The workspace opens as soon as the import is saved; analysis keeps running in th
 ![Decompiling while the analysis indicator runs in the status bar](screenshots/analysis.png)
 
 ### Command bar (`Cmd+K`)
-One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high; source-file paths (`__FILE__` in asserts) and very short words are left out of the string leads. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, toggle a graph, export, …); each action that has a key shows it on the right (`Rename  L`, `Call Graph  ⌘⇧G`). `Cmd+G` goes straight to an address; Back/Forward (`Cmd+[` / `Cmd+]`) live in the status bar.
+One bar for jumping, searching and actions. Empty, it lists ranked leads (entry point, the most used imports, strings and functions) with the reason each ranks high and its score (kind weight + 10 × log2(1 + references); weights: entry point 100, import that reads input 70, dangerous call 60, crypto 50, string 40, other import 30, function 20; the lists are in `app/src/renderer/rank.ts`); source-file paths (`__FILE__` in asserts) and very short words are left out of the string leads. Type to search symbols, strings or an address; string hits show where they are used. Start with `>` for actions (rename, retype, open a panel, load coverage, toggle a graph, export, …); each action that has a key shows it on the right (`Rename  L`, `Call Graph  ⌘⇧G`). `G` goes straight to an address; Back/Forward (`Alt+Left` / `Alt+Right`) live in the status bar. Keys follow Ghidra's defaults (Ctrl is Cmd on macOS); the few app-only keys are ones Ghidra leaves free.
 
 ![Command bar with ranked leads](screenshots/command-bar.png)
 
 ![Command bar actions with their keys](screenshots/command-actions.png)
 
 ### Key hints and colours
-The right side of the status bar lists the keys that work in the view you are in, taken from the same table as the menu and the command bar and limited to what the provider can do: listing `L rename · X refs · Space graph · ; comment · F function · T data · C clear`; decompiler `L rename · X refs · Space graph · ⌘L retype · ; comment`; graphs `Space back · wheel zoom · drag pan · Fit · 1:1`; elsewhere `⌘K commands · ⌘G go to`. The most used keys come first; a narrow window cuts the rest, hover the line for all of it.
+The right side of the status bar lists the keys that work in the view you are in, taken from the same table as the menu and the command bar and limited to what the provider can do: listing `L rename · ⌘⇧F refs · ⌘Space graph · ; comment · F function · T data · [ array · P pointer · C clear`; decompiler `L rename · ⌘⇧F refs · ⌘Space graph · ⌘L retype · ; comment`; graphs `⌘Space back · wheel zoom · drag pan · Fit · 1:1`; elsewhere `⌘K commands · G go to`. The most used keys come first; a narrow window cuts the rest, hover the line for all of it.
 
 Colours always come with a shape, so nothing depends on colour alone. Who named a function (function list, call graph): off-white solid dot = named by you, amber ring = named by analysis (a guess), light-blue solid dot = from the file (symbols, also when the demangler rewrote them) or a library signature, grey dashed ring = unnamed (`FUN_…`). Orange-red marks attention: code reached by only one coverage run. Green is the "both runs" tint.
 
 ### Read: function list, binary map, listing, decompiler, references
 The function list filters by name; tick **not yet renamed** to see only functions nobody has named. The vertical binary map beside it shows the whole file; click or drag to go there, the map draws every function in grey, and its layers toggle with **R** (functions you named, off-white) and **C** (coverage); hovering a toggle says what its colours mean. The listing shows function headers, plate/pre/post/EOL/repeatable comments, all labels, `XREF[n]` annotations (click to follow) and folded structures and arrays (click the arrow or Left/Right), across all address spaces including overlays. The decompiler follows the cursor and opens one tab per function; click a call to go to the callee.
 
-The panel under the function list shows the references to the cursor (calls, jumps, reads, writes, pointers, each with its function). `X` on a listing row or decompiler token (or Go > Show References To) pins it to that target, **Follow cursor** unpins it, and **from…** lists what the current instruction references. `X` on a decompiler temporary (`iVar1`) lists where it is written and read.
+The panel under the function list shows the references to the cursor (calls, jumps, reads, writes, pointers, each with its function). `Cmd+Shift+F` on a listing row or decompiler token (or Go > Show References To) pins it to that target, **Follow cursor** unpins it, and **from…** lists what the current instruction references. `Cmd+Shift+F` on a decompiler temporary (`iVar1`) lists where it is written and read.
 
-### Control-flow graph (`Space`)
-`Space` in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are told apart by line style as well as colour: true is blue and solid, false is orange and dashed, a jump is thin grey, and a loop-back edge (its target starts at or before its source) is dotted. A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
+### Control-flow graph (`Cmd+Space`)
+`Cmd+Space` (Ghidra's Toggle Listing and Function Graph; macOS may reserve it for Spotlight, then use the menu) in the listing or decompiler (or View > Control-Flow Graph) swaps the decompiler for the function's graph. Blocks show C where the decompiler maps them, otherwise assembly; edges are told apart by line style as well as colour: true is blue and solid, false is orange and dashed, a jump is thin grey, and a loop-back edge (its target starts at or before its source) is dotted. A graph that would only fit at an unreadable size opens at actual size on the cursor's block instead; **Fit** shows the whole graph, **1:1** returns to the cursor's block, and the view follows the cursor when it moves to a block off screen. Wheel zooms, drag pans, a click on a block moves the cursor there.
 
 ![Control-flow graph at C level](screenshots/graph.png)
 
@@ -52,6 +52,9 @@ The panel under the function list shows the references to the cursor (calls, jum
 View > Call Graph (or the command bar) swaps the decompiler for the functions around the current one (with a provider that has no decompiler it takes the decompiler's place, following the current function): callers above, callees below, two calls each way. Imports are dashed leaves, `×n` on an edge counts its call sites, each function carries the naming dot described under Key hints and colours (imports keep a dashed box in the library colour), and with coverage loaded each function says whether the shown runs reached it (**never ran** = 0×). Type a function into **routes to function…** and **Find routes** to see the ways from here to it: the shortest route and those one call longer. A click on a function goes there.
 
 ![Call graph with callers, callees, imports and coverage](screenshots/call-graph.png)
+
+### Decompiler warnings and problems
+Non-fatal decompiler warnings (unknown calling convention, a switch table it could not recover, code it cut at invalid bytes, …) show in a compact bar above the C, one line each in plain words (hover for Ghidra's own text; more than three fold into a keyboard-operable "+N more"), with a one-line note for `in_` / `unaff_` / `extraout_` names when a warning mentions them. The Bookmarks panel has a **Problems** button: the analyzers' Error and Warning bookmarks.
 
 ### Debugger (QEMU)
 Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb -kernel fw.bin -S -gdb tcp::1234 -display none` (the test firmware is `sidecar/testdata/fw/fw.bin`), open the same image (a raw image at the base address it runs at, with the loader and language it needs; program addresses are runtime addresses), then Debug > Attach to QEMU… (host:port, default `localhost:1234`, and a load offset). The target stops where it is; the listing and decompiler jump to the stop and highlight the current row and line (the instructions behind that line are tinted in the listing), the **Registers** tab lists the program language's registers and marks the ones that changed since the last stop, and the status bar says `running`, `stopped at <address>` or `detached` (with why: target exited, connection lost; a stop on a fault says its signal). `F9` toggles a breakpoint on the listing cursor row or the decompiler line's first address (a click in the gutter does the same; they can be set before attaching and while the target runs), `F5` continues, `F6` pauses, Debug > Detach lets go. Errors are plain words: connection refused, unknown architecture (the target is not the program's processor), the target exited.
@@ -67,14 +70,14 @@ Start QEMU halted with its gdb stub, for example `qemu-system-arm -M lm3s6965evb
 ![Stopped in scale() under QEMU: breakpoint, the statement's instructions tinted, values after the lines, Locals tab with what changed](screenshots/debugger.png)
 
 ### Strings, symbols, memory search
-View > Defined Strings (`Cmd+Shift+E`) lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default, and a minimum length and a text filter narrow it. Symbol Table (`Cmd+Shift+Y`) filters by name (`*` and `?` wildcards) and kind and shows each symbol's namespace and source. Search Memory (`Cmd+Shift+F`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text and streams results; **Cancel** keeps what was found, **Continue** resumes. All of them open in the dock under the panes; a click or Enter goes to the address.
+View > Defined Strings lists strings with **Used by** (grouped per function, click to go there); *referenced only* is on by default, and a minimum length and a text filter narrow it. Symbol Table (`Cmd+T`) filters by name (`*` and `?` wildcards) and kind and shows each symbol's namespace and source. Search Memory (`S`) takes hex bytes with `??` wildcards or ASCII/UTF-16 text and streams results; **Cancel** keeps what was found, **Continue** resumes. All of them open in the dock under the panes; a click or Enter goes to the address.
 
 ![Defined strings with their referencing functions](screenshots/strings.png)
 
 ### Edit (Ghidra's default keys)
-In the listing: `L` rename (or create a label), `;` comment (EOL, pre, post, plate or repeatable), `F` create function, `T` define data, `C` clear code. In the decompiler: `L` rename variable, parameter or function, `Cmd+L` retype, `;` comment; Edit > Edit Function Signature… and Auto Create Structure work on the cursor, Edit > Create Structure from Data… on the listing row. `Cmd+Z` / `Cmd+Shift+Z` undo and redo every edit. View > Changes (`Cmd+Shift+H`) lists the edits since the program was opened, saved or not; click one to go there.
+In the listing: `L` rename (or create a label), `;` comment (EOL, pre, post, plate or repeatable), `F` create function, `T` define data, `[` define array (asks for the element count; default: up to the next defined item or label), `P` define pointer, `Y` repeat the last type applied with `T` or `P`, `Shift+[` create structure, `C` clear code. In the decompiler: `L` rename variable, parameter or function, `Cmd+L` retype, `;` comment; Edit > Edit Function Signature… and Auto Create Structure work on the cursor, Edit > Create Structure from Data… on the listing row. `Cmd+Z` / `Cmd+Shift+Z` undo and redo every edit. View > Changes (`Cmd+Shift+H`) lists the edits since the program was opened, saved or not; click one to go there.
 
-### Data types (`Cmd+Shift+T`)
+### Data types
 View > Data Type Manager browses the program's types and Ghidra's built-in types and creates structs, unions, enums, typedefs, pointers and categories. A struct opens as a field table: add, insert, delete, clear and reorder fields, change the size or packing, hide undefined filler, and **Apply at address…** lays it over memory. Rename and delete are undoable like any edit.
 
 ![Data Type Manager editing a struct](screenshots/data-types.png)
@@ -84,13 +87,13 @@ File > Load Coverage… reads a text file of executed code, one `0xSTART-0xEND` 
 
 ![Two coverage runs compared in listing and decompiler](screenshots/coverage.png)
 
-### Calls: callers and callees (`Cmd+Shift+J`)
+### Calls: callers and callees
 View > Calls lists the callers and callees of the function at the cursor as a table (the Call Graph shows the same neighbourhood as a picture). An import stub shows what it forwards to and is marked *thunk to external*; externals have no address to go to. Click a row to navigate the listing and decompiler.
 
 ![Calls panel with three callers, five callees and a thunk to an external](screenshots/calls.png)
 
 ### Bookmarks (`Cmd+D`)
-Edit > Add Bookmark… (`Cmd+D`) adds a note with a category at the cursor row or decompiler line; it shows as a marker in the listing. View > Bookmarks (`Cmd+Shift+B`) lists them, sortable by address, type or category, with a text filter and a type filter: it shows your own notes by default, and Ghidra's analyzer bookmarks (Analysis, Warning, Error, Info) are one dropdown away. × removes one. Adding and removing are undoable like any edit and are saved with the program.
+Edit > Add Bookmark… (`Cmd+D`) adds a note with a category at the cursor row or decompiler line; it shows as a marker in the listing. View > Bookmarks (`Cmd+B`) lists them, sortable by address, type or category, with a text filter and a type filter: it shows your own notes by default, and Ghidra's analyzer bookmarks (Analysis, Warning, Error, Info) are one dropdown away. × removes one. Adding and removing are undoable like any edit and are saved with the program.
 
 ![Bookmarks panel with three notes and their markers in the listing](screenshots/bookmarks.png)
 

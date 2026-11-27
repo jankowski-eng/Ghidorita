@@ -27,7 +27,7 @@ sidecar/
       program.py       provider_info, active_session, open_binary and open_program (by stored programId, no file read; import, save, publish; blocking mode analyzes first; the swap commits on R and returns the new session), cancel_open, close_program, save, undo, redo, undo_state
       analysis.py      the analysis of the open program on its own thread: start_analysis, cancel_analysis, analysis_status; execute()/Poller/new_monitor shared with blocking opens
       listing.py       listing_info, listing_rows, list_functions, get_function_at, get_comments, load_coverage
-      decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), cancel_decompile, decompile_for_edit()
+      decompile.py     decompile, variable_uses and function_graph (pool, one cache keyed by (space, entry) [+ "uses"]), tokens (varAddress on globals), `warnings` (WARNING comment lines moved out of the C, plus a completed result's error message), cancel_decompile, decompile_for_edit()
       edits.py         rename_symbol, create_label, set_comment, create_function, set_function_signature, define_data, clear_code
       highvars.py      rename_variable, retype_variable, auto_create_structure (structure inference via jscans/StructureInference)
       search.py        search_symbols, top_symbols, list_symbols, list_strings, search_memory, cancel_search, snapshot cache (strings and kind filter/sort via jscans/GhidoritaScans)

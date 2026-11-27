@@ -5,6 +5,8 @@ import { blockAt, dedent, initialView, isBackEdge, layout } from "./graphLayout"
 import { covStyle } from "./palette";
 import type { Decompilation } from "./backend";
 import { usePanZoom } from "./usePanZoom";
+import { KEYS, showKey } from "../keys";
+import { isMac } from "./platform";
 
 const CW = 7.3, LH = 15, PAD = 8, MAXC = 90, MAXL = 40; // character width / line height of the 12px monospace, padding, caps per node
 const EDGE = { true: "#5aa0e0", false: "#e0a93b", uncond: "#888" } as const; // blue / orange / neutral: no red-green
@@ -50,7 +52,7 @@ export function GraphView({ source, entry, here, version, covVersion, onGo }: { 
   };
   void covVersion; // re-render when the coverage runs change
   return (
-    <div className="graph" ref={box} tabIndex={0} aria-label="Control-flow graph" role="img" aria-description="Basic blocks of the current function; Space returns to the decompiler"
+    <div className="graph" ref={box} tabIndex={0} aria-label="Control-flow graph" role="img" aria-description={`Basic blocks of the current function; ${showKey(KEYS.graph, isMac)} returns to the decompiler`}
       {...handlers}>
       {!g && !err && <div className="empty">Building graph…</div>}
       {err && <div className="empty err">{err}</div>}

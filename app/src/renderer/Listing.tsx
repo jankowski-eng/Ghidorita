@@ -281,8 +281,7 @@ export function Listing({ reader, initialRows, map, scrollReq, change, topAddrRe
       if (row?.parts && st.unfolded.has(row.address) === (e.key === "ArrowLeft")) { e.preventDefault(); toggleFold(row); }
       return;
     }
-    if (e.key.toLowerCase() === "x" && !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) && st.cur && onXrefs) { e.preventDefault(); onXrefs(st.rows[curIndex()]?.address ?? st.cur); return; } // references to the cursor row
-    const a = listingKey(e.nativeEvent);
+    const a = listingKey({ key: e.key, code: e.code, meta: e.metaKey, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
     if (a && canEdit(a)) { e.preventDefault(); onEdit?.(a); }
   };
   const cp = st.cur ? parseAddr(st.cur) : null;

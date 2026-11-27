@@ -1,6 +1,7 @@
+import { useRef } from "react";
 import type { Address, CommentKind } from "../../../../protocol";
 import { allowsEdit } from "../../capabilities";
-import { renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
+import { arrayPlan, arrayType, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
 import type { EditSpec } from "../EditDialog";
 import type { Program } from "../store/program";
 import { useSession } from "../store/session";
@@ -20,8 +21,11 @@ export function useEditing(tabs: TabsApi) {
   const { views, refs, caps, store } = session;
   const fnNames = () => new Map(store.getState().funcs.map((f) => [f.entry, f.name]));
   const activeTab = () => tabs.state.tabs.find((x) => x.id === tabs.state.active) ?? null;
+  const lastType = useRef<string | null>(null); // Y repeats it; set by T and P like Ghidra's "recently used" (Ghidra's array key does not set it)
+  const define = async (ops: Program["api"], at: Address, dataType: string) => { await ops.edits.defineData({ address: at, dataType }); lastType.current = dataType; };
   const decompilerFocused = (kind: Focus) => kind === "decompiler" || (kind !== "listing" && refs.lastPane.current === "decompiler");
 
+  const dialogOpen = () => !!views.getState().dlg || !!views.getState().formDlg;
   const ask = (current: Program, spec: EditSpec, submit: (v: string, k: CommentKind) => Promise<void>) => {
     if (session.program() === current) views.dispatch({ type: "set", patch: { dlg: { spec, submit } } });
   };
@@ -52,7 +56,20 @@ export function useEditing(tabs: TabsApi) {
     else if (a === "bookmark") askBookmark(at);
     else if (a === "clear") await ops.edits.clearCode({ address: at });
     else if (a === "defineData") ask(current, { title: "Define data", label: "Data type", field: "datatype", initial: "", submit: "Define" },
-      async (v) => { await ops.edits.defineData({ address: at, dataType: v.trim() }); });
+      async (v) => { await define(ops, at, v.trim()); });
+    else if (a === "definePointer") await define(ops, at, "pointer"); // Ghidra's default pointer: the program's pointer size
+    else if (a === "repeatData") { if (lastType.current) await ops.edits.defineData({ address: at, dataType: lastType.current }); else session.flash("No data type applied yet: use T or P first."); }
+    else if (a === "defineArray") {
+      const plan = arrayPlan(await ops.listing.rows({ address: at, count: 257 })); // shortcut: looks 256 rows ahead for the next defined item or label
+      if (!plan) return session.flash("Define Array works on data, not on code.");
+      if (session.program() !== current || dialogOpen()) return; // the fetch was async: the program or a dialog may have changed meanwhile
+      views.dispatch({ type: "set", patch: { formDlg: { title: `Define ${plan.elem}[]`, submit: "Define", fields: [{ key: "count", label: "Number of elements", initial: String(plan.count) }],
+        go: async (v) => {
+          const n = Number(v.count.trim());
+          if (!Number.isInteger(n) || n < 1) throw new Error("Enter a whole number of elements, 1 or more.");
+          await ops.edits.defineData({ address: at, dataType: arrayType(plan.elem, n) });
+        } } } });
+    }
     else if (a === "createStruct") views.dispatch({ type: "set", patch: { formDlg: { title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
       go: async (v) => { await ops.edits.createStructFromData({ address: at, length: Number(v.length), name: v.name.trim() }); } } } });
     else if (a === "signature") { const f = await current.lookup.containing(at); if (f) await editSignature(current, f.entry); else session.flash("No function here."); }
@@ -102,7 +119,6 @@ export function useEditing(tabs: TabsApi) {
     const current = session.program();
     if (!current || session.blocked() || views.getState().importFor || !allowsEdit(caps, a)) return;
     const kind = focusKind(document.activeElement);
-    const dialogOpen = () => !!views.getState().dlg || !!views.getState().formDlg;
     if (a === "undo" || a === "redo") {
       if (undoRoute(kind) === "text") { document.execCommand(a); return; } // a text input keeps its own undo
       if (dialogOpen()) return; // no program undo under an open dialog

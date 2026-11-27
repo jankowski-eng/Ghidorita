@@ -62,7 +62,7 @@ export interface References {
 
 export interface Searches {
   searchSymbols(params: { query: string; limit?: number }): Job<SymbolHit[]>;
-  /** What an empty command bar suggests (suggestions capability): entry points, most used imports and functions. */
+  /** What an empty command bar suggests (suggestions capability): entry points, most used imports and functions (the client ranks them: rank.ts). */
   topSymbols(params: { limit?: number }): Job<TopSymbol[]>;
   listSymbols(params: ListSymbolsParams): Job<{ total: number; items: SymbolRow[] }>;
   listStrings(params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }): Job<{ total: number; items: StringItem[] }>;
