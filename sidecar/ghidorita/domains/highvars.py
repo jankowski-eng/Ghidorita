@@ -287,6 +287,11 @@ class HighVars:
             op, slot, vn, parent = facet
             choices = self._union_choices(union, vn, parent)
             if field is None:
+                from ghidra.program.model.data import Pointer
+                from ghidra.program.model.pcode import PartialUnion
+                # ForceUnionAction offers "no field" only for the whole union: a pointer to it, or a varnode of its size that is not a part of it
+                if not (isinstance(parent, Pointer) or (not isinstance(parent, PartialUnion) and vn.getSize() == union.getLength())):
+                    raise RpcError(INVALID, "this access is a part of the union: choose a field; choices: %s" % (", ".join(n for _, n in choices) or "(none)"))
                 number = -1
             else:
                 number = next((n for n, name in choices if name == field), None)

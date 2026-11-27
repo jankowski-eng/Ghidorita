@@ -233,8 +233,9 @@ class Edits:
                 raise RpcError(NOT_FOUND, "no enum %s" % enum)
             if not dt.contains(name) or dt.getValue(name) & mask != val & mask:  # several names may share a value: ask for this one directly
                 raise RpcError(INVALID, "%s has no member %s = %s" % (enum, name, value))
-            # an enum-ID equate resolves to the value's first member (EquateDB.getName), so an alias member stays a plain named equate
-            if str(dt.getName(dt.getValue(name))) == name:
+            # an enum-ID equate stores the scalar's value and resolves it to the value's first member (EquateDB.getName): it names this member
+            # only if that is the member's own raw value and the first member with it; otherwise (an alias, or a masked match) a plain named equate
+            if dt.getValue(name) == scalar.getValue() and str(dt.getName(dt.getValue(name))) == name:
                 eq_name = EquateManager.formatNameForEquate(dt.getUniversalID(), scalar.getValue())
 
         def go(p):

@@ -167,4 +167,5 @@ def test_force_union_field(sc, tmp_path, monkeypatch):
             assert (await call("undo_state"))["undoName"] == "Force union field in u"
             await call("undo")
             assert (await call("decompile", entry=fns["u"]))["text"] == before["text"]
+            await call("force_union_field", field=None, **args)  # a pointer to the whole union may be shown without a field
     run(go())
