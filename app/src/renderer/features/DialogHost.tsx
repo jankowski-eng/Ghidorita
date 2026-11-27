@@ -16,7 +16,7 @@ export function DialogHost() {
       {opening && <OpenDialog path={opening.path} progress={progress} startedAt={opening.startedAt} cancelling={opening.cancelling} onCancel={s.cancelOpen} />}
       {importFor && !opening && <ImportDialog imports={s.backend.imports} key={importFor} path={importFor} onOpen={(o) => confirmImport(s, importFor, o)} onCancel={() => cancelImport(s)} />}
       {dlg && <EditDialog typeSearch={types} spec={dlg.spec} onSubmit={dlg.submit} onClose={() => { if (s.views.getState().dlg === dlg) s.views.dispatch({ type: "set", patch: { dlg: null } }); }} />}
-      {formDlg && <FormDialog typeSearch={types} title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} onSubmit={formDlg.go} onClose={() => { if (s.views.getState().formDlg === formDlg) s.views.dispatch({ type: "set", patch: { formDlg: null } }); }} />}
+      {formDlg && <FormDialog typeSearch={types} title={formDlg.title} submit={formDlg.submit} fields={formDlg.fields} preview={formDlg.preview} onSubmit={formDlg.go} onClose={() => { if (s.views.getState().formDlg === formDlg) s.views.dispatch({ type: "set", patch: { formDlg: null } }); }} />}
     </>
   );
 }

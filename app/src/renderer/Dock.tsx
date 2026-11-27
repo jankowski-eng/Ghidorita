@@ -2,7 +2,7 @@ import type { Capability } from "../../../protocol";
 import type { Searches } from "./backend";
 import { dockCapability } from "../capabilities";
 import { useState } from "react";
-import type { Address, FunctionInfo } from "../../../protocol";
+import type { Address, FunctionInfo, PatchedRange } from "../../../protocol";
 import { StringsPanel } from "./StringsPanel";
 import { SymbolsPanel } from "./SymbolsPanel";
 import { MemSearchPanel } from "./MemSearchPanel";
@@ -15,14 +15,17 @@ import { LocalsPanel } from "./LocalsPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { StackPanel } from "./StackPanel";
 import { UndefinedPanel } from "./UndefinedPanel";
-import type { Bookmarks, FunctionNavigation, References } from "./backend";
+import { HexPanel } from "./HexPanel";
+import type { AddrMap } from "./addrmap";
+import type { Bookmarks, FunctionNavigation, ListingReads, References } from "./backend";
 import type { StackSlot } from "../../../protocol";
 
-export type DockId = "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" | "locals" | "memory" | "stack" | "undefined";
-const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["undefined", "Undefined"], ["memsearch", "Search Memory"], ["changes", "Changes"], ["calls", "Calls"], ["stack", "Stack"], ["bookmarks", "Bookmarks"], ["coverage", "Coverage"], ["registers", "Registers"], ["locals", "Locals"], ["memory", "Target Memory"]];
+export type DockId = "strings" | "symbols" | "memsearch" | "changes" | "coverage" | "calls" | "bookmarks" | "registers" | "locals" | "memory" | "stack" | "undefined" | "hex";
+const TABS: [DockId, string][] = [["symbols", "Symbol Table"], ["strings", "Defined Strings"], ["undefined", "Undefined"], ["memsearch", "Search Memory"], ["changes", "Changes"], ["calls", "Calls"], ["stack", "Stack"], ["bookmarks", "Bookmarks"], ["hex", "Bytes"], ["coverage", "Coverage"], ["registers", "Registers"], ["locals", "Locals"], ["memory", "Target Memory"]];
 
 /** Bottom dock with the navigate-and-find windows. A panel keeps its filter/results while another tab is shown (hidden, not unmounted). */
-export function Dock({ searches, capabilities, active, onActivate, onClose, version, onGo, onError, cov, calls, stack, bookmarks }: {
+export function Dock({ searches, capabilities, active, onActivate, onClose, version, onGo, onError, cov, calls, stack, bookmarks, hex }: {
+  hex: { read: ListingReads["bytes"]; patches?: () => Promise<PatchedRange[]>; unit: (a: Address) => Promise<{ address: Address; length: number } | null>; map: AddrMap; cursor: Address | null };
   stack: { read: FunctionNavigation["stackFrame"]; entry: Address | null; name: string; onRename?: (entry: Address, s: StackSlot) => void; onRetype?: (entry: Address, s: StackSlot) => void };
   bookmarks: Bookmarks;
   calls: { op: References["calls"]; entry: Address | null; name: string };
@@ -51,6 +54,7 @@ export function Dock({ searches, capabilities, active, onActivate, onClose, vers
         {seen.includes("calls") && <div hidden={active !== "calls"}><CallsPanel calls={calls.op} entry={calls.entry} name={calls.name} {...P} /></div>}
         {seen.includes("stack") && <div hidden={active !== "stack"}><StackPanel stackFrame={stack.read} entry={stack.entry} name={stack.name} version={version} onError={onError} onRename={stack.onRename} onRetype={stack.onRetype} /></div>}
         {seen.includes("bookmarks") && <div hidden={active !== "bookmarks"}><BookmarksPanel bookmarks={bookmarks} {...P} /></div>}
+        {seen.includes("hex") && <div hidden={active !== "hex"}><HexPanel {...hex} {...P} /></div>}
         {seen.includes("coverage") && <div hidden={active !== "coverage"}><CoveragePanel {...cov} onGo={onGo} /></div>}
         {seen.includes("registers") && <div hidden={active !== "registers"}><RegistersPanel /></div>}
         {seen.includes("locals") && <div hidden={active !== "locals"}><LocalsPanel /></div>}

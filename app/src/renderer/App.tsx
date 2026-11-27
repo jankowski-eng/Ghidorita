@@ -35,7 +35,7 @@ function Main({ onReady }: { onReady?: (driver: TestDriver) => void }) {
 
   // Handlers registered once (startup, menu, mouse) call the latest closures through this.
   const api = useRef<Api>(null!);
-  const handleMenu: Api["handleMenu"] = (c) => routeMenu(s, c, { back: nav.back, forward: nav.forward, goTab: nav.goTab, closeActive: tabs.closeActive, edit: editing.edit, showXrefs: editing.showXrefs, coverage, copy: copy.copy, debug });
+  const handleMenu: Api["handleMenu"] = (c) => routeMenu(s, c, { back: nav.back, forward: nav.forward, goTab: nav.goTab, closeActive: tabs.closeActive, edit: editing.edit, showXrefs: editing.showXrefs, trail: editing.trail, coverage, copy: copy.copy, debug });
   api.current = { go: nav.go, back: nav.back, forward: nav.forward, clickAt: nav.clickAt, edit: editing.edit, handleMenu, selected: () => tabs.state.tabs.find((x) => x.id === tabs.state.active)?.entry ?? null };
 
   useBootstrap(() => api.current, onReady);

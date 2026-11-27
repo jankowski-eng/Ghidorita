@@ -6,7 +6,7 @@ import contextlib, re, threading
 from collections import OrderedDict
 
 from ..core.args import MASK64, akey, lim, text_arg
-from ..core.errors import CANCELLED, INTERNAL, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
+from ..core.errors import CANCELLED, INTERNAL, INVALID, NO_PROGRAM, NOT_FOUND, TIMEOUT, RpcError
 from ..core.rpc import rpc
 
 KINDS = {0: "keyword", 1: "comment", 2: "type", 3: "function", 4: "variable", 5: "const",
@@ -17,6 +17,7 @@ RANGE_ONLY_KINDS = {"comment", "code", "bookmark"}
 WARNING_ONE = re.compile(r"/\*\s*(WARNING(?:(?!\*/).)*?)\s*\*/")  # the body never crosses a "*/"
 WARNING_LINE = re.compile(r"(?:/\*\s*WARNING(?:(?!\*/).)*\*/\s*)+")
 WARNINGS_MAX = 50
+PCODE_MAX_INSNS, PCODE_MAX_OPS = 5000, 30000  # shortcut: a larger function is cut and `truncated` says so; upgrade with paging
 GRAPH_MAX_BLOCKS, GRAPH_MAX_LINES = 2000, 200  # shortcut: larger functions are cut, upgrade with a "truncated" flag in the result
 
 
@@ -132,6 +133,142 @@ class Decompile:
         """Basic blocks of the function at `entry` with their decompiled C (or assembly) and the flow edges between them; see protocol.md."""
         return self._run(entry, timeoutSecs, job, ("graph",), self._graph)[0]
 
+    @rpc(lane="decomp")
+    def pcode(self, entry, timeoutSecs=30, job=None):
+        """P-code of the function at `entry`: `raw` = Instruction.getPcode() per instruction (address order, keyed by the instruction's address),
+        `high` = the decompiler's HighFunction ops in block order, each with the address of its instruction. Same lane, pool, cache and
+        cancellation (cancel_decompile) as `decompile`: the high p-code is part of one decompile."""
+        return self._run(entry, timeoutSecs, job, ("pcode",), self._pcode)[0]
+
+    @rpc(lane="decomp")
+    def value_trail(self, entry, name=None, line=None, colStart=None, timeoutSecs=30, job=None):
+        """The value trail of a decompiler variable inside the function at `entry`: the p-code ops its value flows to (`forward`, downstream) and
+        comes from (`backward`, upstream), and the C tokens of the same ops and varnodes, from Ghidra's own slice utilities
+        (DecompilerUtils.getForward/BackwardSliceToPCodeOps and getForward/BackwardSlice). The seed is the varnode of the token at `line`/`colStart`
+        (0-based, as in decompile's tokens) when given and the token has one, else every instance of the variable `name`. The slice stops at
+        calls (the CALL op is in the forward slice, its result is not followed) and does not leave the function. Decompiler lane, cancellable
+        with cancel_decompile, cached with the decompile cache (one entry per seed). NotFound: no function, or no such variable."""
+        if name is not None:
+            text_arg(name, "name")
+        if line is not None and (isinstance(line, bool) or not isinstance(line, int) or line < 0 or isinstance(colStart, bool) or not isinstance(colStart, int) or colStart < 0):
+            raise RpcError(INVALID, "line and colStart must be non-negative integers")
+        if name is None and line is None:
+            raise RpcError(INVALID, "name or line/colStart is required")
+        return self._run(entry, timeoutSecs, job, ("trail", name, line, colStart), lambda prog, func, res: self._trail(prog, res, name, line, colStart))[0]
+
+    def _trail(self, prog, res, name, line, col):
+        from ghidra.app.decompiler import ClangVariableToken
+        from ghidra.app.decompiler.component import DecompilerUtils
+        from ghidra.program.model.pcode import PcodeOp
+        from java.util import HashSet
+        hf, fa = res.getHighFunction(), self.ses.fmtr(prog)
+        toks, ln = [], 0  # (line, start, end, ClangToken), numbered exactly as _tokens does (lines of nothing but WARNING comments are not lines)
+        for ln_toks in DecompilerUtils.toLines(res.getCCodeMarkup()):
+            c, here, text = len(str(ln_toks.getIndentString())), [], str(ln_toks.getIndentString())
+            for t in ln_toks.getAllTokens():
+                n = len(str(t.getText()))
+                text += str(t.getText())
+                if str(t.getText()).strip():
+                    here.append((ln, c, c + n, t))
+                c += n
+            if WARNING_LINE.fullmatch(text.strip()) and WARNING_ONE.findall(text):
+                continue
+            toks += here
+            ln += 1
+        seeds = []
+        if line is not None:
+            for ln, a, b, t in toks:
+                if ln == line and a <= col < b:
+                    vn = DecompilerUtils.getVarnodeRef(t)
+                    if vn is not None:
+                        seeds.append(vn)
+                    elif name is None and t.getVarnode() is not None:
+                        seeds.append(t.getVarnode())
+                    break
+        if not seeds and name is not None:
+            for sym in hf.getLocalSymbolMap().getSymbols():
+                hv = sym.getHighVariable()
+                if hv is not None and str(sym.getName()) == name:
+                    seeds.extend(hv.getInstances())
+        if not seeds:
+            raise RpcError(NOT_FOUND, "no variable %s at that place in the function" % (name or "(token)"))
+        skip = (PcodeOp.MULTIEQUAL, PcodeOp.INDIRECT)
+        vns = {"forward": HashSet(), "backward": HashSet()}
+        ops = {"forward": HashSet(), "backward": HashSet()}
+        for sd in seeds:
+            vns["forward"].addAll(DecompilerUtils.getForwardSlice(sd))
+            vns["backward"].addAll(DecompilerUtils.getBackwardSlice(sd))
+            ops["forward"].addAll(DecompilerUtils.getForwardSliceToPCodeOps(sd))
+            ops["backward"].addAll(DecompilerUtils.getBackwardSliceToPCodeOps(sd))
+        seed_set = HashSet()
+        for sd in seeds:
+            seed_set.add(sd)
+        out_ops, seen = [], set()
+        for d in ("backward", "forward"):
+            for op in ops[d]:
+                if op.getOpcode() in skip:
+                    continue
+                k = (fa(op.getSeqnum().getTarget()), str(op.getMnemonic()), d)
+                if k not in seen:
+                    seen.add(k)
+                    out_ops.append({"address": k[0], "op": k[1], "dir": d})
+        out_ops.sort(key=lambda o: (akey(o["address"]), o["dir"], o["op"]))
+        out_toks = []
+        for ln, a, b, t in toks:
+            vn, d = DecompilerUtils.getVarnodeRef(t), None
+            if vn is not None:  # a variable (or parameter declaration): by its varnode
+                d = "seed" if seed_set.contains(vn) else "forward" if vns["forward"].contains(vn) else "backward" if vns["backward"].contains(vn) else None
+            elif not isinstance(t, ClangVariableToken):  # an operator or a call's name: by the op it belongs to
+                op = t.getPcodeOp()
+                if op is not None and op.getOpcode() not in skip:
+                    d = "forward" if ops["forward"].contains(op) else "backward" if ops["backward"].contains(op) else None
+            if d is not None:
+                out_toks.append({"line": ln, "colStart": a, "colEnd": b, "dir": d})
+        return {"ops": out_ops, "tokens": out_toks}
+
+    @staticmethod
+    def _vn(vn, lang):
+        """One varnode as text: a register by name, a constant as hex, any other space as space[0xoffset]:size; a high variable's name follows."""
+        if vn is None:
+            return "_"
+        a, size = vn.getAddress(), vn.getSize()
+        if vn.isConstant():
+            t = "0x%x" % (vn.getOffset() & ((1 << 64) - 1))
+        elif vn.isRegister():
+            r = lang.getRegister(a, size)
+            t = str(r.getName()) if r is not None else "reg[0x%x]:%d" % (a.getOffset() & MASK64, size)
+        else:
+            off = a.getOffset()
+            t = "%s[%s0x%x]:%d" % (a.getAddressSpace().getName(), "-" if off < 0 and a.getAddressSpace().isStackSpace() else "", abs(off) if off < 0 and a.getAddressSpace().isStackSpace() else off & MASK64, size)
+        h = vn.getHigh() if hasattr(vn, "getHigh") else None
+        n = h.getName() if h is not None else None
+        return "%s (%s)" % (t, n) if n and str(n) != "UNNAMED" and not vn.isConstant() else t
+
+    def _op(self, op, lang):
+        out, ins = op.getOutput(), [self._vn(op.getInput(i), lang) for i in range(op.getNumInputs())]
+        return ("%s = " % self._vn(out, lang) if out is not None else "") + "%s %s" % (op.getMnemonic(), ", ".join(ins))
+
+    def _pcode(self, prog, func, res):
+        """{raw: [{address, asm, ops[]}], high: [{block, address, text}], truncated}. High ops come from the decompile that is cached anyway."""
+        fa, lang, hf = self.ses.fmtr(prog), prog.getLanguage(), res.getHighFunction()
+        raw, n, cut = [], 0, False
+        for ins in prog.getListing().getInstructions(func.getBody(), True):
+            if len(raw) >= PCODE_MAX_INSNS or n >= PCODE_MAX_OPS:
+                cut = True
+                break
+            ops = [self._op(o, lang) for o in ins.getPcode()]
+            n += len(ops)
+            raw.append({"address": fa(ins.getAddress()), "asm": str(ins), "ops": ops, "length": int(ins.getLength())})
+        high, n = [], 0
+        for bi, b in enumerate(hf.getBasicBlocks()):
+            for op in b.getIterator():
+                if n >= PCODE_MAX_OPS:
+                    cut = True
+                    break
+                n += 1
+                high.append({"block": bi, "address": fa(op.getSeqnum().getTarget()), "text": self._op(op, lang)})
+        return {"raw": raw, "high": high, "truncated": cut}
+
     def _graph(self, prog, func, res):
         """Blocks: Ghidra's BasicBlockModel. C lines go to the block holding their first addressed token (lines without an address follow the
         previous line; the header before the first addressed line is dropped); a block that gets no C line shows its instructions.
@@ -220,6 +357,8 @@ class Decompile:
             if not res.decompileCompleted():
                 raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
             out = work(prog, func, res)
+            if job.cancelled or mon.isCancelled():  # cancelled while the result was being extracted: neither cache nor return it
+                raise RpcError(CANCELLED, "decompile cancelled")
             body = func.getBody()
             with self.cache_lock:
                 if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store

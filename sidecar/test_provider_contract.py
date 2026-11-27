@@ -81,10 +81,10 @@ def test_browsing_protocol(provider, tmp_path):
                 assert fn["entry"] == "overlay::fedcba9876543060"
                 assert len(ranges["ranges"]) == 3
                 await c.err("decompile", -32601, session_id=session, entry=fn["entry"])
-                for m, p in (("export_gzf", {"path": "/tmp/x"}), ("get_bytes", {"address": fn["entry"], "length": 1}), ("function_calls", {"entry": fn["entry"]}), ("list_bookmarks", {}), ("set_bookmark", {"address": fn["entry"], "category": "", "comment": "x"})):  # every optional method of the quick wins: a provider without the capability does not have it
+                for m, p in (("export_gzf", {"path": "/tmp/x"}), ("get_bytes", {"address": fn["entry"], "length": 1}), ("function_calls", {"entry": fn["entry"]}), ("list_bookmarks", {}), ("set_bookmark", {"address": fn["entry"], "category": "", "comment": "x"}), ("assemble_instruction", {"address": fn["entry"], "text": "nop"}), ("patch_instruction", {"address": fn["entry"], "bytes": "90"}), ("list_patches", {})):  # every optional method of the quick wins: a provider without the capability does not have it
                     await c.err(m, -32601, session_id=session, **p)
             else:
-                assert {"exportGzf", "bytes", "calls", "bookmarks"} <= set(info["capabilities"])
+                assert {"exportGzf", "bytes", "calls", "bookmarks", "patch"} <= set(info["capabilities"])
                 got = await c.ok("get_bytes", session_id=session, address=fn["entry"], length=4)  # same spelling as a listing row's bytes
                 row = landing[0]["bytes"].split(" ")
                 assert got["length"] == 4 and got["bytes"].split(" ")[:len(row)] == row[:4]

@@ -1,7 +1,7 @@
 import type { Address, ListingRow, Token } from "../../../protocol";
 import { parseAddr } from "./address";
 
-export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "setEquate" | "noReturn" | "splitVariable" | "forceField" | "clear" | "signature" | "undo" | "redo" | "save";
+export type EditAction = "rename" | "retype" | "comment" | "createFunction" | "defineData" | "defineArray" | "definePointer" | "repeatData" | "createStruct" | "bookmark" | "autoStruct" | "setEquate" | "noReturn" | "splitVariable" | "forceField" | "clear" | "signature" | "patch" | "undo" | "redo" | "save";
 export type Focus = "listing" | "decompiler" | "input" | "other";
 export interface KeyLike { key: string; code?: string; meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }
 

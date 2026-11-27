@@ -23,6 +23,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Split Out As New Variable", cmd: { type: "edit", action: "splitVariable" } },
   { label: "Force Field", cmd: { type: "edit", action: "forceField" } },
   { label: "Auto Create Structure", cmd: { type: "edit", action: "autoStruct" } },
+  { label: "Patch Instruction", cmd: { type: "edit", action: "patch" } },
   { label: "Clear Code", cmd: { type: "edit", action: "clear" } },
   { label: "Copy Address", cmd: { type: "copy", what: "address" } },
   { label: "Copy Bytes (Hex)", cmd: { type: "copy", what: "bytes" } },
@@ -39,6 +40,7 @@ export const ACTIONS: CommandAction[] = [
   { label: "Show Calls (callers and callees)", cmd: { type: "dock", panel: "calls" } },
   { label: "Undefined Data References", cmd: { type: "dock", panel: "undefined" } },
   { label: "Stack Frame", cmd: { type: "dock", panel: "stack" } },
+  { label: "Bytes (Hex View)", cmd: { type: "dock", panel: "hex" } },
   { label: "Search Memory", cmd: { type: "dock", panel: "memsearch" } },
   { label: "Data Type Manager", cmd: { type: "datatypes" } },
   { label: "Coverage", cmd: { type: "dock", panel: "coverage" } },
@@ -59,6 +61,9 @@ export const ACTIONS: CommandAction[] = [
   { label: "Load Coverage…", cmd: { type: "coverage-load" } },
   { label: "Clear Coverage", cmd: { type: "coverage-clear" } },
   { label: "Toggle Control-Flow Graph", cmd: { type: "graph" } },
+  { label: "Show Value Trail (variable at the cursor)", cmd: { type: "trail" } },
+  { label: "Clear Value Trail", cmd: { type: "trail-clear" } },
+  { label: "Toggle P-code", cmd: { type: "pcode" } },
   { label: "Toggle Call Graph", cmd: { type: "callgraph" } },
   { label: "Export Symbol Map (JSON)", cmd: { type: "export", kind: "symbols" } },
   { label: "Export C Header", cmd: { type: "export", kind: "header" } },
@@ -67,8 +72,20 @@ export const ACTIONS: CommandAction[] = [
   { label: "Close Program", cmd: { type: "close-program" } },
 ];
 
-/** Actions whose label contains every word of `q` (case-insensitive); an empty query lists all. */
-export const matchActions = (q: string): CommandAction[] => {
+/** The actions that depend on what the user saved: restore or delete each layout, save the current one, move panes. */
+export function layoutActions(names: string[]): CommandAction[] {
+  const pane = (p: "functions" | "listing" | "decompiler", label: string): CommandAction[] => [
+    { label: `Move ${label} Left`, cmd: { type: "pane-move", pane: p, dir: -1 } }, { label: `Move ${label} Right`, cmd: { type: "pane-move", pane: p, dir: 1 } }];
+  return [
+    ...names.map((n): CommandAction => ({ label: `Layout: ${n}`, cmd: { type: "layout", op: "apply", name: n } })),
+    { label: "Layout: Save Current As…", cmd: { type: "layout-save" } },
+    ...names.filter((n) => n !== "Default").map((n): CommandAction => ({ label: `Layout: Delete ${n}`, cmd: { type: "layout", op: "delete", name: n } })),
+    ...pane("functions", "Function List"), ...pane("listing", "Listing"), ...pane("decompiler", "Decompiler"),
+  ];
+}
+
+/** Actions whose label contains every word of `q` (case-insensitive); an empty query lists all. `extra` are the saved-layout actions. */
+export const matchActions = (q: string, extra: CommandAction[] = []): CommandAction[] => {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return ACTIONS.filter((a) => words.every((w) => a.label.toLowerCase().includes(w)));
+  return [...ACTIONS, ...extra].filter((a) => words.every((w) => a.label.toLowerCase().includes(w)));
 };

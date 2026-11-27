@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { analysisRunning } from "../analysis";
 import { onProgramChanged } from "../changes";
 import { useSession } from "../store/session";
+import { clearTrail } from "../store/views";
 import type { TabsApi } from "../useTabs";
 
 /** What the views do when the program changes (program_changed: edits, undo, redo) or is replaced: the one place that wires changes.ts to the tabs, listing, xrefs and function list. */
@@ -11,6 +12,7 @@ export function useProgramReactions(tabs: TabsApi) {
   const latest = useRef(tabs); latest.current = tabs;
   useEffect(() => session.onReset(() => latest.current.reset()), []); // eslint-disable-line
   useEffect(() => session.onChanged((p, current) => {
+    if (p.kinds.length) views.dispatch({ type: "set", patch: clearTrail }); // the slice's token positions belong to the text it was computed for
     const isCurrent = () => store.getState().program === current;
     onProgramChanged(p, {
       refetchFunctions: () => session.refreshFunctions(current),

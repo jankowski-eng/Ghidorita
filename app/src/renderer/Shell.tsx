@@ -27,7 +27,7 @@ export function AppToolbar() {
 export function TopBars({ go, run }: { go: (a: Address, source: Source) => unknown; run: (c: MenuCommand) => void }) {
   const s = useSession();
   const opened = useProgram((p) => !!p.program), program = useProgram((p) => p.program), funcs = useProgram((p) => p.funcs);
-  const searchOpen = useViews((v) => v.searchOpen), gotoOpen = useViews((v) => v.gotoOpen);
+  const layouts = useViews((v) => v.layoutNames), searchOpen = useViews((v) => v.searchOpen), gotoOpen = useViews((v) => v.gotoOpen);
   const close = (key: "searchOpen" | "gotoOpen") => s.views.dispatch({ type: "set", patch: { [key]: false } });
   const symbolSearch = s.caps.has("symbolSearch") ? program?.api.searches.searchSymbols : undefined;
   const searchLocation = (q: string): Promise<SymbolHit[]> => symbolSearch
@@ -35,7 +35,7 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
     : Promise.resolve(funcs.filter((f) => f.name.toLowerCase().startsWith(q.toLowerCase())).map((f) => ({ name: f.name, address: f.entry, kind: "function" })));
   return (
     <>
-      {searchOpen && opened && <SearchPanel capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
+      {searchOpen && opened && <SearchPanel layouts={layouts} capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
       {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => close("gotoOpen")} />}
     </>
   );
@@ -44,9 +44,12 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
 export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown }) {
   const s = useSession();
   const program = useProgram((p) => p.program), funcs = useProgram((p) => p.funcs);
-  const { dock, dataVersion, covVersion, fn } = useViews((v) => v);
+  const { dock, dataVersion, covVersion, fn, cursorAt } = useViews((v) => v);
+  const map = useProgram((p) => p.map), here = useViews((v) => v.nav.current?.address ?? null);
   const cov = useMemo(() => coverageActions(s), [s]);
-  if (!program || !dock) return null;
+  if (!program || !dock || !map) return null;
+  const hex = { read: program.api.listing.bytes, patches: s.caps.has("patch") ? program.api.patch.list : undefined, map, cursor: cursorAt ?? here,
+    unit: async (address: Address) => (await program.api.listing.rows({ address, count: 1 }))[0] ?? null };
   // a slot is edited through the decompiler's variable edits (rename_variable / retype_variable): the same dialogs as the decompiler's L and Cmd+L
   const ask = (spec: { title: string; label: string; field: "text" | "datatype"; initial: string; submit: string }, go: (v: string) => Promise<unknown>) =>
     s.views.dispatch({ type: "set", patch: { dlg: { spec, submit: async (v) => { await go(v.trim()); } } } });
@@ -54,7 +57,7 @@ export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown
   const rename = (entry: Address, slot: StackSlot) => ask({ title: "Rename variable", label: "New name", field: "text", initial: slot.name, submit: "Rename" }, (v) => program.api.edits.renameVariable({ entry, name: slot.name, newName: v }));
   const retype = (entry: Address, slot: StackSlot) => ask({ title: "Retype variable", label: "Data type", field: "datatype", initial: slot.dataType, submit: "Retype" }, (v) => program.api.edits.retypeVariable({ entry, name: slot.name, dataType: v }));
   return <Dock searches={program.api.searches} capabilities={s.caps} active={dock} onActivate={(d) => s.views.dispatch({ type: "set", patch: { dock: d } })} onClose={() => s.views.dispatch({ type: "set", patch: { dock: null } })}
-    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} bookmarks={program.api.bookmarks} stack={{ read: program.api.functions.stackFrame, entry: fn?.entry ?? null, name: fn?.name ?? "", onRename: editable ? rename : undefined, onRetype: editable ? retype : undefined }} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
+    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} bookmarks={program.api.bookmarks} hex={hex} stack={{ read: program.api.functions.stackFrame, entry: fn?.entry ?? null, name: fn?.name ?? "", onRename: editable ? rename : undefined, onRetype: editable ? retype : undefined }} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
 }
 
 export function TypeManager() {
@@ -69,10 +72,10 @@ export function TypeManager() {
 export function AppStatusBar({ nav }: { nav: Navigation }) {
   const { map, funcs, stats, error, saving, flash, analysis, debug } = useProgram((p) => p);
   const session = useSession(), shown = useProgram(shownDebug), at = useProgram((p) => p.debugAt), n = useProgram((p) => p.debugHistory.length);
-  const dirty = useProgram((p) => p.undo.dirty);
+  const dirty = useProgram((p) => p.undo.dirty), trail = useViews((v) => v.trail);
   return (
     <>
-      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} analysis={analysis} debug={shown} debugNote={shown && debug && at !== null ? ` · recorded stop ${at + 1} of ${n}, the target is at ${debug.address ?? debug.state}` : ""} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
+      <StatusBar address={nav.nav.current?.address ?? null} func={nav.fn?.name ?? null} bytes={map?.total ?? 0} funcs={funcs.length} stats={stats} error={error} dirty={dirty} saving={saving} flash={flash} trail={trail ? `value trail ${trail.name}: ${trail.trail.ops.filter((o) => o.dir === "backward").length} upstream, ${trail.trail.ops.filter((o) => o.dir === "forward").length} downstream · Esc clears` : undefined} analysis={analysis} debug={shown} debugNote={shown && debug && at !== null ? ` · recorded stop ${at + 1} of ${n}, the target is at ${debug.address ?? debug.state}` : ""} onAnalysis={(a) => void session.analysisAction(a)} caps={session.caps}
         back={[...nav.nav.back].reverse().map((l) => l.address)} forward={[...nav.nav.forward].reverse().map((l) => l.address)} onBack={nav.back} onForward={nav.forward} />
     </>
   );

@@ -11,7 +11,7 @@ const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
 const UNDEF_REFS = Array.from({ length: 40 }, (_, k) => BASE + (k * 4000 + 5) * STRIDE); // list_undefined_refs targets: real undefined rows, not generated code
-const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(UNDEF_REFS.map((a) => [a, { mnemonic: "??", length: STRIDE }])), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map() });
+const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(UNDEF_REFS.map((a) => [a, { mnemonic: "??", length: STRIDE }])), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map(), patches: new Map() });
 let S = freshS();
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
@@ -61,6 +61,17 @@ function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mut
   changed(notify, ranges, kinds);
   return result;
 }
+function assembleAt({ address, text }) {
+    if (typeof text !== "string" || !text.trim()) bad("text");
+    const f = segOf(address), at = parseAddr(address);
+    if (!f) nf();
+    const r = f[0].row(f[1]);
+    if (at !== Number(f[0].base) + f[1] * STRIDE) bad("address is inside an instruction");
+    const bytes = { nop: "90", int3: "cc" }[text.trim().toLowerCase()];
+    if (!bytes) bad(`cannot assemble '${text.trim()}'`);
+    const old = (r.bytes + " 00 00 00 00 00 00 00 00").split(" ").slice(0, r.length).join(" ");
+    return { address, bytes, length: 1, oldBytes: old, oldLength: r.length, overwrites: 0 };
+  }
 const MNEMS = ["push", "mov", "lea", "call", "add", "sub", "cmp", "jne", "xor", "ret"];
 
 const hexb = (h, n) => Array.from({ length: n }, (_, k) => (((h >>> ((k % 4) * 8)) + k) & 255).toString(16).padStart(2, "0")).join(" ");
@@ -212,7 +223,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -423,8 +434,22 @@ const handlers = {
       const r = f[0].row(i), b = r.bytes.split(" ");
       for (let k = skip; k < r.length && out.length < length; k++) out.push(b[k] ?? "00");
     }
-    return { address, length, bytes: out.join(" ") };
+    const at = parseAddr(address);
+    return { address, length, bytes: out.map((b, i) => S.patches.get(at + i)?.cur ?? b).join(" ") };
   },
+  // patching: the mock assembles only NOP (90) and INT3 (cc); patched bytes show in get_bytes and list_patches, not in the listing rows
+  assemble_instruction: assembleAt,
+  patch_instruction({ address, bytes, overwriteFollowing }, notify) {
+    const a = assembleAt({ address, text: { "90": "nop", cc: "int3" }[bytes] ?? "?" });
+    const at = parseAddr(address), orig = handlers.get_bytes({ address, length: a.oldLength }).bytes.split(" ");
+    void overwriteFollowing;
+    return edit(`Patch instruction at ${address}`, notify, [{ start: address, end: hex(Number(at) + a.oldLength - 1) }], ["code", "data"], () => {
+      const was = S.patches.get(Number(at));
+      S.patches.set(Number(at), { orig: was?.orig ?? orig[0], cur: bytes });
+      return { address, length: 1, replaced: a.oldLength, overwritten: 0 };
+    });
+  },
+  list_patches() { return [...S.patches].filter(([, p]) => p.orig !== p.cur).sort((x, y) => x[0] - y[0]).map(([n, p]) => ({ address: hex(n), length: 1, original: p.orig, current: p.cur })); },
   get_function_at: ({ address }) => funcAt(parseAddr(address)),
   export_symbols({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, functions: NFUNC, labels: 3, data: 2, comments: 1 }; },
   export_header({ path }) { if (typeof path !== "string" || !path.startsWith("/")) bad("path"); return { path, types: 2, functions: NFUNC, skipped: 0 }; },
@@ -557,6 +582,26 @@ const handlers = {
     const at = (k) => hex(n + k * STRIDE), blk = (k, len, lines, kind = "asm") => ({ start: at(k), end: hex(n + (k + len) * STRIDE - 1), kind, lines });
     return { blocks: [blk(0, 3, [`${at(0)}  push rbp`, `${at(1)}  mov rbp, rsp`, `${at(2)}  jz ${at(6)}`]), blk(3, 3, ["  puts(\"then\");", "  iVar1 = 1;"], "c"), blk(6, 2, [`${at(6)}  xor eax, eax`, `${at(7)}  jmp ${at(8)}`]), blk(8, 2, [`${at(8)}  pop rbp`, `${at(9)}  ret`])],
       edges: [{ from: at(0), to: at(3), kind: "false" }, { from: at(0), to: at(6), kind: "true" }, { from: at(3), to: at(8), kind: "uncond" }, { from: at(6), to: at(8), kind: "uncond" }] };
+  },
+  pcode({ entry }) { // ten fake instructions per function; the high p-code has fewer ops, in two blocks
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (i < 0) nf();
+    const at = (k) => hex(n + k * STRIDE);
+    return {
+      raw: Array.from({ length: 10 }, (_, k) => ({ address: at(k), asm: `${MNEMS[k % MNEMS.length]} rax, 0x${k}`, ops: [`unique[0x${(k * 8).toString(16)}]:8 = INT_ADD RAX, 0x${k}`, `RAX = COPY unique[0x${(k * 8).toString(16)}]:8`] })),
+      high: Array.from({ length: 6 }, (_, k) => ({ block: k < 3 ? 0 : 1, address: at(k * 2), text: `RAX (iVar${k}) = INT_ADD RAX (iVar${k}), 0x${k}` })),
+      truncated: false,
+    };
+  },
+  value_trail({ entry, name, line, colStart }) { // the tokens of the same name are the seed; the call and arithmetic tokens that follow on the next lines are downstream
+    const n = parseAddr(entry), i = idxOfEntry(n);
+    if (i < 0) nf();
+    const d = decompile(i), seed = d.tokens.filter((t) => (name !== undefined ? t.varName === name : t.line === line && t.colStart === colStart) && t.varName);
+    if (!seed.length) nf();
+    const after = d.tokens.filter((t) => t.address && t.line > seed[0].line && !seed.includes(t)).slice(0, 3);
+    const at = (k) => hex(n + k * STRIDE);
+    return { ops: [{ address: at(2), op: "COPY", dir: "backward" }, { address: at(4), op: "INT_ADD", dir: "forward" }, { address: at(6), op: "CALL", dir: "forward" }],
+      tokens: [...seed.map((t) => ({ line: t.line, colStart: t.colStart, colEnd: t.colEnd, dir: "seed" })), ...after.map((t) => ({ line: t.line, colStart: t.colStart, colEnd: t.colEnd, dir: "forward" }))] };
   },
   xrefs_from({ address }) {
     const n = parseAddr(address), i = Math.floor((n - BASE) / STEP);

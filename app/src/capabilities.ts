@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger", stack: "stackFrame", undefined: "undefinedRefs",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger", stack: "stackFrame", undefined: "undefinedRefs", hex: "bytes",
 } as const;
 
 /** What the centre pane hosts: the decompiler (tabs, editor, control-flow graph) needs `decompile`; the call graph is a view of its own and needs only `callGraph`. */
@@ -16,6 +16,7 @@ export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCo
     case "defineData": case "defineArray": case "definePointer": case "repeatData": case "createStruct": return caps.has("typeEditing");
     case "setEquate": case "noReturn": case "splitVariable": case "forceField": return caps.has("decompile") && caps.has("decompilerEdits");
     case "bookmark": return caps.has("bookmarks");
+    case "patch": return caps.has("patch");
     default: return caps.has("editing");
   }
 }
@@ -27,6 +28,8 @@ export function allowsCommand(caps: ReadonlySet<Capability>, cmd: MenuCommand): 
     case "datatypes": return caps.has("dataTypes");
     case "coverage-path": case "coverage-load": case "coverage-clear": return caps.has("coverage");
     case "graph": return caps.has("controlFlowGraph") && caps.has("decompile");
+    case "trail": case "trail-clear": return caps.has("valueTrail") && caps.has("decompile");
+    case "pcode": return caps.has("pcode") && caps.has("decompile");
     case "callgraph": return caps.has("callGraph");
     case "debug": return caps.has("debugger");
     case "export": return caps.has(cmd.kind === "gzf" ? "exportGzf" : "export");

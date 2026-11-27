@@ -4,6 +4,7 @@ import { allowsEdit } from "../../capabilities";
 import { arrayPlan, arrayType, equateTarget, fieldTarget, noReturnTarget, splitTarget, renameTarget, retypeTarget, tokenAt, undoRoute, isOwnName, xrefTargetOf, type EditAction, type Focus } from "../editActions";
 import type { EditSpec } from "../EditDialog";
 import type { Program } from "../store/program";
+import { patchPreview } from "../patch";
 import { useSession } from "../store/session";
 import type { TabsApi } from "../useTabs";
 
@@ -83,6 +84,17 @@ export function useEditing(tabs: TabsApi) {
     }
     else if (a === "createStruct") views.dispatch({ type: "set", patch: { formDlg: { title: "Create structure", submit: "Create", fields: [{ key: "name", label: "Structure name" }, { key: "length", label: "Length (bytes)", initial: String(row.length) }],
       go: async (v) => { await ops.edits.createStructFromData({ address: at, length: Number(v.length), name: v.name.trim() }); } } } });
+    else if (a === "patch") views.dispatch({ type: "set", patch: { formDlg: { title: "Patch instruction", submit: "Patch",
+      fields: [{ key: "text", label: "Instruction", initial: `${row.mnemonic} ${row.operands}`.trim() }, { key: "over", label: "Also overwrite the following instructions when the bytes are longer", kind: "check" }],
+      preview: (v) => {
+        if (!v.text.trim()) return { cancel() {}, result: Promise.resolve({ message: "Type an instruction", ok: false }) };
+        const job = ops.patch.assemble({ address: at, text: v.text.trim() });
+        return { cancel: job.cancel, result: job.result.then((r) => patchPreview(r, v.over === "1")) };
+      },
+      go: async (v) => {
+        const r = await ops.patch.assemble({ address: at, text: v.text.trim() }).result;
+        await ops.patch.apply({ address: at, bytes: r.bytes, overwriteFollowing: v.over === "1" });
+      } } } });
     else if (a === "signature") { const f = await current.lookup.containing(at); if (f) await editSignature(current, f.entry); else session.flash("No function here."); }
     else if (a === "retype") session.flash("Retype works on a variable in the decompiler.");
     else if (a === "setEquate" || a === "noReturn" || a === "splitVariable" || a === "forceField") session.flash("This edit works on a token in the decompiler.");
@@ -181,6 +193,26 @@ export function useEditing(tabs: TabsApi) {
       if (a) { const at = refs.listingRow.current?.()?.address ?? a; views.dispatch({ type: "set", patch: { xrefTarget: { type: "address", address: at, label: at } } }); }
     }
   };
+  // J: the value trail of the decompiler variable under the cursor (a scan-like job: a newer one or Esc cancels the older)
+  const trailJob = useRef({ cancel: (() => {}) as () => void }).current; // one per hook, not per render
+  const trail = () => {
+    const current = session.program();
+    if (!current || session.blocked() || !caps.has("valueTrail")) return;
+    const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined, pos = refs.editor.current?.getPosition();
+    const tok = d && pos ? tokenAt(d.tokens, pos.lineNumber, pos.column) : undefined;
+    if (!tab || !tok || !tok.varName || (tok.kind !== "variable" && tok.kind !== "param")) return session.flash("Put the cursor on a variable to trace its value.");
+    trailJob.cancel();
+    const seq = views.getState().trailSeq + 1;
+    views.dispatch({ type: "set", patch: { trailSeq: seq } }); // this request is now the newest; Esc, a program change or another J bumps it again
+    const job = current.api.decompiler.valueTrail({ entry: tab.entry, name: tok.varName, line: tok.line, colStart: tok.colStart });
+    trailJob.cancel = job.cancel;
+    const name = tok.varName;
+    void session.send(async () => {
+      const r = await job.result;
+      if (session.program() !== current || views.getState().trailSeq !== seq) return;
+      views.dispatch({ type: "set", patch: { trail: { entry: tab.entry, name, trail: r } } });
+    });
+  };
   const canAt = (line1: number, col1: number) => {
     const tab = activeTab(), d = tab ? tabs.data[tab.id] : undefined;
     const tok = d ? tokenAt(d.tokens, line1, col1) : undefined;
@@ -189,8 +221,8 @@ export function useEditing(tabs: TabsApi) {
     const reference = xrefTargetOf(tok, text, fn);
     const textOf = (x: typeof tok & {}) => (d?.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd);
     return { equate: !!equateTarget(tok), noReturn: !!noReturnTarget(tok, text, fn), split: !!splitTarget(tok), field: !!(d && fieldTarget(d.tokens, tok, textOf)),
-      rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
+      rename: !!renameTarget(tok, text, fn), retype: !!retypeTarget(tok), trail: !!retypeTarget(tok) && caps.has("valueTrail"), signature: isOwnName(tok, text, fn), xrefs: !!reference && (reference.type !== "variable" || caps.has("variableReferences")) };
   };
-  return { edit, showXrefs, canAt };
+  return { edit, showXrefs, trail, canAt };
 }
 export type Editing = ReturnType<typeof useEditing>;

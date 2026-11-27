@@ -2,7 +2,7 @@ import { allowsEdit } from "../capabilities";
 import type { Capability } from "../../../protocol";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import type { Address, Token } from "../../../protocol";
+import type { Address, Token, TrailToken } from "../../../protocol";
 import { coverage } from "./coverage";
 import { mapPos, type EditAction } from "./editActions";
 
@@ -13,12 +13,12 @@ type Monaco = Parameters<OnMount>[1];
  * One Monaco instance, one model per tab (path "tab-<id>"): the wrapper saves/restores scroll and cursor per path.
  * Call tokens of the active tab are underlined and clickable.
  */
-export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean; equate: boolean; noReturn: boolean; split: boolean; field: boolean };
-export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
+export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean; trail: boolean; equate: boolean; noReturn: boolean; split: boolean; field: boolean };
+export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, onCursor, onTrail, trail, canEdit }: {
   values?: { line: number; text: string }[]; // debugger: text after a line (the variables' values at the stop)
   pcLine?: number | null; pcSeq?: number; bpLines?: number[]; onGutter?: (line1: number) => void; // debugger: the stop line (0-based) and which stop it is, the breakpoint lines, a click in the glyph margin
-  tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
-  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void;
+  onTrail: () => void; trail: TrailToken[]; tabId: number | null; covVersion: number; liveIds: number[]; text: string; tokens: Token[]; highlight: Token[]; onCallClick: (line1: number, col1: number) => void; editorRef: { current: Ed | null };
+  canEdit: ReadonlySet<Capability>; onEdit: (a: EditAction) => void; canAt: (line1: number, col1: number) => CanEdit; onXrefs: () => void; onCopy: (what: "address" | "decompiled") => void; onCursor: (line1: number, col1: number) => void;
 }) {
   const decorations = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const hlDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
@@ -33,14 +33,17 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const canRef = useRef(canAt); canRef.current = canAt;
   const xrefsRef = useRef(onXrefs); xrefsRef.current = onXrefs;
   const copyRef = useRef(onCopy); copyRef.current = onCopy;
+  const cursorRef = useRef(onCursor); cursorRef.current = onCursor;
+  const trailRef = useRef(onTrail); trailRef.current = onTrail;
+  const trailDecor = useRef<ReturnType<Ed["createDecorationsCollection"]> | null>(null);
   const keysRef = useRef<{ set(c: CanEdit): void } | null>(null);
   const syncKeys = () => { const p = editorRef.current?.getPosition(); if (p) keysRef.current?.set(canRef.current(p.lineNumber, p.column)); };
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor; monacoRef.current = monaco; 
     // Ghidra's keys through Monaco's action API (also the context menu); preconditions follow the token under the cursor
-    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false),
+    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false), trail: editor.createContextKey<boolean>("gdTrail", false),
       equate: editor.createContextKey<boolean>("gdEquate", false), noReturn: editor.createContextKey<boolean>("gdNoReturn", false), split: editor.createContextKey<boolean>("gdSplit", false), field: editor.createContextKey<boolean>("gdField", false) };
-    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); ck.equate.set(c.equate); ck.noReturn.set(c.noReturn); ck.split.set(c.split); ck.field.set(c.field); } };
+    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); ck.trail.set(c.trail); ck.equate.set(c.equate); ck.noReturn.set(c.noReturn); ck.split.set(c.split); ck.field.set(c.field); } };
     const act = (id: string, label: string, action: EditAction, order: number, precondition?: string, keybindings?: number[]) =>
       allowsEdit(canEdit, action) && editor.addAction({ id: "gd." + id, label, keybindings, precondition, contextMenuGroupId: "gd", contextMenuOrder: order, run: () => editRef.current(action) });
     act("rename", "Rename…", "rename", 1, "gdRename && !findInputFocus && !replaceInputFocus", [monaco.KeyCode.KeyL]);
@@ -53,13 +56,15 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     act("field", "Force Field…", "forceField", 3.4, `gdField && ${free}`);
     act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
     if (canEdit.has("references")) editor.addAction({ id: "gd.xrefs", label: "Show References To", precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
+    if (canEdit.has("valueTrail")) editor.addAction({ id: "gd.trail", label: "Show Value Trail", keybindings: [monaco.KeyCode.KeyJ], precondition: "gdTrail && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5.5, run: () => trailRef.current() });
     // Cmd+C stays Monaco's own copy of the selection; these two are menu-only (the Edit menu has their keys)
     editor.addAction({ id: "gd.copyAddress", label: "Copy Address", contextMenuGroupId: "gd", contextMenuOrder: 6, run: () => copyRef.current("address") });
     editor.addAction({ id: "gd.copyDecompiled", label: "Copy Decompiled Function", contextMenuGroupId: "gd", contextMenuOrder: 7, run: () => copyRef.current("decompiled") });
-    editor.onDidChangeCursorPosition(syncKeys);
+    editor.onDidChangeCursorPosition((e) => { syncKeys(); cursorRef.current(e.position.lineNumber, e.position.column); });
     decorations.current = editor.createDecorationsCollection();
     hlDecor.current = editor.createDecorationsCollection();
     covDecor.current = editor.createDecorationsCollection();
+    trailDecor.current = editor.createDecorationsCollection();
     pcDecor.current = editor.createDecorationsCollection();
     editor.onMouseDown((e) => { if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) { gutterRef.current?.(e.target.position.lineNumber); return; } if (e.target.position) clickRef.current(e.target.position.lineNumber, e.target.position.column); });
   };
@@ -126,6 +131,12 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
     if (key && key !== pcKey.current) editorRef.current?.revealLineInCenterIfOutsideViewport(pcLine! + 1);
     pcKey.current = key;
   }, [pcLine, pcSeq, (bpLines ?? []).join(","), text, tabId]); // eslint-disable-line
+  useEffect(() => { // the value trail: seed, downstream and upstream tokens (styles differ in more than colour)
+    trailDecor.current?.set(trail.map((t) => ({
+      range: { startLineNumber: t.line + 1, startColumn: t.colStart + 1, endLineNumber: t.line + 1, endColumn: t.colEnd + 1 },
+      options: { inlineClassName: "trail-" + t.dir },
+    })));
+  }, [trail, text, tabId]);
   useEffect(() => { // the token(s) of the use clicked in the references panel; scrolled into view once per new highlight
     const rng = (t: Token) => ({ startLineNumber: t.line + 1, startColumn: t.colStart + 1, endLineNumber: t.line + 1, endColumn: t.colEnd + 1 });
     hlDecor.current?.set(highlight.map((t) => ({ range: rng(t), options: { inlineClassName: "use-token" } })));

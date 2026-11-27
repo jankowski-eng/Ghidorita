@@ -80,6 +80,16 @@ export interface FunctionGraph { blocks: GraphBlock[]; edges: GraphEdge[] } // b
 export interface CallGraphNode { entry: Address; name: string; kind: "function" | "import" } // import: an external function or a thunk to one (a leaf)
 export interface CallGraph { nodes: CallGraphNode[]; edges: { from: Address; to: Address; sites: number }[]; truncated: boolean } // sites: call instructions from `from` to `to`
 
+/** Op text is `[out = ]OPCODE in, ...`: a register by name, a constant as 0x.., other varnodes as space[0xoffset]:size; the high p-code appends the high variable's name in parentheses. */
+export interface RawPcode { address: Address; asm: string; ops: string[]; length?: number } // one instruction (address order); ops as Instruction.getPcode()
+export interface HighPcodeOp { block: number; address: Address; text: string } // block = basic block index, in block order; address = the instruction the op belongs to
+export interface PcodeResult { raw: RawPcode[]; high: HighPcodeOp[]; truncated: boolean } // truncated: a large function was cut (5000 instructions, 30000 ops)
+
+/** forward = downstream (where the value goes), backward = upstream (where it comes from). `address` is the instruction of the op; phi (MULTIEQUAL) and INDIRECT ops are not listed. The slice stops at calls: a CALL is in the forward slice, its result is not followed. */
+export interface TrailOp { address: Address; op: string; dir: "forward" | "backward" }
+export interface TrailToken { line: number; colStart: number; colEnd: number; dir: "seed" | "forward" | "backward" } // seed: a token of the variable the trail starts from
+export interface ValueTrail { ops: TrailOp[]; tokens: TrailToken[] }
+
 export interface ListingRow {
   address: Address;
   length: number;    // code unit length in bytes; next row (if contiguous) starts at address + length
@@ -146,7 +156,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -199,6 +209,10 @@ export interface Methods {
   // The variables of the function at `entry` with their values in the stopped target (decompiler parameters, locals, the globals it uses). Scan lane, cancellable with cancel_search.
   debug_values: { params: { entry: Address }; result: { pc: Address | null; items: DebugValue[] } };
   debug_pause: { params: {}; result: {} };
+  // P-code of one function (capability "pcode", needs "decompile"): raw per instruction and the decompiler's high p-code per op. Decompiler lane, cancellable with cancel_decompile, same cache and invalidation as decompile.
+  pcode: { params: { entry: Address; timeoutSecs?: number }; result: PcodeResult };
+  // Forward and backward slice of a decompiler variable inside one function (capability "valueTrail", needs "decompile"): the p-code ops and the C tokens the value flows to and comes from. Decompiler lane, cancellable with cancel_decompile. Seed: the token at line/colStart (0-based, as in decompile's tokens) when it has a varnode, else the variable `name`. NotFound for no function or no such variable.
+  value_trail: { params: { entry: Address; name?: string; line?: number; colStart?: number; timeoutSecs?: number }; result: ValueTrail };
   cancel_decompile: { params: { id: number }; result: { cancelled: boolean } };
   listing_info: { params: {}; result: { ranges: AddrRange[]; totalBytes: number } };
   listing_rows: { params: { address: Address; count: number; direction?: "forward" | "backward" }; result: ListingRow[] };
@@ -275,10 +289,21 @@ export interface Methods {
   create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
   // Ghidra's Auto Create Structure on a decompiler variable: infers a struct from the field accesses through it, retypes the variable to a pointer to it; one transaction. structName default: Ghidra's unique name in /auto_structs.
   auto_create_structure: { params: { entry: Address; name: string; structName?: string; timeoutSecs?: number }; result: { path: string } };
+  // ---- patching (capability "patch", protocol.md "Patching") ----
+  // Assembles one instruction with Ghidra's assembler for the program's language; nothing is written. Scan lane (the first call per language builds the grammar), cancellable with cancel_search. InvalidArgument names what was rejected.
+  assemble_instruction: { params: { address: Address; text: string }; result: AssembledInstruction };
+  // Writes the bytes over the code unit at `address`: one transaction "Patch instruction at <address>", range re-disassembled, original bytes kept in a program property map. Longer than the unit = InvalidArgument unless overwriteFollowing.
+  patch_instruction: { params: { address: Address; bytes: string; overwriteFollowing?: boolean }; result: { address: Address; length: number; replaced: number; overwritten: number } };
+  // The bytes that differ from what the file had, as runs of adjacent addresses (address order, at most 10000 runs).
+  list_patches: { params: {}; result: PatchedRange[] };
   // ---- persistence ----
   // Writes the program to the project. saved=false when nothing had changed. Ghidra drops the undo/redo history on save; a save that wrote fires program_changed {ranges: [], kinds: []} so clients learn the new UndoState. Also done automatically when a program is closed and on shutdown.
   save: { params: {}; result: { saved: boolean; undoHistoryCleared: boolean } };
 }
+
+/** oldLength/oldBytes: the code unit at `address` that a patch replaces; overwrites: the following instructions or defined data a longer patch would also overwrite (0 when the bytes fit). bytes/oldBytes: hex like "48 89 e5"; oldBytes is cut to its first 16 bytes and ends with " …" when the unit is longer. */
+export interface AssembledInstruction { address: Address; bytes: string; length: number; oldBytes: string; oldLength: number; overwrites: number }
+export interface PatchedRange { address: Address; length: number; original: string; current: string } // hex of the bytes the file had / the program has now
 
 /** All optional. Omit all = Ghidra's default import (preferred LoadSpec); programId stays the plain sha256. Any field present = explicit import, programId = sha256 + "-" + 12 hex of the options hash (protocol.md). */
 export interface ImportOptions {

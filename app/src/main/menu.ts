@@ -24,6 +24,7 @@ export function createMenu({ getWin, pick }: Deps) {
     ({ id: p, label, enabled: allowsCommand(caps, { type: "toggle-pane", pane: p, visible: true }), type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p, visible: mi.checked }); } });
 
   function build() {
+    if (state.panes) Object.assign(shown, state.panes);
     const recent = getRecent();
     const recentItems: MenuItemConstructorOptions[] = recent.length
       ? [...recent.map((p): MenuItemConstructorOptions => ({ label: p.length > 80 ? "…" + p.slice(-79) : p, enabled: state.canOpen, click: () => send({ type: "open-path", path: p }) })),
@@ -66,12 +67,13 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { id: "bookmark", label: "Add Bookmark…", accelerator: acc("edit:bookmark"), enabled: state.hasProgram && allowsEdit(caps, "bookmark"), click: () => send({ type: "edit", action: "bookmark" }) },
         ...(([["Rename…", "rename"], ["Retype Variable…", "retype"], ["Set Comment…", "comment"], ["Create Function", "createFunction"],
-          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Set Equate…", "setEquate"], ["Mark Function as No Return", "noReturn"], ["Split Out As New Variable…", "splitVariable"], ["Force Field…", "forceField"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"]] as const).map(([label, action]): MenuItemConstructorOptions =>
+          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Set Equate…", "setEquate"], ["Mark Function as No Return", "noReturn"], ["Split Out As New Variable…", "splitVariable"], ["Force Field…", "forceField"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"], ["Patch Instruction…", "patch"]] as const).map(([label, action]): MenuItemConstructorOptions =>
           ({ id: action, label: lab(label, "edit:" + action), enabled: state.hasProgram && allowsEdit(caps, action), click: () => send({ type: "edit", action }) }))),
       ] },
       { label: "View", submenu: [
         pane("Function List", "functions"), pane("Listing", "listing"), pane("Decompiler", "decompiler"),
         { label: "Control-Flow Graph", accelerator: acc("graph"), enabled: state.hasProgram && allowsCommand(caps, { type: "graph" }), click: () => send({ type: "graph" }) },
+        { label: "P-code", enabled: state.hasProgram && allowsCommand(caps, { type: "pcode" }), click: () => send({ type: "pcode" }) },
         { label: "Call Graph", enabled: state.hasProgram && allowsCommand(caps, { type: "callgraph" }), accelerator: acc("callgraph"), click: () => send({ type: "callgraph" }) },
         { type: "separator" },
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: acc("dock:symbols"), click: () => send({ type: "dock", panel: "symbols" }) },
@@ -81,12 +83,20 @@ export function createMenu({ getWin, pick }: Deps) {
         { id: "stack", label: "Stack Frame", enabled: state.hasProgram && caps.has(dockCapability.stack), click: () => send({ type: "dock", panel: "stack" }) }, // Ghidra has no key for its stack window
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: acc("dock:calls"), click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: acc("dock:bookmarks"), click: () => send({ type: "dock", panel: "bookmarks" }) },
+        { id: "hex", label: "Bytes (Hex View)", enabled: state.hasProgram && caps.has(dockCapability.hex), click: () => send({ type: "dock", panel: "hex" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },
         { id: "registers", label: "Registers", enabled: state.hasProgram && caps.has(dockCapability.registers), click: () => send({ type: "dock", panel: "registers" }) },
         { id: "locals", label: "Locals", enabled: state.hasProgram && caps.has(dockCapability.locals), click: () => send({ type: "dock", panel: "locals" }) },
         { id: "memory", label: "Target Memory", enabled: state.hasProgram && caps.has(dockCapability.memory), click: () => send({ type: "dock", panel: "memory" }) },
         { id: "memsearch", label: lab("Search Memory…", "dock:memsearch"), enabled: state.hasProgram && caps.has(dockCapability.memsearch), accelerator: acc("dock:memsearch"), click: () => send({ type: "dock", panel: "memsearch" }) },
         { id: "datatypes", label: "Data Type Manager", enabled: state.hasProgram && caps.has("dataTypes"), accelerator: acc("datatypes"), click: () => send({ type: "datatypes" }) },
+        { label: "Layouts", enabled: state.hasProgram, submenu: [
+          { label: "Save Current Layout…", click: () => send({ type: "layout-save" }) },
+          { type: "separator" },
+          ...(state.layouts ?? ["Default"]).map((name): MenuItemConstructorOptions => ({ label: name, click: () => send({ type: "layout", op: "apply", name }) })),
+          { type: "separator" },
+          { label: "Delete Layout", enabled: (state.layouts ?? []).some((n) => n !== "Default"), submenu: (state.layouts ?? []).filter((n) => n !== "Default").map((name): MenuItemConstructorOptions => ({ label: name, click: () => send({ type: "layout", op: "delete", name }) })) },
+        ] },
         { type: "separator" }, { role: "toggleDevTools" },
       ] },
       { label: "Go", submenu: [
@@ -94,6 +104,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { label: lab("Forward", "nav-forward"), accelerator: acc("nav-forward"), enabled: state.canForward, click: () => send({ type: "nav-forward" }) },
         { id: "command-bar", label: "Command Bar…", enabled: state.hasProgram, accelerator: acc("search"), click: () => send({ type: "search" }) },
         { id: "search-symbols", label: "Search Symbols…", enabled: state.hasProgram && caps.has("symbolSearch"), accelerator: acc("symbolSearch"), click: () => send({ type: "search" }) },
+        { id: "trail", label: lab("Show Value Trail", "trail"), enabled: state.hasProgram && allowsCommand(caps, { type: "trail" }), click: () => send({ type: "trail" }) },
         { id: "goto", label: lab("Go to Address…", "goto"), enabled: state.hasProgram, accelerator: acc("goto"), click: () => send({ type: "goto" }) },
         { id: "xrefs", label: "Show References To", accelerator: acc("xrefs"), enabled: state.hasProgram && caps.has("references"), click: () => send({ type: "xrefs" }) },
       ] },

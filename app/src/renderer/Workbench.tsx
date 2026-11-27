@@ -5,10 +5,12 @@ import { BinaryMap } from "./BinaryMap";
 import { GraphView } from "./GraphView";
 import { CallGraphView } from "./CallGraphView";
 import { DecompilerWarnings } from "./DecompilerWarnings";
+import { PcodeView } from "./PcodeView";
 import { Decompiler } from "./Decompiler";
 import { FunctionList } from "./FunctionList";
 import { Listing } from "./Listing";
 import { Panes } from "./Layout";
+import { saveSizes } from "./layouts";
 import { TabStrip } from "./TabStrip";
 import { XrefPanel } from "./XrefPanel";
 import { allowsEdit, centreViews } from "../capabilities";
@@ -28,7 +30,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const initialRows = useProgram((p) => p.initialRows), reading = useProgram((p) => p.reading), browseError = useProgram((p) => p.browseError);
   const dbg = useProgram(shownDebug), liveDbg = useProgram((p) => p.debug), canDebug = caps.has("debugger");
   const busy = useProgram((p) => !!p.opening || p.closing || p.unavailable);
-  const { xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, dataVersion } = useViews((v) => v);
+  const { paneOrder, paneSizes, xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, pcodeOn, cursorAt, trail, dataVersion } = useViews((v) => v);
   const ops = program.api;
   const set = (patch: Partial<Views>) => views.dispatch({ type: "set", patch });
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
@@ -36,10 +38,18 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
   const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
+  const trailTokens = trail && active && trail.entry === active.entry ? trail.trail.tokens : [];
+  const trailAddrs = useMemo(() => (trail && active && trail.entry === active.entry ? { forward: new Set(trail.trail.ops.filter((o) => o.dir === "forward").map((o) => o.address)), backward: new Set(trail.trail.ops.filter((o) => o.dir === "backward").map((o) => o.address)) } : undefined), [trail, active?.entry]); // eslint-disable-line
   const symbolSearch = caps.has("symbolSearch") ? ops.searches.searchSymbols : undefined;
   const { go, goTab, clickAt, fn } = nav;
   const centre = centreViews(caps, callGraphOn), graphEntry = active?.entry ?? fn?.entry; // without a decompiler there are no tabs: the call graph follows the current function
+  const setCursor = (a: Address | null) => { if (a && views.getState().cursorAt !== a) set({ cursorAt: a }); };
+  const tokenCursor = (line1: number, col1: number) => { // the decompiler cursor stands for the address of the token under it, else the first addressed token of its line
+    const on = (ad?.tokens ?? []).filter((t) => t.line + 1 === line1 && t.address);
+    setCursor((on.find((t) => col1 - 1 >= t.colStart && col1 - 1 < t.colEnd) ?? on[0])?.address ?? null);
+  };
   const rowMenu = () => [
+    ...(caps.has("patch") ? [{ label: "Patch Instruction…", run: () => void editing.edit("patch") }] : []),
     { label: "Copy Address", run: () => void copy.copy("address") },
     ...(caps.has("bytes") ? [{ label: "Copy Bytes (Hex)", run: () => void copy.copy("bytes") }, { label: "Copy Bytes (C Array)", run: () => void copy.copy("carray") }] : []),
   ];
@@ -58,7 +68,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
     </div>
   );
   return (
-    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && (centre.decompiler || centre.callGraph) }}>{{
+    <Panes key={program.session.sessionId} visible={{ ...visible, decompiler: visible.decompiler && (centre.decompiler || centre.callGraph) }} order={paneOrder} sizes={paneSizes} onSizes={(z, save) => { set({ paneSizes: z }); if (save) saveSizes(z); }}>{{
       functions: (
         <div className="funcs-col">
           <div className="funcs-row">
@@ -68,7 +78,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           {caps.has("references") && <XrefPanel references={ops.references} variableReferences={caps.has("variableReferences")} address={here} target={xrefTarget} version={xrefVersion} onGo={(a, use) => { set({ useHl: use ? { name: use.name, address: a } : null }); void go(a, "xrefs"); }} onFollow={() => set({ xrefTarget: null, useHl: null })} />}
         </div>
       ),
-      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} stmt={stmt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
+      listing: <Listing reader={ops.listing} initialRows={initialRows} testMode={testMode} rowRef={refs.listingRow} canEdit={(action) => allowsEdit(caps, action)} map={map} scrollReq={scrollReq} change={listingChange} topAddrRef={refs.topAddr} cursorRef={refs.cursor} onEdit={(a) => void editing.edit(a)} onLatency={(ms) => s.store.dispatch({ type: "stats", patch: { listingMs: ms } })} onError={s.fail} pc={stoppedAt} stmt={stmt} breakpoints={bps} onGutter={canDebug ? toggleBp : undefined} onRowClick={(a) => go(a, "listing")} onCursor={setCursor} trail={trailAddrs} onGo={(a) => go(a, "xrefs")} onXrefs={caps.has("references") ? (a) => set({ xrefTarget: { type: "address", address: a, label: a } }) : undefined} menu={rowMenu} />,
       decompiler: (centre.decompiler || centre.callGraph) && (
         <div className="dec">
           {centre.decompiler && <><TabStrip tabs={tabs.state} name={(e) => names.get(e) ?? e} onActivate={(id) => goTab(tabs.activate(id))} onClose={(id) => goTab(tabs.close(id))} onPin={tabs.pin} />
@@ -80,9 +90,10 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
           </>}
           {centre.decompiler && graphOn && active && <GraphView source={ops.decompiler.graph} entry={active.entry} here={here} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
           {centre.callGraph && graphEntry && <CallGraphView source={ops.references.callGraph} entry={graphEntry} funcs={funcs} version={dataVersion} covVersion={covVersion} onGo={(a) => go(a, "graph")} />}
-          {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn ? undefined : "none" }}>
+          {centre.decompiler && pcodeOn && active && caps.has("pcode") && <PcodeView source={ops.decompiler.pcode} entry={active.entry} cursor={cursorAt ?? here} version={dataVersion} onGo={(a) => go(a, "pcode")} />}
+          {centre.decompiler && <div className="editor" style={{ display: active && !graphOn && !callGraphOn && !pcodeOn ? undefined : "none" }}>
             <DecompilerWarnings warnings={ad?.status === "ready" ? ad.warnings ?? [] : []} />
-            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} /></div>
+            <div className="edwrap"><Decompiler canEdit={caps} tabId={active?.id ?? null} liveIds={tabs.state.tabs.map((t) => t.id)} text={ad?.text ?? ""} tokens={ad?.tokens ?? []} highlight={hlTokens} covVersion={covVersion} pcLine={pcLine} pcSeq={dbg?.stop} values={vals} bpLines={bpl} onGutter={canDebug ? (line1) => toggleBp(ad ? firstAddress(ad.tokens, line1 - 1) : null) : undefined} onCallClick={clickAt} editorRef={refs.editor} onEdit={(a) => void editing.edit(a)} canAt={editing.canAt} onXrefs={editing.showXrefs} onCopy={(w) => void copy.copy(w)} onCursor={tokenCursor} onTrail={editing.trail} trail={trailTokens} /></div>
           </div>}
         </div>
       ),
