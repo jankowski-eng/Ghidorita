@@ -49,10 +49,10 @@ test("live sizes win over the Default's at startup, and a saved layout applies i
 });
 
 test("missing, corrupt or unavailable storage gives the built-in Default; bad entries are dropped one by one", () => {
-  assert.deepEqual(L.readLayouts(memory()).layouts, { Default: L.BUILTIN });
-  for (const bad of ["{", "null", "[]", "\"x\"", JSON.stringify({ layouts: 5 })]) assert.deepEqual(L.readLayouts(memory({ [L.KEY]: bad })).layouts, { Default: L.BUILTIN }, bad);
-  assert.deepEqual(L.readLayouts(memory({ "ghidra.layout.v1": "garbage" })).layouts, { Default: L.BUILTIN });
-  assert.deepEqual(L.readLayouts(undefined).layouts, { Default: L.BUILTIN });
+  assert.deepEqual(({ ...L.readLayouts(memory()).layouts }), { Default: L.BUILTIN });
+  for (const bad of ["{", "null", "[]", "\"x\"", JSON.stringify({ layouts: 5 })]) assert.deepEqual(({ ...L.readLayouts(memory({ [L.KEY]: bad })).layouts }), { Default: L.BUILTIN }, bad);
+  assert.deepEqual(({ ...L.readLayouts(memory({ "ghidra.layout.v1": "garbage" })).layouts }), { Default: L.BUILTIN });
+  assert.deepEqual(({ ...L.readLayouts(undefined).layouts }), { Default: L.BUILTIN });
   const throwing = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
   assert.deepEqual(L.startupLayout(throwing), L.BUILTIN);
   assert.equal(L.saveLayout("A", mine, throwing).ok, false);
@@ -75,4 +75,11 @@ test("every dock tab round-trips, the stack and undefined tabs included", () => 
     assert.equal(L.readLayouts(st).layouts.d?.dock, dock, dock);
   }
   assert.ok(L.DOCKS.includes("stack") && L.DOCKS.includes("undefined"));
+});
+
+test("a layout named __proto__ is stored and read back as an entry", () => {
+  const mem = new Map();
+  const st = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) };
+  assert.equal(L.saveLayout("__proto__", L.BUILTIN, st).ok, true);
+  assert.ok(L.layoutNames(L.readLayouts(st)).includes("__proto__"));
 });

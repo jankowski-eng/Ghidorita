@@ -357,6 +357,8 @@ class Decompile:
             if not res.decompileCompleted():
                 raise RpcError(INTERNAL, "decompile failed: %s" % res.getErrorMessage())
             out = work(prog, func, res)
+            if job.cancelled or mon.isCancelled():  # cancelled while the result was being extracted: neither cache nor return it
+                raise RpcError(CANCELLED, "decompile cancelled")
             body = func.getBody()
             with self.cache_lock:
                 if self.cache_ver == ver:  # an edit/invalidation during the decompile means this result may be stale: don't store

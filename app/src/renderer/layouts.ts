@@ -41,7 +41,7 @@ export interface LayoutStore { layouts: Record<string, Layout>; sizes: Sizes | n
 
 /** The stored layouts. Missing or corrupt storage gives the built-in Default alone; the sizes of the old single key become the Default's. */
 export function readLayouts(st: StorageLike | undefined = browserStorage()): LayoutStore {
-  let layouts: Record<string, Layout> = {}, sizes: Sizes | null = null, found = false;
+  let layouts: Record<string, Layout> = Object.create(null), sizes: Sizes | null = null, found = false;
   try {
     const raw = st?.getItem(KEY);
     if (raw) {
@@ -52,7 +52,7 @@ export function readLayouts(st: StorageLike | undefined = browserStorage()): Lay
         sizes = cleanSizes(p.sizes);
       }
     }
-  } catch { layouts = {}; sizes = null; found = false; }
+  } catch { layouts = Object.create(null); sizes = null; found = false; }
   if (!found) { // first run with named layouts: carry the old saved sizes over
     try { const old = cleanSizes(JSON.parse(st?.getItem(OLD_KEY) ?? "null")); if (old) layouts[DEFAULT_NAME] = { ...BUILTIN, sizes: old }; } catch { /* corrupt: defaults */ }
     if (layouts[DEFAULT_NAME] && writeLayouts({ layouts, sizes: null }, st)) { try { st?.removeItem?.(OLD_KEY); } catch { /* keep it */ } } // the old key goes only once the new copy is stored
