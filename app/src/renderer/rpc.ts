@@ -176,7 +176,7 @@ export class WebSocketBackend implements ApplicationBackend {
 
     return {
       listing: { info: () => read("listing_info", {}), rows: (p) => read("listing_rows", p), bytes: (p) => read("get_bytes", p, "bytes") },
-      functions: { list: () => read("list_functions", {}), containing: (p) => read("get_function_at", p) },
+      functions: { list: () => read("list_functions", {}), containing: (p) => read("get_function_at", p), stackFrame: (p) => read("stack_frame", p, "stackFrame") },
       decompiler: { decompile: (p) => job("decompile", "decompile", p, "cancel_decompile"), graph: (p) => job("controlFlowGraph", "function_graph", p, "cancel_decompile") },
       references: {
         xrefsTo: (p) => read("xrefs_to", p, "references"),
@@ -191,6 +191,7 @@ export class WebSocketBackend implements ApplicationBackend {
         topSymbols: (p) => job("suggestions", "top_symbols", p, "cancel_search"),
         listSymbols: (p) => job("symbolTable", "list_symbols", p, "cancel_search"),
         listStrings: (p) => job("strings", "list_strings", p, "cancel_search"),
+        listUndefinedRefs: (p) => job("undefinedRefs", "list_undefined_refs", p, "cancel_search"),
         searchMemory: (p) => job("memorySearch", "search_memory", p, "cancel_search"),
       },
       types: {
@@ -220,6 +221,10 @@ export class WebSocketBackend implements ApplicationBackend {
         setFunctionSignature: (p) => edit("editing", "setFunctionSignature", "set_function_signature", p),
         renameVariable: (p) => edit("variableEditing", "renameVariable", "rename_variable", p),
         retypeVariable: (p) => edit("variableEditing", "retypeVariable", "retype_variable", p),
+        setEquate: (p) => edit("decompilerEdits", "setEquate", "set_equate", p),
+        setFunctionNoReturn: (p) => edit("decompilerEdits", "setFunctionNoReturn", "set_function_no_return", p),
+        splitVariable: (p) => edit("decompilerEdits", "splitVariable", "split_variable", p),
+        forceUnionField: (p) => edit("decompilerEdits", "forceUnionField", "force_union_field", p),
         defineData: (p) => edit("typeEditing", "defineData", "define_data", p),
         clearCode: (p) => edit("editing", "clearCode", "clear_code", p),
         createStructFromData: (p) => edit("typeEditing", "createStructFromData", "create_struct_from_data", p),

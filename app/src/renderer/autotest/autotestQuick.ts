@@ -1,6 +1,6 @@
 import type { FunctionInfo } from "../../../../protocol";
 import { copied } from "../clipboard";
-import { byLabel, setSelect, typeInto, waitFor, sleep, type AutotestCtx } from "./autotest";
+import { byLabel, press, setSelect, typeInto, waitFor, sleep, type AutotestCtx } from "./autotest";
 
 // Round 11 flow: one step per quick win (copy actions, then callers/callees, then bookmarks). Mock and real sidecar.
 const need = (ok: unknown, what: string) => { if (!ok) throw new Error("quick: " + what); };
@@ -85,6 +85,58 @@ async function callsStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, a
   R.calls = { entry: f.entry, callers: r.callers.length, callees: r.callees.length, clicked: target.name, thunks: [...r.callers, ...r.callees].filter((e) => e.thunk).length };
 }
 
+/** The Stack panel follows the function at the cursor: one row per slot, amber rings on analysis/default slots, a click selects (Rename/Retype enable). */
+async function stackStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("stackFrame"), "provider has no stackFrame capability");
+  let pick: { f: FunctionInfo; slots: Awaited<ReturnType<ReturnType<AutotestCtx["program"]>["functions"]["stackFrame"]>>["slots"] } | null = null;
+  for (const f of fl.slice(0, 300)) {
+    const slots = (await c.program().functions.stackFrame({ entry: f.entry })).slots;
+    if (slots.length >= 2 && slots.some((s) => s.source === "analysis" || s.source === "default")) { pick = { f, slots }; break; }
+  }
+  need(pick, "no function with a stack frame");
+  const { f, slots } = pick!;
+  await c.select(f.entry);
+  c.command({ type: "dock", panel: "stack" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Stack frame"]'), 5000, "stack panel");
+  const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
+  await waitFor(() => rows().length > 0 && region.textContent!.includes(`${slots.length} slots`), 10000, "stack rows");
+  // the table is virtualized: check the rendered window only (aria-rowindex maps a row to its slot)
+  const inferredAt = (r: HTMLElement) => { const s = slots[Number(r.getAttribute("aria-rowindex")) - 1]; return !!s && (s.source === "analysis" || s.source === "default"); };
+  const inferred = slots.filter((s) => s.source === "analysis" || s.source === "default").length;
+  need(rows().every((r) => (r.querySelector(".psrc.ring") !== null) === inferredAt(r)), "amber rings exactly on the inferred slots");
+  const rename = region.querySelector<HTMLButtonElement>('button[aria-label="Rename slot"]');
+  if (rename) {
+    need(rename.disabled, "Rename needs a selected slot");
+    rows()[0].click();
+    await waitFor(() => !region.querySelector<HTMLButtonElement>('button[aria-label="Rename slot"]')!.disabled, 5000, "Rename enabled after a click");
+  }
+  R.stack = { entry: f.entry, slots: slots.length, inferred, editable: !!rename };
+}
+
+/** The Undefined tab: a click goes to the target, T there defines it, and the row is gone after the refresh. */
+async function undefinedStep(c: AutotestCtx, R: Record<string, any>) {
+  need(c.backend.capabilities.has("undefinedRefs"), "provider has no undefinedRefs capability");
+  const first = await c.program().searches.listUndefinedRefs({ limit: 50 }).result;
+  need(first.total > 0, "no reference into undefined bytes");
+  const target = first.items[0].address;
+  c.command({ type: "dock", panel: "undefined" });
+  const region = await waitFor(() => document.querySelector<HTMLElement>('[role="region"][aria-label="Undefined data references"]'), 5000, "undefined panel");
+  const rows = () => [...region.querySelectorAll<HTMLElement>('[role="row"].vt-row')];
+  await waitFor(() => rows().length > 0 && region.textContent!.includes(`${first.total} references`), 20000, "undefined rows");
+  const isTarget = (r: HTMLElement) => r.firstElementChild?.textContent === target;
+  rows().find(isTarget)!.click();
+  await waitFor(() => c.selected() === target || c.topAddr() === target, 20000, "navigation to the target");
+  await sleep(300);
+  document.querySelector<HTMLElement>(".lbox")!.focus();
+  press(document.querySelector<HTMLElement>(".lbox")!, "t");
+  const dlg = await waitFor(() => byLabel("dialog", "Define data"), 5000, "define data dialog");
+  const box = dlg.querySelector<HTMLInputElement>('input[aria-label="Data type"]')!;
+  typeInto(box, "byte"); press(box, "Enter");
+  await waitFor(() => !byLabel("dialog", "Define data"), 10000, "dialog closed");
+  await waitFor(() => !rows().some(isTarget) && !region.textContent!.includes(`${first.total} references`), 15000, "the defined target left the list");
+  R.undefinedRefs = { total: first.total, target, after: (await c.program().searches.listUndefinedRefs({ limit: 1 }).result).total };
+}
+
 async function bookmarkStep(fl: FunctionInfo[], c: AutotestCtx, R: Record<string, any>, result: Record<string, any>) {
   need(c.backend.capabilities.has("bookmarks"), "provider has no bookmarks capability");
   await c.goAddr(fl[0].entry);
@@ -134,6 +186,8 @@ export async function runQuickFlow(fl: FunctionInfo[], c: AutotestCtx, result: R
   const R: Record<string, any> = (result.quick = {});
   await copyStep(fl, c, R);
   await callsStep(fl, c, R);
+  await stackStep(fl, c, R);
+  await undefinedStep(c, R);
   await bookmarkStep(fl, c, R, result);
   return true;
 }

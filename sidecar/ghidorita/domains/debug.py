@@ -580,7 +580,7 @@ class Debug:
                 except Exception:  # noqa
                     depth = None
             places = []
-            with decompile_for_edit(self.ctx, prog, func, 30, scan) as (hf, d, mon):
+            with decompile_for_edit(self.ctx, prog, func, 30, scan) as (hf, d, mon, _res):
                 syms = [(k, s) for k, s in (("local", s) for s in hf.getLocalSymbolMap().getSymbols())] + \
                        [("global", s) for s in hf.getGlobalSymbolMap().getSymbols()]
                 for kind, sym in syms:

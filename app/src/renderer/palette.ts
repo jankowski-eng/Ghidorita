@@ -13,6 +13,10 @@ const DOTS: Record<Dot["kind"], Dot> = {
 /** The dot for who named a function (FunctionInfo.source); a source we do not know is shown as unknown. */
 export const dotOf = (source: FunctionInfo["source"] | undefined): Dot => DOTS[source === "user" ? "confirmed" : source === "analysis" ? "inferred" : source === "imported" ? "library" : "unknown"];
 
+/** The dot for who made a stack slot (StackSlot.source): analysis and default names are inferred (amber ring), a person's is confirmed, the file's own is from the file. */
+export const slotDot = (source: FunctionInfo["source"] | undefined): Dot =>
+  source === "analysis" || source === "default" ? { ...DOTS.inferred, label: source === "default" ? "inferred: default name" : "inferred by analysis" } : dotOf(source);
+
 /** Coverage mark (Coverage.mark) -> how it is drawn: both runs green; only one run in the attention colour, A solid with the letter A, B hatched with the letter B. */
 export const COV_BOTH = "#4ec36b";
 export function covStyle(mark: string): { color: string; letter: "" | "A" | "B"; hatched: boolean } | null {

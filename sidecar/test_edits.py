@@ -1,6 +1,9 @@
 """Listing edits: comments and labels."""
 
-from testlib import Client, INVALID, NOT_FOUND, run
+import pytest
+
+from ghidorita.core.errors import RpcError
+from testlib import Client, INVALID, NOT_FOUND, inproc, run
 
 
 def test_get_comments_and_create_label(env):
@@ -66,4 +69,72 @@ def test_function_source_and_load_coverage(env, tmp_path):
             await c.err("load_coverage", NOT_FOUND, path=str(tmp_path / "missing"))
             await c.ok("undo")
 
+    run(go())
+
+
+async def open_edit_blob(call, tmp_path):
+    from testlib import BASE, X86, edit_blob
+    path, fns = edit_blob(tmp_path)
+    await call("open_binary", path=path, loader="Raw Binary", language=X86, baseAddress=BASE, analysis="blocking")
+    have = {f["entry"] for f in await call("list_functions")}
+    for name, entry in fns.items():
+        if entry not in have:
+            await call("create_function", address=entry, name=name)
+    return fns
+
+
+def test_set_equate_one_operand(sc, tmp_path, monkeypatch):
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            fns = await open_edit_blob(call, tmp_path)
+            before = (await call("decompile", entry=fns["h"]))
+            tok = next(t for t in before["tokens"] if t["kind"] == "const")
+            assert (tok["constValue"], tok["constSize"]) == ("42", 4) and "callee(0x2a)" in before["text"]
+            at = tok["address"]
+            for bad in (dict(value="43"), dict(size=3), dict(name="not a name")):
+                with pytest.raises(RpcError) as e:
+                    await call("set_equate", address=at, **{"value": "42", "size": 4, "name": "ANSWER", **bad})
+                assert e.value.code == INVALID
+            await call("set_equate", address=at, value="42", size=4, name="ANSWER")
+            after = await call("decompile", entry=fns["h"])
+            assert "callee(ANSWER)" in after["text"] and after["cached"] is False
+            assert (await call("undo_state"))["undoName"] == "Set equate ANSWER"
+            await call("undo")
+            assert (await call("decompile", entry=fns["h"]))["text"] == before["text"]
+            await call("redo")
+            assert "callee(ANSWER)" in (await call("decompile", entry=fns["h"]))["text"]
+            # an enum member: the equate is named after the enum, the C shows the member
+            e = (await call("create_data_type", kind="enum", name="Answers"))["path"]
+            await call("edit_enum", path=e, op={"op": "set", "name": "FORTY_TWO", "value": "42"})
+            await call("set_equate", address=at, value="42", size=4, name="FORTY_TWO", enum=e)
+            assert "callee(FORTY_TWO)" in (await call("decompile", entry=fns["h"]))["text"]
+            await call("edit_enum", path=e, op={"op": "set", "name": "ALSO_42", "value": "42"})  # a second name for the same value is as valid
+            await call("set_equate", address=at, value="42", size=4, name="ALSO_42", enum=e)
+            assert "callee(ALSO_42)" in (await call("decompile", entry=fns["h"]))["text"]
+            await call("set_equate", address=at, value="42", size=4, name="FORTY_TWO", enum=e)  # and back, with both members existing
+            assert "callee(FORTY_TWO)" in (await call("decompile", entry=fns["h"]))["text"]
+            await call("set_equate", address=at, value="42", size=4, name="ALSO_42", enum=e)
+            assert "callee(ALSO_42)" in (await call("decompile", entry=fns["h"]))["text"]
+            with pytest.raises(RpcError) as err:
+                await call("set_equate", address=at, value="42", size=4, name="NOPE", enum=e)
+            assert err.value.code == INVALID
+    run(go())
+
+
+def test_set_function_no_return_redecompiles_callers(sc, tmp_path, monkeypatch):
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            fns = await open_edit_blob(call, tmp_path)
+            before = await call("decompile", entry=fns["g"])
+            assert "return 1" in before["text"]
+            assert (await call("decompile", entry=fns["g"]))["cached"] is True
+            await call("set_function_no_return", entry=fns["die"], noReturn=True)
+            after = await call("decompile", entry=fns["g"])
+            assert after["cached"] is False and "return 1" not in after["text"], after["text"]
+            assert (await call("undo_state"))["undoName"].startswith("Mark no return")
+            with pytest.raises(RpcError) as e:
+                await call("set_function_no_return", entry=fns["die"], noReturn="yes")
+            assert e.value.code == INVALID
+            await call("undo")
+            assert (await call("decompile", entry=fns["g"]))["text"] == before["text"]
     run(go())

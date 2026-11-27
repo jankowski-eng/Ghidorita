@@ -66,7 +66,7 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { id: "bookmark", label: "Add Bookmark…", accelerator: acc("edit:bookmark"), enabled: state.hasProgram && allowsEdit(caps, "bookmark"), click: () => send({ type: "edit", action: "bookmark" }) },
         ...(([["Rename…", "rename"], ["Retype Variable…", "retype"], ["Set Comment…", "comment"], ["Create Function", "createFunction"],
-          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"]] as const).map(([label, action]): MenuItemConstructorOptions =>
+          ["Define Data…", "defineData"], ["Define Array…", "defineArray"], ["Define Pointer", "definePointer"], ["Repeat Last Data Type", "repeatData"], ["Create Structure from Data…", "createStruct"], ["Auto Create Structure (variable)…", "autoStruct"], ["Set Equate…", "setEquate"], ["Mark Function as No Return", "noReturn"], ["Split Out As New Variable…", "splitVariable"], ["Force Field…", "forceField"], ["Clear Code Bytes", "clear"], ["Edit Function Signature…", "signature"]] as const).map(([label, action]): MenuItemConstructorOptions =>
           ({ id: action, label: lab(label, "edit:" + action), enabled: state.hasProgram && allowsEdit(caps, action), click: () => send({ type: "edit", action }) }))),
       ] },
       { label: "View", submenu: [
@@ -76,7 +76,9 @@ export function createMenu({ getWin, pick }: Deps) {
         { type: "separator" },
         { id: "symbols", label: "Symbol Table", enabled: state.hasProgram && caps.has(dockCapability.symbols), accelerator: acc("dock:symbols"), click: () => send({ type: "dock", panel: "symbols" }) },
         { id: "strings", label: "Defined Strings", enabled: state.hasProgram && caps.has(dockCapability.strings), accelerator: acc("dock:strings"), click: () => send({ type: "dock", panel: "strings" }) },
+        { id: "undefined", label: "Undefined Data References", enabled: state.hasProgram && caps.has(dockCapability.undefined), click: () => send({ type: "dock", panel: "undefined" }) }, // Ghidra has no key for it
         { id: "changes", label: "Changes", enabled: state.hasProgram && caps.has(dockCapability.changes), accelerator: acc("dock:changes"), click: () => send({ type: "dock", panel: "changes" }) },
+        { id: "stack", label: "Stack Frame", enabled: state.hasProgram && caps.has(dockCapability.stack), click: () => send({ type: "dock", panel: "stack" }) }, // Ghidra has no key for its stack window
         { id: "calls", label: "Calls (callers and callees)", enabled: state.hasProgram && caps.has(dockCapability.calls), accelerator: acc("dock:calls"), click: () => send({ type: "dock", panel: "calls" }) },
         { id: "bookmarks", label: "Bookmarks", enabled: state.hasProgram && caps.has(dockCapability.bookmarks), accelerator: acc("dock:bookmarks"), click: () => send({ type: "dock", panel: "bookmarks" }) },
         { id: "coverage", label: "Coverage", enabled: state.hasProgram && caps.has(dockCapability.coverage), click: () => send({ type: "dock", panel: "coverage" }) },

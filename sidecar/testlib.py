@@ -170,3 +170,36 @@ async def inproc(tmp_path, monkeypatch):
     finally:
         for hook in ctx.shutdown_hooks:
             await asyncio.to_thread(ctx.lanes.on_r, hook)
+
+
+def edit_blob(tmp_path, name="edit.bin"):
+    """A hand-assembled x86-32 program for the decompiler edit tests. Offsets from BASE: callee 0x40, g 0x60 (calls die, then returns 1), die 0x80 (halts),
+    h 0xa0 (callee(0x2a)), u 0xc0 (int u(U *p) after the test types U), X 0x100, g3 0x120 (stores X()'s result twice in one variable, which the decompiler merges),
+    p 0x1a0 and w 0x1c0 (a pointer and a write reference into the bytes after X's), k 0x160 (one local at [ebp-4] whose address is passed on, so the decompiler keeps it as a stack variable).
+    Returns (path, {name: entry})."""
+    le = lambda n: (n & 0xFFFFFFFF).to_bytes(4, "little")
+    code = bytearray(0x200)
+
+    def put(off, b):
+        code[off:off + len(b)] = b
+
+    def call(at, to):
+        return b"\xe8" + le(to - (at + 5))
+    put(0x40, bytes.fromhex("5589e55dc3"))
+    put(0x60, bytes.fromhex("5589e5") + call(0x63, 0x80) + bytes.fromhex("b8010000005dc3"))
+    put(0x80, bytes.fromhex("f4ebfe"))
+    put(0xA0, bytes.fromhex("5589e56a2a") + call(0xA5, 0x40) + bytes.fromhex("83c4045dc3"))
+    put(0xC0, bytes.fromhex("5589e58b45088b005dc3"))
+    put(0x100, bytes.fromhex("a1") + le(int(BASE, 16) + 0x1F0) + bytes.fromhex("c3"))
+    g3, at = bytearray(bytes.fromhex("5589e5")), 0x120
+    for _ in range(2):
+        g3 += call(at + len(g3), 0x100) + b"\x50" + call(at + len(g3) + 6, 0x40) + bytes.fromhex("83c404")
+    put(0x120, bytes(g3) + bytes.fromhex("5dc3"))
+    k = bytearray(bytes.fromhex("5589e583ec08c745fc05000000"))  # a local at [ebp-4] written, its address passed to callee, then read and passed again
+    k += bytes.fromhex("8d45fc50") + call(0x160 + 17, 0x40) + bytes.fromhex("83c4048b45fc50") + call(0x160 + 29, 0x40) + bytes.fromhex("83c404c9c3")
+    put(0x160, bytes(k))
+    put(0x1A0, b"\x8d\x05" + le(int(BASE, 16) + 0x1F4) + b"\xc3")  # p: returns the address of an undefined dword (a pointer reference)
+    put(0x1C0, b"\xa3" + le(int(BASE, 16) + 0x1F8) + b"\xc3")  # w: stores eax into an undefined dword (a write reference)
+    p = tmp_path / name
+    p.write_bytes(bytes(code))
+    return str(p), {n: hex(int(BASE, 16) + o) for n, o in dict(callee=0x40, g=0x60, die=0x80, h=0xA0, u=0xC0, X=0x100, g3=0x120, k=0x160, p=0x1A0, w=0x1C0).items()}

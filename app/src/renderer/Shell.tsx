@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { Address, SymbolHit } from "../../../protocol";
+import type { Address, StackSlot, SymbolHit } from "../../../protocol";
+import { allowsEdit } from "../capabilities";
 import { Dock } from "./Dock";
 import { DataTypes } from "./DataTypes";
 import { GoTo } from "./GoTo";
@@ -46,8 +47,14 @@ export function BottomDock({ go }: { go: (a: Address, source: Source) => unknown
   const { dock, dataVersion, covVersion, fn } = useViews((v) => v);
   const cov = useMemo(() => coverageActions(s), [s]);
   if (!program || !dock) return null;
+  // a slot is edited through the decompiler's variable edits (rename_variable / retype_variable): the same dialogs as the decompiler's L and Cmd+L
+  const ask = (spec: { title: string; label: string; field: "text" | "datatype"; initial: string; submit: string }, go: (v: string) => Promise<unknown>) =>
+    s.views.dispatch({ type: "set", patch: { dlg: { spec, submit: async (v) => { await go(v.trim()); } } } });
+  const editable = allowsEdit(s.caps, "retype"); // rename_variable / retype_variable: decompile + variableEditing
+  const rename = (entry: Address, slot: StackSlot) => ask({ title: "Rename variable", label: "New name", field: "text", initial: slot.name, submit: "Rename" }, (v) => program.api.edits.renameVariable({ entry, name: slot.name, newName: v }));
+  const retype = (entry: Address, slot: StackSlot) => ask({ title: "Retype variable", label: "Data type", field: "datatype", initial: slot.dataType, submit: "Retype" }, (v) => program.api.edits.retypeVariable({ entry, name: slot.name, dataType: v }));
   return <Dock searches={program.api.searches} capabilities={s.caps} active={dock} onActivate={(d) => s.views.dispatch({ type: "set", patch: { dock: d } })} onClose={() => s.views.dispatch({ type: "set", patch: { dock: null } })}
-    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} bookmarks={program.api.bookmarks} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
+    version={dataVersion} onGo={(a) => go(a, "search")} onError={s.fail} bookmarks={program.api.bookmarks} stack={{ read: program.api.functions.stackFrame, entry: fn?.entry ?? null, name: fn?.name ?? "", onRename: editable ? rename : undefined, onRetype: editable ? retype : undefined }} calls={{ op: program.api.references.calls, entry: fn?.entry ?? null, name: fn?.name ?? "" }} cov={{ version: covVersion, funcs, onLoad: () => void cov.pick(), onChange: cov.changed }} />;
 }
 
 export function TypeManager() {

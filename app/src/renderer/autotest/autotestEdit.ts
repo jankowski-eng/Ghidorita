@@ -140,13 +140,43 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
   await wait(() => !dirtyShown(), "dirty marker to clear after save");
   R.dirtyCleared = !(await c.program().history.state()).dirty && !document.title.startsWith("●");
   if (!R.dirtyCleared) throw new Error("dirty not cleared");
-  const ok = R.renameFunction && R.renameVariable && R.retype && R.comment && R.createFunction && R.textUndoLeavesProgram && R.escapeRestoresFocus && R.focusBack && R.cursorLineKept && R.undoAll && R.redo && R.dirtyCleared;
-  return { ok: !!ok, persist: { entry: f.entry, newName: newFn, origName: f.name, origVar, newVar, newType } };
+
+  // 11. E on a number in the decompiler: the equate replaces it in the C and survives a save and a restart (phase 2 checks it)
+  const EQ = "AUTOTEST_EQ";
+  let eq: { entry: string } | null = null, sawConst = false;
+  for (const g of fl.filter((x) => x.entry !== f.entry).reverse().slice(0, 120)) { // from the end of the list: the types flow edits the early functions, and a retyped parameter can swallow the number
+    const r = await c.program().decompiler.decompile({ entry: g.entry }).result;
+    const consts = r.tokens.filter((t) => t.kind === "const" && t.constValue && t.address && t.line > 1).slice(0, 4);
+    if (!consts.length) continue;
+    sawConst = true;
+    await c.select(g.entry); await waitFor(() => c.editorText() === r.text, 15000, "decompiler text of " + g.name);
+    for (const t of consts) {
+      c.editor().setPosition({ lineNumber: t.line + 1, column: t.colStart + 2 }); monacoKey("e");
+      await dialog("Set equate"); const box = await fill("Equate name or enum member", EQ);
+      const out = await waitFor(() => (!byLabel("dialog", "Set equate") ? "closed" : document.querySelector('[role="alert"]')?.textContent || null), 8000, "Set equate to finish");
+      if (out === "closed") {
+        const shown = await waitFor(() => c.editorText().includes(EQ), 4000, "equate in the decompiler").then(() => true, () => false);
+        if (shown) { eq = { entry: g.entry }; break; }
+        await c.menu("undo"); await waitFor(() => c.editorText() === r.text, 8000, "undo of an equate the C does not show"); // an operand the C does not print as this number
+        continue;
+      }
+      press(box, "Escape"); await closed("Set equate"); // this constant is not one operand's scalar: the next one
+    }
+    if (eq) break;
+  }
+  if (!eq && sawConst) throw new Error("could not set an equate on any constant");
+  R.equate = true; // a provider whose decompile has no const tokens (the mock) has nothing to equate: the step is skipped
+  if (eq) {
+    await c.menu("save");
+    await waitFor(() => !dirtyShown(), 10000, "dirty marker to clear after saving the equate");
+  }
+  const ok = R.equate && R.renameFunction && R.renameVariable && R.retype && R.comment && R.createFunction && R.textUndoLeavesProgram && R.escapeRestoresFocus && R.focusBack && R.cursorLineKept && R.undoAll && R.redo && R.dirtyCleared;
+  return { ok: !!ok, persist: { equate: eq ? { entry: eq.entry, name: EQ } : undefined, entry: f.entry, newName: newFn, origName: f.name, origVar, newVar, newType } };
 }
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */
 export async function runPhase2(file: string, c: AutotestCtx, result: Record<string, any>) {
-  const x = c.expect as { entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; data?: { arr: string; ptr: string; rep: string }; auto?: string } };
+  const x = c.expect as { equate?: { entry: string; name: string }; entry: string; newName: string; origVar: string; newVar: string; bookmark?: { address: string; comment: string }; types?: { name: string; fields: string[]; size: number; addr: string; entry: string; from: string; fromAddr: string; data?: { arr: string; ptr: string; rep: string }; auto?: string } };
   const fl = await c.open(file);
   if (!fl?.length) throw new Error("no functions after relaunch");
   const f = await c.program().functions.containing({ address: x.entry });
@@ -177,6 +207,10 @@ export async function runPhase2(file: string, c: AutotestCtx, result: Record<str
     const b = await c.program().bookmarks.list({ type: "Note" }).result;
     result.phase2.bookmark = b.items.find((i) => i.address === x.bookmark!.address) ?? null;
     typesOk = typesOk && result.phase2.bookmark?.comment === x.bookmark.comment;
+  }
+  if (x.equate) { // the equate set with E survived save + quit + relaunch
+    result.phase2.equate = (await c.program().decompiler.decompile({ entry: x.equate.entry }).result).text.includes(x.equate.name);
+    typesOk = typesOk && result.phase2.equate;
   }
   result.ok = f?.name === x.newName && d.text.includes(x.origVar) && !d.text.includes(x.newVar) && !rows[0]?.comment && !undo.dirty && typesOk;
 }

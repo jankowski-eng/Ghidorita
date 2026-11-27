@@ -1,6 +1,9 @@
 """Function reads and symbol search by name/address."""
 
-from testlib import Client, INVALID, NOT_FOUND, run
+import pytest
+
+from ghidorita.core.errors import RpcError
+from testlib import Client, INVALID, NOT_FOUND, inproc, run
 
 
 def test_reads(env):
@@ -77,4 +80,44 @@ def test_get_bytes(env):
             end = hex(int(last["start"], 16) + last["size"] - 1)
             assert len((await c.ok("get_bytes", address=end, length=1))["bytes"].split(" ")) == 1
             await c.err("get_bytes", NOT_FOUND, address=end, length=2)  # runs past the end of the range
+    run(go())
+
+
+def test_stack_frame(sc, tmp_path, monkeypatch):
+    """A function with two stack variables of known source: the frame lists them by offset, a rename shows in the next read and in the decompile."""
+    from test_edits import open_edit_blob
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            from ghidra.program.model.data import IntegerDataType, LongDataType
+            from ghidra.program.model.listing import LocalVariableImpl
+            from ghidra.program.model.symbol import SourceType
+            fns = await open_edit_blob(call, tmp_path)
+            k = fns["k"]
+            assert (await call("stack_frame", entry=k))["slots"] == []
+            prog, f = ctx.session.program, ctx.session.program.getFunctionManager().getFunctionAt(ctx.session.addr(k))
+            tx = prog.startTransaction("variables")
+            try:
+                f.addLocalVariable(LocalVariableImpl("counter", IntegerDataType.dataType, -8, prog), SourceType.USER_DEFINED)
+                f.addLocalVariable(LocalVariableImpl("buf", LongDataType.dataType, -12, prog), SourceType.ANALYSIS)
+                f.addLocalVariable(LocalVariableImpl("local_10", LongDataType.dataType, -16, prog), SourceType.DEFAULT)
+            finally:
+                prog.endTransaction(tx, True)
+            fr = await call("stack_frame", entry=k)
+            assert fr["entry"] == k and fr["name"] == "k"
+            assert fr["slots"] == [
+                {"offset": -16, "size": 4, "name": "local_10", "dataType": "long", "parameter": False, "source": "default"},
+                {"offset": -12, "size": 4, "name": "buf", "dataType": "long", "parameter": False, "source": "analysis"},
+                {"offset": -8, "size": 4, "name": "counter", "dataType": "int", "parameter": False, "source": "user"}], fr
+            assert "counter" in (await call("decompile", entry=k))["text"]
+            await call("rename_variable", entry=k, name="counter", newName="total")
+            fr = await call("stack_frame", entry=k)
+            assert [s["name"] for s in fr["slots"]] == ["local_10", "buf", "total"] and fr["slots"][2]["source"] == "user"
+            text = (await call("decompile", entry=k))["text"]
+            assert "total" in text and "counter" not in text
+            await call("retype_variable", entry=k, name="total", dataType="short")
+            assert next(s for s in (await call("stack_frame", entry=k))["slots"] if s["name"] == "total")["dataType"] == "short"
+            with pytest.raises(RpcError) as e:
+                await call("stack_frame", entry="0x1")
+            assert e.value.code == NOT_FOUND
     run(go())

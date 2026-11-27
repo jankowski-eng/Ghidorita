@@ -75,6 +75,19 @@ class Listing:
                 "size": int(f.getBody().getNumAddresses()), "signature": str(f.getSignature().getPrototypeString())}
 
     @rpc(lane="R")
+    def stack_frame(self, entry):
+        """The stack variables of the function at `entry` (parameters and locals Ghidra stores with stack storage), by stack offset ascending.
+        One read of the function's variable table: quick even for thousands of slots, so it stays on R and is not cancellable."""
+        from ghidra.program.model.listing import Parameter
+        prog, f = self.ses.function(entry)
+        frame = f.getStackFrame()
+        slots = [{"offset": int(v.getStackOffset()), "size": int(v.getLength()), "name": str(v.getName()), "dataType": self._dt_ref(v.getDataType()),
+                  "parameter": isinstance(v, Parameter), "source": SOURCES.get(str(v.getSource()), "other")}
+                 for v in sorted(frame.getStackVariables(), key=lambda v: v.getStackOffset())]
+        return {"entry": self.ses.fmt(f.getEntryPoint(), prog), "name": str(f.getName()), "localSize": int(frame.getLocalSize()),
+                "parameterSize": int(frame.getParameterSize()), "slots": slots}
+
+    @rpc(lane="R")
     def listing_info(self):
         prog = self.ses.need()
         f = self.ses.fmtr(prog)

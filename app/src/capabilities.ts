@@ -2,7 +2,7 @@ import type { Capability } from "../../protocol";
 import type { MenuCommand } from "./preload";
 
 export const dockCapability = {
-  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger",
+  symbols: "symbolTable", strings: "strings", memsearch: "memorySearch", changes: "editing", coverage: "coverage", calls: "calls", bookmarks: "bookmarks", registers: "debugger", locals: "debugger", memory: "debugger", stack: "stackFrame", undefined: "undefinedRefs",
 } as const;
 
 /** What the centre pane hosts: the decompiler (tabs, editor, control-flow graph) needs `decompile`; the call graph is a view of its own and needs only `callGraph`. */
@@ -14,6 +14,7 @@ export function allowsEdit(caps: ReadonlySet<Capability>, action: Extract<MenuCo
     case "undo": case "redo": return caps.has("undo");
     case "retype": case "autoStruct": return caps.has("decompile") && caps.has("variableEditing");
     case "defineData": case "defineArray": case "definePointer": case "repeatData": case "createStruct": return caps.has("typeEditing");
+    case "setEquate": case "noReturn": case "splitVariable": case "forceField": return caps.has("decompile") && caps.has("decompilerEdits");
     case "bookmark": return caps.has("bookmarks");
     default: return caps.has("editing");
   }

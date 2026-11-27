@@ -13,8 +13,10 @@ export const KEYS: Readonly<Record<string, string>> = {
   "edit:undo": "CmdOrCtrl+Z", "edit:redo": "CmdOrCtrl+Shift+Z",
   "copy:address": "CmdOrCtrl+Shift+C", "copy:bytes": "CmdOrCtrl+Alt+C", // app-only
   "edit:bookmark": "CmdOrCtrl+D",
-  "edit:rename": "L", "edit:retype": "CmdOrCtrl+L", "edit:comment": ";", "edit:createFunction": "F", "edit:defineData": "T", "edit:clear": "C",
+  "edit:rename": "L", "edit:retype": "CmdOrCtrl+L", "edit:comment": ";", "edit:createFunction": "F", "edit:defineData": "T", "edit:setEquate": "E", // Set Equate: Ghidra 12.3 SetEquateAction (decompiler) and EquatePlugin (listing), VK_E; Split Out, Force Field and No Return have no key in Ghidra
+  "edit:clear": "C",
   "edit:defineArray": "[", "edit:definePointer": "P", "edit:repeatData": "Y", "edit:createStruct": "Shift+[",
+  // dock:stack (Stack Frame) has no key: Ghidra binds none to its stack window
   graph: "CmdOrCtrl+Space", callgraph: "CmdOrCtrl+Shift+G", // graph: Ghidra's "Toggle Listing and Function Graph"; call graph app-only
   "dock:symbols": "CmdOrCtrl+T", "dock:changes": "CmdOrCtrl+Shift+H", "dock:bookmarks": "CmdOrCtrl+B", "dock:memsearch": "S", // changes app-only
   "debug:continue": "F5", "debug:pause": "F6", "debug:step": "F7", "debug:stepi": "F8", "debug:breakpoint": "F9", "debug:stepinto": "F10", "debug:stepout": "Shift+F10",

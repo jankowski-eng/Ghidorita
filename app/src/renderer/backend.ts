@@ -2,7 +2,7 @@ import type {
   ActiveSession, AnalysisState, Address, AddrRange, Capability, CommentKind, DataTypeDetail, DataTypeHit, DecompileResult,
   DtSource, EnumOp, FunctionInfo, ImportChoices, ImportOptions, LanguageInfo, ListingRow, ListSymbolsParams,
   MemoryHit, OpenResult, ProgramEntry, SearchMemoryParams, StringItem, StructOp, SymbolHit, SymbolRow, UndoState, XrefFrom, XrefTo,
-  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol,
+  BookmarkItem, CallGraph, ChangeKind, DebugMemory, DebugState, DebugValue, FunctionCalls, ListBookmarksParams, FunctionGraph, TopSymbol, StackFrame, UndefinedRef,
 } from "../../../protocol";
 
 export type Failure = "noProgram" | "cancelled" | "timeout" | "notFound" | "busy" | "projectLocked" | "stale" | "invalid" | "unsupported" | "target" | "connection" | "protocol" | "internal";
@@ -41,6 +41,8 @@ export interface ListingReads {
 export interface FunctionNavigation {
   list(): Promise<FunctionInfo[]>;
   containing(params: { address: Address }): Promise<{ name: string; entry: Address; size: number; signature: string } | null>;
+  /** the function's stack variables by offset (capability "stackFrame"); a quick read on thread R, not a Job */
+  stackFrame(params: { entry: Address }): Promise<StackFrame>;
 }
 
 export interface Decompilation {
@@ -66,6 +68,8 @@ export interface Searches {
   topSymbols(params: { limit?: number }): Job<TopSymbol[]>;
   listSymbols(params: ListSymbolsParams): Job<{ total: number; items: SymbolRow[] }>;
   listStrings(params: { offset?: number; limit?: number; minLength?: number; query?: string; referencedOnly?: boolean }): Job<{ total: number; items: StringItem[] }>;
+  /** data references into undefined bytes (undefinedRefs capability): a scan, paged like listStrings */
+  listUndefinedRefs(params: { offset?: number; limit?: number }): Job<{ total: number; items: UndefinedRef[] }>;
   searchMemory(params: SearchMemoryParams): Job<{ items: MemoryHit[]; next: Address | null }>;
 }
 
@@ -102,6 +106,13 @@ export interface ProgramEdits {
   setFunctionSignature(params: { entry: Address; signature: string }): Promise<{}>;
   renameVariable(params: { entry: Address; name: string; newName: string; timeoutSecs?: number }): Promise<{}>;
   retypeVariable(params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }): Promise<{}>;
+  /** decompilerEdits: one operand's equate; value/size are the const token's constValue/constSize, address its address */
+  setEquate(params: { address: Address; value: string; size: number; name: string; enum?: string }): Promise<{}>;
+  /** the callers' decompile caches are dropped by the provider */
+  setFunctionNoReturn(params: { entry: Address; noReturn?: boolean }): Promise<{}>;
+  splitVariable(params: { entry: Address; name: string; address: Address; newName: string; timeoutSecs?: number }): Promise<{}>;
+  /** union tokens carry `union` and `unionAt`; field null = no field */
+  forceUnionField(params: { entry: Address; address: Address; text: string; field: string | null; occurrence?: number; timeoutSecs?: number }): Promise<{}>;
   defineData(params: { address: Address; dataType: string }): Promise<{}>;
   clearCode(params: { address: Address; length?: number }): Promise<{}>;
   createStructFromData(params: { address: Address; length: number; name: string; category?: string; apply?: boolean }): Promise<{ path: string }>;

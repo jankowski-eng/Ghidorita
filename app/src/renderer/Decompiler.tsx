@@ -13,7 +13,7 @@ type Monaco = Parameters<OnMount>[1];
  * One Monaco instance, one model per tab (path "tab-<id>"): the wrapper saves/restores scroll and cursor per path.
  * Call tokens of the active tab are underlined and clickable.
  */
-export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean };
+export type CanEdit = { rename: boolean; retype: boolean; signature: boolean; xrefs: boolean; equate: boolean; noReturn: boolean; split: boolean; field: boolean };
 export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion, pcLine, pcSeq, bpLines, values, onGutter, onCallClick, editorRef, onEdit, canAt, onXrefs, onCopy, canEdit }: {
   values?: { line: number; text: string }[]; // debugger: text after a line (the variables' values at the stop)
   pcLine?: number | null; pcSeq?: number; bpLines?: number[]; onGutter?: (line1: number) => void; // debugger: the stop line (0-based) and which stop it is, the breakpoint lines, a click in the glyph margin
@@ -38,13 +38,19 @@ export function Decompiler({ tabId, liveIds, text, tokens, highlight, covVersion
   const onMount: OnMount = (editor, monaco) => {
     editorRef.current = editor; monacoRef.current = monaco; 
     // Ghidra's keys through Monaco's action API (also the context menu); preconditions follow the token under the cursor
-    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false) };
-    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); } };
+    const ck = { rename: editor.createContextKey<boolean>("gdRename", false), retype: editor.createContextKey<boolean>("gdRetype", false), signature: editor.createContextKey<boolean>("gdSignature", false), xrefs: editor.createContextKey<boolean>("gdXrefs", false),
+      equate: editor.createContextKey<boolean>("gdEquate", false), noReturn: editor.createContextKey<boolean>("gdNoReturn", false), split: editor.createContextKey<boolean>("gdSplit", false), field: editor.createContextKey<boolean>("gdField", false) };
+    keysRef.current = { set: (c) => { ck.rename.set(c.rename); ck.retype.set(c.retype); ck.signature.set(c.signature); ck.xrefs.set(c.xrefs); ck.equate.set(c.equate); ck.noReturn.set(c.noReturn); ck.split.set(c.split); ck.field.set(c.field); } };
     const act = (id: string, label: string, action: EditAction, order: number, precondition?: string, keybindings?: number[]) =>
       allowsEdit(canEdit, action) && editor.addAction({ id: "gd." + id, label, keybindings, precondition, contextMenuGroupId: "gd", contextMenuOrder: order, run: () => editRef.current(action) });
     act("rename", "Rename…", "rename", 1, "gdRename && !findInputFocus && !replaceInputFocus", [monaco.KeyCode.KeyL]);
     act("retype", "Retype Variable…", "retype", 2, "gdRetype && !findInputFocus && !replaceInputFocus", [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL]);
     act("signature", "Edit Function Signature…", "signature", 3, "gdSignature && !findInputFocus && !replaceInputFocus");
+    const free = "!findInputFocus && !replaceInputFocus";
+    act("equate", "Set Equate…", "setEquate", 3.1, `gdEquate && ${free}`, [monaco.KeyCode.KeyE]);
+    act("noReturn", "Mark Function as No Return", "noReturn", 3.2, `gdNoReturn && ${free}`);
+    act("split", "Split Out As New Variable…", "splitVariable", 3.3, `gdSplit && ${free}`);
+    act("field", "Force Field…", "forceField", 3.4, `gdField && ${free}`);
     act("comment", "Set Comment…", "comment", 4, "!findInputFocus && !replaceInputFocus", [monaco.KeyCode.Semicolon]);
     if (canEdit.has("references")) editor.addAction({ id: "gd.xrefs", label: "Show References To", precondition: "gdXrefs && !findInputFocus && !replaceInputFocus", contextMenuGroupId: "gd", contextMenuOrder: 5, run: () => xrefsRef.current() });
     // Cmd+C stays Monaco's own copy of the selection; these two are menu-only (the Edit menu has their keys)

@@ -10,7 +10,8 @@ const entryOf = (i) => hex(BASE + i * ROWS_PER_FUNC * STRIDE);
 const baseName = (i) => (i === 0 ? "entry" : i === 1 ? "main" : `fn_${i}`);
 const STEP = ROWS_PER_FUNC * STRIDE;
 // Mutable program state (all edits go through edit(), which snapshots it for undo/redo).
-const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map() });
+const UNDEF_REFS = Array.from({ length: 40 }, (_, k) => BASE + (k * 4000 + 5) * STRIDE); // list_undefined_refs targets: real undefined rows, not generated code
+const freshS = () => ({ names: new Map(), comments: new Map(), created: new Map(), sigs: new Map(), vars: new Map(), types: new Map(), data: new Map(UNDEF_REFS.map((a) => [a, { mnemonic: "??", length: STRIDE }])), labels: new Map(), dt: new Map(), cats: new Set(), bookmarks: new Map() });
 let S = freshS();
 const nameOf = (i) => S.names.get(i) ?? baseName(i);
 const COMMENT_KINDS = ["eol", "pre", "post", "plate", "repeatable"];
@@ -211,7 +212,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger"] };
+  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -575,6 +576,12 @@ const handlers = {
       .filter((s) => s.value.length >= min && s.value.toLowerCase().includes(q) && (!referencedOnly || s.refs > 0) && S.data.get(parseAddr(s.address))?.mnemonic !== "??"); // clear_code removes a string
     return { total: all.length, items: all.slice(off, off + lim) };
   },
+  list_undefined_refs({ offset, limit }) { // fake: 40 references into undefined words; define_data on a target removes its row
+    const off = parseInt0(offset, 0, "offset"), lim = Math.min(5000, parseInt0(limit, 500, "limit"));
+    const all = UNDEF_REFS.map((a, k) => ({ address: hex(a), type: ["read", "write", "pointer"][k % 3], from: entryOf(k % NFUNC), function: nameOf(k % NFUNC) }))
+      .filter((r) => { const d = S.data.get(parseAddr(r.address)); return d?.mnemonic === "??"; });
+    return { total: all.length, items: all.slice(off, off + lim) };
+  },
   list_symbols({ offset, limit, query, kinds, sort, desc }) {
     const off = parseInt0(offset, 0, "offset"), lim = Math.min(1000, parseInt0(limit, 100, "limit")), srt = sort ?? "address";
     if (!["name", "address", "kind", "namespace", "source"].includes(srt)) bad("sort");
@@ -850,6 +857,35 @@ const handlers = {
     if (!d || d.size < 0) bad("dataType");
     return edit("Retype variable", notify, [fnRange(i)], ["function"], () => { S.types.set(`${i}|${o}`, d.name); });
   },
+  stack_frame({ entry }) {
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0) nf();
+    // the same variables the decompiler and rename/retype_variable use, so an edit shows here after the refresh
+    const at = { iVar1: [-8, false], param_1: [4, true], param_2: [8, true] };
+    const slots = Object.keys(VARS).map((o) => ({ offset: at[o][0], size: (() => { try { return resolveType(ty(i, o)).size; } catch { return 4; } })(), name: v(i, o), dataType: ty(i, o), parameter: at[o][1],
+      source: S.vars.has(`${i}|${o}`) || S.types.has(`${i}|${o}`) ? "user" : "analysis" })).sort((a, b) => a.offset - b.offset);
+    return { entry: hex(BASE + i * STEP), name: nameOf(i), localSize: 8, parameterSize: 16, slots };
+  },
+  // decompilerEdits: the mock's decompiler has no numbers or unions to point at, so these only validate and record an undo step
+  set_equate({ address, value, size, name }, notify) {
+    const n = parseAddr(address);
+    if (!/^-?\d+$/.test(String(value)) || ![1, 2, 4, 8].includes(size)) bad("value/size");
+    validName(name);
+    return edit("Set equate " + name, notify, [{ start: hex(n), end: hex(n) }], ["symbol"], () => {});
+  },
+  set_function_no_return({ entry, noReturn }, notify) {
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0) nf();
+    if (noReturn !== undefined && typeof noReturn !== "boolean") bad("noReturn");
+    return edit("Mark no return", notify, [fnRange(i)], ["function"], () => {});
+  },
+  split_variable({ entry, name, address, newName }, notify) {
+    const i = idxOfEntry(parseAddr(entry));
+    if (i < 0 || !Object.keys(VARS).some((o) => v(i, o) === name)) nf();
+    validName(newName); parseAddr(address);
+    bad("nothing to split: the mock's variables are one use only");
+  },
+  force_union_field() { bad("the mock has no unions"); },
   define_data({ address, dataType }, notify) {
     const n = parseAddr(address);
     if (typeof dataType !== "string" || n < BASE || n >= BASE + ROWS * STRIDE) bad("dataType/address");

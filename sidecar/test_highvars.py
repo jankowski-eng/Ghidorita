@@ -11,7 +11,7 @@ from ghidorita.app import App
 from ghidorita.core.errors import RpcError
 from ghidorita.core.rpc import Dispatcher
 from ghidorita.domains import highvars
-from testlib import BASE, CANCELLED, Client, INVALID, NOT_FOUND, TIMEOUT, X86, run
+from testlib import BASE, CANCELLED, Client, INVALID, NOT_FOUND, TIMEOUT, X86, inproc, run
 
 
 def test_variable_edit_timeout_arg_and_cancel(env):
@@ -106,4 +106,66 @@ def test_structure_inference_callees_and_cancellation(sc, tmp_path, monkeypatch)
         finally:
             for hook in ctx.shutdown_hooks:
                 await asyncio.to_thread(ctx.lanes.on_r, hook)
+    run(go())
+
+
+def _tok(r, text, kind=None):
+    return [t for t in r["tokens"] if r["text"].split("\n")[t["line"]][t["colStart"]:t["colEnd"]] == text and (kind is None or t["kind"] == kind)]
+
+
+def test_split_variable(sc, tmp_path, monkeypatch):
+    from test_edits import open_edit_blob
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            fns = await open_edit_blob(call, tmp_path)
+            before = await call("decompile", entry=fns["g3"])
+            uses = _tok(before, "uVar1", "variable")  # one variable, written twice: the decompiler merged two live ranges
+            assert len(uses) >= 4 and "second" not in before["text"], before["text"]
+            at = uses[-1]["address"]
+            assert all(t.get("split") for t in uses) and not any(t.get("split") for t in _tok(before, "callee", "function"))
+            for bad in (dict(newName="bad name"), dict(address="0x1"), dict(name="nope")):
+                with pytest.raises(RpcError) as e:
+                    await call("split_variable", **{"entry": fns["g3"], "name": "uVar1", "address": at, "newName": "second", **bad})
+                assert e.value.code in (INVALID, NOT_FOUND)
+            await call("split_variable", entry=fns["g3"], name="uVar1", address=at, newName="second")
+            after = (await call("decompile", entry=fns["g3"]))["text"]
+            assert "second" in after and "uVar1" in after, after  # the first use keeps its name, the second is its own variable
+            assert (await call("undo_state"))["undoName"] == "Split out variable in g3"
+            with pytest.raises(RpcError) as e:  # a second split of the (now isolated) variable has nothing to split
+                await call("split_variable", entry=fns["g3"], name="second", address=at, newName="third")
+            assert e.value.code == INVALID
+            await call("undo")
+            assert (await call("decompile", entry=fns["g3"]))["text"] == before["text"]
+            await call("redo")
+            assert "second" in (await call("decompile", entry=fns["g3"]))["text"]
+    run(go())
+
+
+def test_force_union_field(sc, tmp_path, monkeypatch):
+    from test_edits import open_edit_blob
+
+    async def go():
+        async with inproc(tmp_path, monkeypatch) as (ctx, call):
+            fns = await open_edit_blob(call, tmp_path)
+            u = (await call("create_data_type", kind="union", name="U"))["path"]
+            await call("edit_struct", path=u, op={"op": "add", "type": "int", "name": "i"})
+            await call("edit_struct", path=u, op={"op": "add", "type": "float", "name": "f"})
+            await call("set_function_signature", entry=fns["u"], signature="int u(U *p)")
+            before = await call("decompile", entry=fns["u"])
+            field = _tok(before, "i", "field")[0]
+            assert field["union"] == u and "p->i" in before["text"]
+            assert all("union" not in t for t in before["tokens"] if t["kind"] == "keyword")
+            args = dict(entry=fns["u"], address=field["unionAt"], text="i")
+            for bad in (dict(field="nope"), dict(text="return"), dict(text="zzz")):
+                with pytest.raises(RpcError) as e:
+                    await call("force_union_field", **{**args, "field": "f", **bad})
+                assert e.value.code in (INVALID, NOT_FOUND)
+            await call("force_union_field", field="f", **args)
+            after = (await call("decompile", entry=fns["u"]))["text"]
+            assert "p->f" in after and "p->i" not in after, after
+            assert (await call("undo_state"))["undoName"] == "Force union field in u"
+            await call("undo")
+            assert (await call("decompile", entry=fns["u"]))["text"] == before["text"]
+            await call("force_union_field", field=None, **args)  # a pointer to the whole union may be shown without a field
     run(go())
