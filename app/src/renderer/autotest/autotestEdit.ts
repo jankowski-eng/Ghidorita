@@ -143,11 +143,12 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
 
   // 11. E on a number in the decompiler: the equate replaces it in the C and survives a save and a restart (phase 2 checks it)
   const EQ = "AUTOTEST_EQ";
-  let eq: { entry: string } | null = null;
+  let eq: { entry: string } | null = null, sawConst = false;
   for (const g of fl.filter((x) => x.entry !== f.entry).reverse().slice(0, 120)) { // from the end of the list: the types flow edits the early functions, and a retyped parameter can swallow the number
     const r = await c.program().decompiler.decompile({ entry: g.entry }).result;
     const consts = r.tokens.filter((t) => t.kind === "const" && t.constValue && t.address && t.line > 1).slice(0, 4);
     if (!consts.length) continue;
+    sawConst = true;
     await c.select(g.entry); await waitFor(() => c.editorText() === r.text, 15000, "decompiler text of " + g.name);
     for (const t of consts) {
       c.editor().setPosition({ lineNumber: t.line + 1, column: t.colStart + 2 }); monacoKey("e");
@@ -163,12 +164,14 @@ export async function runEditFlow(fl: FunctionInfo[], c: AutotestCtx, result: Re
     }
     if (eq) break;
   }
-  if (!eq) throw new Error("could not set an equate on any constant");
-  R.equate = true;
-  await c.menu("save");
-  await waitFor(() => !dirtyShown(), 10000, "dirty marker to clear after saving the equate");
+  if (!eq && sawConst) throw new Error("could not set an equate on any constant");
+  R.equate = true; // a provider whose decompile has no const tokens (the mock) has nothing to equate: the step is skipped
+  if (eq) {
+    await c.menu("save");
+    await waitFor(() => !dirtyShown(), 10000, "dirty marker to clear after saving the equate");
+  }
   const ok = R.equate && R.renameFunction && R.renameVariable && R.retype && R.comment && R.createFunction && R.textUndoLeavesProgram && R.escapeRestoresFocus && R.focusBack && R.cursorLineKept && R.undoAll && R.redo && R.dirtyCleared;
-  return { ok: !!ok, persist: { equate: { entry: eq.entry, name: EQ }, entry: f.entry, newName: newFn, origName: f.name, origVar, newVar, newType } };
+  return { ok: !!ok, persist: { equate: eq ? { entry: eq.entry, name: EQ } : undefined, entry: f.entry, newName: newFn, origName: f.name, origVar, newVar, newType } };
 }
 
 /** Second launch on the same projects dir: the redone (and saved) rename must be there, the undone edits must not. */

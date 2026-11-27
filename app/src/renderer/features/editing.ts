@@ -116,7 +116,7 @@ export function useEditing(tabs: TabsApi) {
       const t = equateTarget(tok);
       if (!t) return session.flash("Put the cursor on a number to set an equate on it.");
       const names = await enumMembers(ops, t.value, t.size);
-      if (session.program() !== current) return; // closed or replaced while the suggestions loaded: the dialog would be bound to the old program
+      if (session.program() !== current || dialogOpen()) return; // closed or replaced (or another dialog opened) while the suggestions loaded
       views.dispatch({ type: "set", patch: { formDlg: { title: "Set equate", submit: "Set", fields: [{ key: "name", label: "Equate name or enum member", initial: names[0]?.label ?? "", choices: names.map((n) => n.label) }],
         go: async (v) => { const typed = v.name.trim(), pick = names.find((n) => n.label === typed); await ops.edits.setEquate({ ...t, name: pick?.name ?? typed, enum: pick?.enum }); } } } });
     } else if (a === "noReturn") {
@@ -132,6 +132,7 @@ export function useEditing(tabs: TabsApi) {
       const t = fieldTarget(d.tokens, tok, (x) => (d.text.split("\n")[x.line] ?? "").slice(x.colStart, x.colEnd));
       if (!t) return session.flash("Force Field works on a union access.");
       const members = caps.has("dataTypes") ? (await ops.types.getDataType({ path: t.union })).components?.filter((c) => !c.undefined).map((c) => c.name ?? c.defaultName) ?? [] : []; // suggestions only: without type browsing the field is typed
+      if (session.program() !== current || dialogOpen()) return;
       views.dispatch({ type: "set", patch: { formDlg: { title: "Force field", submit: "Force", fields: [{ key: "field", label: "Field", initial: members.includes(t.text) ? t.text : "", choices: [...members, NO_FIELD] }],
         go: async (v) => { const f = v.field.trim(); await ops.edits.forceUnionField({ entry, address: t.address, text: t.text, occurrence: t.occurrence, field: f === NO_FIELD ? null : f }); } } } });
     } else if (a === "bookmark") {

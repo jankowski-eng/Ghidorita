@@ -203,7 +203,7 @@ def test_prepared_variable_edit_rejects_intervening_write(monkeypatch):
 
     @contextlib.contextmanager
     def decompile(*_args):
-        yield hf, None, None
+        yield hf, None, None, None
 
     def on_r(fn):
         with ses.lock:
