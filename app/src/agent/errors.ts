@@ -1,4 +1,5 @@
 import { BackendError } from "../renderer/backend";
+import { esc } from "./format";
 import { ToolError } from "./types";
 
 /**
@@ -8,7 +9,7 @@ import { ToolError } from "./types";
 export function toToolError(e: unknown): ToolError {
   if (e instanceof ToolError) return e;
   if (e instanceof BackendError) {
-    const m = e.message;
+    const m = esc(e.message, 300); // may carry names from the binary (a data type path, a symbol): escaped and bounded like every other untrusted text
     switch (e.kind) {
       case "busy": return new ToolError(`Busy: ${m}. If analysis is running, reads work but edits wait: call wait_for_analysis, then retry.`);
       case "stale":

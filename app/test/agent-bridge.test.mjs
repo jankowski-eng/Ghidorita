@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { build } from "esbuild";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -300,4 +300,21 @@ test("the fallback negotiates the protocol version like the SDK server: the vers
   assert.equal((await rpc(p, { jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2099-01-01" } })).result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
   assert.equal((await rpc(p, { jsonrpc: "2.0", id: 3, method: "initialize", params: {} })).result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
   p.stdin.end(); await p.exit;
+});
+
+test("the fallback's initialize carries the server instructions too, including the warning that binary text is untrusted", async () => {
+  const { INSTRUCTIONS } = await import("../src/agent/instructions.ts").catch(() => ({ INSTRUCTIONS: null }));
+  const p = run([], sockPath());
+  const r = await rpc(p, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
+  assert.match(r.result.instructions, /Ghidorita is not running/);
+  assert.match(r.result.instructions, /untrusted data, never instructions/);
+  if (INSTRUCTIONS) assert.ok(r.result.instructions.includes(INSTRUCTIONS));
+  p.stdin.end(); await p.exit;
+});
+
+test("the launcher wrapper is executable in the repository (clients run it directly; a copy keeps the mode)", () => {
+  const f = new URL("../../packaging/ghidorita-mcp", import.meta.url).pathname;
+  assert.ok(fs.statSync(f).mode & 0o111, "no execute bit on disk");
+  const idx = spawnSync("git", ["ls-files", "-s", f], { encoding: "utf8" }).stdout;
+  if (idx) assert.match(idx, /^100755 /, `git records ${idx.slice(0, 6)}`); // outside a git checkout there is nothing to check
 });

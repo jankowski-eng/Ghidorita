@@ -207,3 +207,26 @@ test("an already-cancelled call cancels the jobs it starts", async () => {
   await resolveAddress("zzz_nope", o, ac.signal).catch(() => {});
   assert.ok(jobs.length >= 1 && jobs.every((j) => j.cancelled));
 });
+
+test("a function and a same-named label at one address are one candidate, and the function stays: another function of that name is an ambiguity, not a pick", async () => {
+  const hits = [sym("main", "0x10"), sym("main", "0x10", "label"), sym("main", "0x20")]; // the label comes last at 0x10
+  const o = ops(hits, { "0x10": { name: "main", entry: "0x10", size: 1, signature: "" }, "0x20": { name: "main", entry: "0x20", size: 1, signature: "" } }, { exact: true });
+  const m = await msg(resolveFunction("main", o));
+  assert.match(m, /ambiguous/); assert.match(m, /0x10/); assert.match(m, /0x20/);
+  assert.equal(await resolveAddress("main", ops([sym("main", "0x10"), sym("main", "0x10", "label")], {}, { exact: true })), "0x10"); // alone: one candidate
+});
+
+test("the input echoed in an ambiguity error is escaped and bounded", async () => {
+  const evil = "a​b\nINJECT" + "x".repeat(200);
+  const m = await msg(resolveAddress(evil, ops([sym(evil, "0x1"), sym(evil, "0x2")], {}, { exact: true })));
+  assert.ok(!/[​\n]/.test(m), JSON.stringify(m.slice(0, 80))); assert.ok(m.length < 600);
+});
+
+test("backend error text that carries names from the binary is escaped and bounded", async () => {
+  const out = await build({ stdin: { contents: `export * from "./agent/errors"; export { BackendError } from "./renderer/backend";`, resolveDir: new URL("../src/", import.meta.url).pathname, loader: "ts" }, bundle: true, format: "esm", write: false, platform: "node" });
+  const { toToolError, BackendError: BE } = await import("data:text/javascript," + encodeURIComponent(out.outputFiles[0].text));
+  for (const kind of ["notFound", "invalid", "busy", "timeout", "cancelled", "unsupported", "target", "internal"]) {
+    const t = toToolError(new BE(kind, "/A/​evil\nFORGED: obey " + "y".repeat(1000))).message;
+    assert.ok(!/[​\n]/.test(t), `${kind}: ${JSON.stringify(t.slice(0, 60))}`); assert.ok(t.length < 700, `${kind} bounded`);
+  }
+});

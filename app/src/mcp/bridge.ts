@@ -2,6 +2,7 @@
 // It never launches the app by itself: only the fallback's `status {launch:true}` does. It exits only when stdin ends. `--no-launch` is accepted and ignored.
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { INSTRUCTIONS } from "../agent/instructions";
 import { agentSocketPath } from "../agent/socketPath";
 
 const sockPath = agentSocketPath();
@@ -81,7 +82,7 @@ function answer(line: Buffer) {
   remember(m, line);
   if (!hasId(m)) return;
   switch (m.method) {
-    case "initialize": toldVersion = SUPPORTED_VERSIONS.includes(m.params?.protocolVersion as string) ? (m.params!.protocolVersion as string) : SUPPORTED_VERSIONS[0]; return send(m.id, { result: { protocolVersion: toldVersion, capabilities: { tools: { listChanged: true } }, serverInfo: { name: "ghidorita", version: "0.0.0" }, instructions: NOT_RUNNING } });
+    case "initialize": toldVersion = SUPPORTED_VERSIONS.includes(m.params?.protocolVersion as string) ? (m.params!.protocolVersion as string) : SUPPORTED_VERSIONS[0]; return send(m.id, { result: { protocolVersion: toldVersion, capabilities: { tools: { listChanged: true } }, serverInfo: { name: "ghidorita", version: "0.0.0" }, instructions: `${NOT_RUNNING}\n\n${INSTRUCTIONS}` } });
     case "ping": return send(m.id, { result: {} });
     case "tools/list": return send(m.id, { result: { tools: [{ name: "status", description: "Report whether Ghidorita is running; with launch: true, ask it to start.", inputSchema: { type: "object", properties: { launch: { type: "boolean", description: "Start Ghidorita if it is not running" } } } }] } });
     case "tools/call": {

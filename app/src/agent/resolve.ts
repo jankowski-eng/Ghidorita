@@ -10,9 +10,10 @@ export interface ResolvedFunction { name: string; entry: Address; size: number; 
 const BARE_HEX = /^[0-9a-f]{1,16}$/i;
 const MAX_LISTED = 8;
 const show = (h: SymbolHit) => `${esc(h.name, 80)} @${h.address} (${h.kind})`;
-const distinct = (hits: SymbolHit[]) => [...new Map(hits.map((h) => [h.address, h])).values()];
+// one candidate per address; a function wins over a same-named label there (resolveFunction must still see the function)
+const distinct = (hits: SymbolHit[]) => [...hits.reduce((m, h) => (m.get(h.address)?.kind === "function" ? m : m.set(h.address, h)), new Map<string, SymbolHit>()).values()];
 const ambiguous = (input: string, hits: SymbolHit[]) =>
-  new ToolError(`"${input}" is ambiguous: ${hits.slice(0, MAX_LISTED).map(show).join("; ")}${hits.length > MAX_LISTED ? `; … ${hits.length - MAX_LISTED} more` : ""}. Pass one of the addresses.`);
+  new ToolError(`"${esc(input, 80)}" is ambiguous: ${hits.slice(0, MAX_LISTED).map(show).join("; ")}${hits.length > MAX_LISTED ? `; … ${hits.length - MAX_LISTED} more` : ""}. Pass one of the addresses.`);
 
 const SEARCH_LIMIT = 500;
 /** Runs a scan job, cancelling it when the call is cancelled. */
