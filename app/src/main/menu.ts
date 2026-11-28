@@ -1,12 +1,15 @@
-import { Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import { Menu, clipboard, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
+import type { AccessMode } from "../agent/types";
 import type { MenuCommand, MenuState } from "../preload/index";
 import { allowsCommand, allowsEdit, dockCapability } from "../capabilities";
 import { KEYS, isHint, showKey } from "../keys";
 import { addRecent, clearRecent, getRecent } from "./recent";
 
-type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null> };
+/** What the Agent menu needs of the agent server (main/agent.ts). Full is accepted by the server but not offered here: phase 2 has no Full tools. */
+export interface AgentMenu { mode(): AccessMode; setMode(m: AccessMode): void; clients(): string[]; setupText(): string }
+type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null>; agent?: AgentMenu };
 
-export function createMenu({ getWin, pick }: Deps) {
+export function createMenu({ getWin, pick, agent }: Deps) {
   let state: MenuState = { capabilities: [], hasProgram: false, canBack: false, canForward: false, canOpen: false, canEdit: false, undoLabel: null, redoLabel: null, dirty: false, canClose: false };
 
   let caps = new Set(state.capabilities);
@@ -22,6 +25,17 @@ export function createMenu({ getWin, pick }: Deps) {
   const shown = { functions: true, listing: true, decompiler: true }; // survives menu rebuilds
   const pane = (label: string, p: keyof typeof shown): MenuItemConstructorOptions =>
     ({ id: p, label, enabled: allowsCommand(caps, { type: "toggle-pane", pane: p, visible: true }), type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p, visible: mi.checked }); } });
+
+  const agentItems = (): MenuItemConstructorOptions[] => {
+    if (!agent) return [];
+    const names = agent.clients();
+    return [
+      { label: "Access", submenu: (["off", "read", "edit"] as const).map((m): MenuItemConstructorOptions =>
+        ({ id: "agent-" + m, label: { off: "Off", read: "Read", edit: "Edit" }[m], type: "radio", checked: agent.mode() === m, click: () => agent.setMode(m) })) },
+      { type: "separator" },
+      { id: "agent-clients", label: names.length ? "Connected: " + names.join(", ") : "No agent connected", enabled: false },
+    ];
+  };
 
   function build() {
     if (state.panes) Object.assign(shown, state.panes);
@@ -114,7 +128,9 @@ export function createMenu({ getWin, pick }: Deps) {
         ["Back in History", "back"], ["Forward in History", "forward"], ["Toggle Breakpoint", "breakpoint"],
       ] as const).map(([label, action]): MenuItemConstructorOptions => label === null ? { type: "separator" }
         : { id: "debug-" + action, label, accelerator: acc("debug:" + action), enabled: state.hasProgram && allowsCommand(caps, { type: "debug", action }), click: () => send({ type: "debug", action }) }) },
+      ...(agent ? [{ id: "agent", label: "Agent", submenu: agentItems() } as MenuItemConstructorOptions] : []),
       { role: "windowMenu" },
+      ...(agent ? [{ role: "help", submenu: [{ id: "agent-setup", label: "Copy Agent Setup", click: () => clipboard.writeText(agent.setupText()) }] } as MenuItemConstructorOptions] : []),
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
@@ -123,5 +139,9 @@ export function createMenu({ getWin, pick }: Deps) {
   return {
     setState(s: MenuState) { state = s; caps = new Set(s.capabilities); build(); },
     addRecent(p: string) { addRecent(p); build(); },
+    /** the agent's mode or clients changed */
+    refresh: build,
+    /** the status bar's kill switch: the Agent submenu at the cursor */
+    popupAgent() { const w = getWin(); Menu.buildFromTemplate(agentItems()).popup(w && !w.isDestroyed() ? { window: w } : undefined); },
   };
 }
