@@ -29,7 +29,7 @@ const call = async (name, args = {}) => { const r = await client.callTool({ name
 check(/Access: edit \(client agent-autotest\)/.test(status), "status: " + status);
 check(/server|Strings, comments/.test(client.getInstructions() ?? ""), "instructions");
 const names = (await client.listTools()).tools.map((t) => t.name);
-for (const n of ["status", "decompile", "rename_variable", "undo_agent_edit"]) check(names.includes(n), `tools/list lacks ${n}: ${names}`);
+for (const n of ["status", "decompile", "rename_variable", "undo_agent_edit", "get_view", "goto"]) check(names.includes(n), `tools/list lacks ${n}: ${names}`);
 R.tools = names.length;
 
 const list = await call("list_functions", { limit: 40 });
@@ -44,6 +44,11 @@ for (const row of list.text.split("\n").filter((l) => /^0x[0-9a-f]+\s/i.test(l))
 }
 check(old, "no function with a local variable among the first 40: " + list.text.slice(0, 400));
 R.entry = entry; R.variable = old;
+
+// the UI tools: goto moves the user's view (through the app's own navigation), get_view reports it back
+const shown = await call("goto", { address: entry });
+check(!shown.error && shown.text.includes(entry), "goto: " + shown.text);
+for (let v; ; ) { v = await call("get_view"); if (!v.error && v.text.includes(`Cursor: ${entry}`) && v.text.includes(`@${entry}`)) break; if (Date.now() > deadline) fail("get_view never showed the goto target: " + v.text); await new Promise((r) => setTimeout(r, 300)); }
 
 const ren = await call("rename_variable", { function: entry, variable: old, newName: NEWNAME });
 check(!ren.error, ren.text);

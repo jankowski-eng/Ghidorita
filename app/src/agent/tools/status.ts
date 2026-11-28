@@ -16,7 +16,7 @@ export const status: ToolDef<Record<string, never>> = {
     if (!ctx.ops || !ctx.session) lines.push("Program: none open. Ask the user to open one.");
     else {
       const [undo, analysis] = await Promise.all([ctx.ops.history.state(), ctx.backend.capabilities.has("analysis") ? ctx.ops.analysis.status() : null]);
-      lines.push(`Program: ${esc(ctx.session.name, 120)} (id ${esc(ctx.session.programId, 60)})`);
+      lines.push(`Program: ${esc(ctx.session.name, 120)} (id ${esc(ctx.session.programId, 100)})`);
       if (analysis) lines.push(`Analysis: ${analysis.state}${analysis.state === "running" ? ` ${analysis.pct}% (${analysis.analyzer})` : ""}, recorded ${analysis.analysis}, profile ${analysis.profile}`);
       lines.push(`Edits: ${undo.dirty ? "unsaved" : "saved"}${undo.canUndo ? `, last: ${esc(undo.undoName ?? "yes", 120)}` : ""}`);
     }

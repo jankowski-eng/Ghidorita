@@ -100,7 +100,7 @@ test("agent tools: modes nest, status is always there, no gating until the capab
   const all = new Set(TOOLS.flatMap((t) => [t.capability ?? []].flat()));
   const read = toolNames("read", all), edit = toolNames("edit", all);
   assert.ok(read.length > 5 && edit.length > read.length && read.every((n) => edit.includes(n)));
-  assert.ok(TOOLS.filter((t) => t.access === "read").every((t) => t.annotations.readOnlyHint), "read tools are read-only");
+  assert.ok(TOOLS.filter((t) => t.access === "read" && !t.appOnly).every((t) => t.annotations.readOnlyHint), "read tools are read-only");
   assert.ok(TOOLS.filter((t) => t.access !== "read" && t.access !== "off").every((t) => !t.annotations.readOnlyHint), "edit tools are not");
   assert.equal(toolNames("edit", undefined).length, TOOLS.filter((t) => t.access !== "full").length);
 });
