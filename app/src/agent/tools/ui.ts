@@ -1,3 +1,4 @@
+import type { Address } from "../../../../protocol";
 import { esc } from "../format";
 import { resolveAddress, resolveFunction } from "../resolve";
 import { ToolError, needProgram, type ToolCtx, type ToolDef } from "../types";
@@ -55,7 +56,8 @@ const highlight: ToolDef<HlArgs> = {
     if (a.clear) { await u.clearHighlight(); return "The highlight is cleared."; }
     if (!a.addresses?.length && !a.lines?.length) throw new ToolError("Give addresses or lines to highlight, or clear: true.");
     if ((a.addresses?.length ?? 0) > MAX_HL_ADDRESSES || (a.lines?.length ?? 0) > MAX_HL_RANGES) throw new ToolError(`At most ${MAX_HL_ADDRESSES} addresses and ${MAX_HL_RANGES} line ranges.`);
-    const addresses = await Promise.all((a.addresses ?? []).map((x) => resolveAddress(x, ops, ctx.signal)));
+    const addresses: Address[] = []; // one at a time: a name is a search, and 200 at once would queue behind the sidecar's request limit in front of the user's own
+    for (const x of a.addresses ?? []) addresses.push(await resolveAddress(x, ops, ctx.signal));
     const lines = [];
     for (const r of a.lines ?? []) {
       const from = Math.trunc(r.from), to = Math.trunc(r.to);

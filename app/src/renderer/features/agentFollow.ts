@@ -23,7 +23,11 @@ export function followAgent(s: { program(): { api: ProgramOperations } | null; b
   const move = debounced((target: string) => {
     const p = s.program(), v = s.views.getState();
     if (!p || s.blocked() || v.dlg || v.formDlg || v.gotoOpen || v.searchOpen || v.agentAsk) return;
-    void resolveAddress(target, p.api, undefined, true).then(go).catch(() => {});
+    // the lookup is asynchronous: the program and the user's state are checked again before the view moves
+    void resolveAddress(target, p.api, undefined, true).then((a) => {
+      const q = s.program(), w = s.views.getState();
+      if (q === p && !s.blocked() && !(w.dlg || w.formDlg || w.gotoOpen || w.searchOpen || w.agentAsk)) return go(a);
+    }).catch(() => {});
   }, ms);
   // only calls that name a place count: a get_view or status in between must not cancel the pending move
   return Object.assign((tool: string, args: Record<string, unknown>) => { const t = followTarget(tool, args); if (t) move(t); }, { cancel: move.cancel });

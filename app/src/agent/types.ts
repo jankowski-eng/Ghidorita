@@ -40,7 +40,7 @@ export interface AgentUi {
   highlight(h: AgentHighlight): Promise<void>;
   clearHighlight(): Promise<void>;
   /** open a stored program (by id) or import a binary (absolute path), replacing the open one, through the session store so the window follows; analysis runs in the background */
-  openProgram(target: { programId: string } | { path: string }): Promise<void>;
+  openProgram(target: { programId: string } | { path: string }, signal?: AbortSignal): Promise<void>;
   /** save and close the open program through the session store */
   closeProgram(): Promise<void>;
   /** ask the user in the app and resolve with the answer; false when declined or the window is closed */

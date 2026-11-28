@@ -40,7 +40,7 @@ export function checkPath(p: unknown, what = "path"): string {
 
 // ---- patching ----
 const HEX = /^[0-9a-f]{2}(?:\s*[0-9a-f]{2})*$/i;
-const MAX_PATCH = 256;
+const MAX_PATCH = 16; // the provider's patch_instruction limit (protocol.md)
 
 const patch: ToolDef<{ address: string; asm?: string; bytes?: string; overwriteFollowing?: boolean }> = {
   name: "patch",
@@ -63,13 +63,14 @@ const patch: ToolDef<{ address: string; asm?: string; bytes?: string; overwriteF
       if (!HEX.test(a.bytes!)) throw new ToolError(`bytes must be hex pairs like "90 90", got ${esc(a.bytes, 80, true)}.`);
       bytes = a.bytes!.trim().replace(/\s+/g, "").match(/../g)!.join(" ").toLowerCase();
       length = (bytes.length + 1) / 3;
-      if (length > MAX_PATCH) throw new ToolError(`At most ${MAX_PATCH} bytes per patch; patch in several calls.`);
+      if (length > MAX_PATCH) throw new ToolError(`At most ${MAX_PATCH} bytes per patch; a longer change is a different tool's job (define data, or several patches at consecutive instructions).`);
       const row = (await ops.listing.rows({ address, count: 1 }))[0];
       if (!row) throw new ToolError(`There is nothing to patch at ${address}: it is not initialized memory.`);
       oldLength = row.length;
       if (length > oldLength && !a.overwriteFollowing)
         throw new ToolError(`Not applied, nothing was written. ${length} bytes would spill over the ${oldLength}-byte unit at ${address} onto what follows it. Call again with overwriteFollowing=true if that is intended, or give at most ${oldLength} bytes.`);
     }
+    if (ctx.signal.aborted) throw new ToolError("cancelled: nothing was written.");
     const r = await ops.patch.apply(ctx.tag({ address, bytes, ...(a.overwriteFollowing ? { overwriteFollowing: true } : {}) }));
     return `Patched ${r.address}: ${bytes} (${r.length} bytes${a.asm !== undefined ? `, \`${esc(a.asm.trim(), 120)}\`` : ""}) over a ${oldLength}-byte unit.${r.overwritten ? ` Overwrote ${r.overwritten} following unit(s).` : ""} The user can undo it. Disassemble to check the result.`;
   }),
@@ -148,7 +149,7 @@ const open_program: ToolDef<{ program?: string; path?: string }> = {
     await confirmReplace(ctx, `The agent wants to open ${esc(name, 200, true)}${ctx.session ? `, which saves and closes ${label(ctx.session)}` : ""}. Allow?`);
     let opened: ActiveSession | null;
     if (ctx.ui) {
-      await ctx.ui.openProgram(target);
+      await ctx.ui.openProgram(target, ctx.signal);
       opened = await ctx.backend.lifecycle.active();
     } else opened = await run(ctx, entry ? ctx.backend.projects.reopen(entry, () => {}, "background") : ctx.backend.lifecycle.open((target as { path: string }).path, {}, () => {}, "background"));
     if (!opened) throw new ToolError("The program did not open. Call status to see what is open; the user may need to look at the window.");
@@ -173,7 +174,7 @@ const close_program: ToolDef<Record<string, never>> = {
 // ---- coverage ----
 const load_coverage: ToolDef<{ path: string; offset?: number; limit?: number }> = {
   name: "load_coverage",
-  description: "Read a coverage file (text: `0xSTART-0xEND` inclusive or `0xADDR` per line, `#` comments; default address space only) and summarise it per function: bytes covered of the function's size, for every function it touches. Does not tint the app's views. `path` must be absolute.",
+  description: "Read a coverage file (text: `0xSTART-0xEND` inclusive or `0xADDR` per line, `#` comments; default address space only) and summarise it per function: bytes covered of the function's size, for every function it touches (a function is taken as the `size` bytes from its entry, so a function with scattered blocks is approximated). Does not tint the app's views. `path` must be absolute.",
   inputSchema: obj({ path: str("Absolute path of the coverage file."), ...PAGE }, ["path"]),
   annotations: ann("Load coverage", true, false, true), access: "full", capability: "coverage", timeoutSecs: 60,
   handler: guard(async (ctx, a) => {
@@ -188,7 +189,9 @@ const load_coverage: ToolDef<{ path: string; offset?: number; limit?: number }> 
       const s = offIn(f.entry, ""); if (s === null) continue;
       const e = s + BigInt(Math.max(f.size, 1));
       let hit = 0n;
-      for (const m of merged) { if (m[0] >= e) break; if (m[1] > s) hit += (m[1] < e ? m[1] : e) - (m[0] > s ? m[0] : s); }
+      let lo = 0, hi = merged.length; // first range ending after s
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (merged[mid][1] > s) hi = mid; else lo = mid + 1; }
+      for (let i = lo; i < merged.length && merged[i][0] < e; i++) { const m = merged[i]; hit += (m[1] < e ? m[1] : e) - (m[0] > s ? m[0] : s); }
       if (hit > 0n) rows.push([esc(f.name, 80), f.entry, `${hit}/${f.size}`, `${Math.round(Number(hit) * 100 / Math.max(f.size, 1))}%`]);
     }
     const bytes = merged.reduce((n, m) => n + (m[1] - m[0]), 0n);

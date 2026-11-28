@@ -147,6 +147,22 @@ test("handover: the host answers right away, then done; the app waits for done; 
   fs.rmSync(dir, { recursive: true });
 });
 
+test("control socket: an oversized line is refused even when it ends in a newline; close is idempotent and never unlinks a successor's socket", async () => {
+  const dir = tmp(), sock = path.join(dir, "s");
+  let runs = 0;
+  const srv = await serveControl(sock, async () => (runs++, { saved: true }), () => {});
+  const c = net.connect(ctlPath(sock));
+  await new Promise((r) => c.on("connect", r));
+  c.write(JSON.stringify({ op: "handover", pad: "x".repeat(4000) }) + "\n");
+  await new Promise((r) => c.on("close", r));
+  assert.equal(runs, 0, "a line over the limit is not parsed");
+  await srv.close();
+  const next = await serveControl(sock, async () => ({ saved: true }), () => {}); // the successor binds the same path
+  await srv.close(); // a second close of the first must leave it alone
+  assert.ok(fs.existsSync(ctlPath(sock)));
+  await next.close(); fs.rmSync(dir, { recursive: true });
+});
+
 test("handover: a failed save is reported; a hung host times out; garbage is refused", async () => {
   const dir = tmp(), sock = path.join(dir, "s");
   const srv = await serveControl(sock, async () => ({ saved: false, saveError: "disk full" }), () => {});

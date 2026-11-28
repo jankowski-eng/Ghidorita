@@ -390,9 +390,10 @@ class DataTypes:
             declared, uses = {}, []
             for m in (parser.getComposites(), parser.getEnums(), parser.getTypes(), parser.getFunctions()):
                 for dt in m.values():
-                    old = dtm.getDataType(dt.getDataTypePath())
-                    if old is None and not cp.isRoot():
-                        old = dtm.getDataType(cp, dt.getName())  # the program's type of that name in the target category
+                    # a type is classified against where it will live (the target category); the lookup at its parsed (root) path is only for what the C merely refers to
+                    old = dtm.getDataType(cp, dt.getName()) if not cp.isRoot() else dtm.getDataType(dt.getDataTypePath())
+                    if old is None and not cp.isRoot() and isinstance(dt, Composite) and dt.getNumComponents() == 0:
+                        old = dtm.getDataType(dt.getDataTypePath())  # an empty composite is `struct Base b;`: the program's `Base`, wherever it is
                     if old is None:
                         declared[str(dt.getPathName())] = dt
                     elif isinstance(dt, Composite) and dt.getNumComponents() == 0 and not old.isEquivalent(dt):

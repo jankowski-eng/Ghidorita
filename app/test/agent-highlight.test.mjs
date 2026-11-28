@@ -65,7 +65,7 @@ test("follow table: read tools by their argument, edits and unknown tools never"
 });
 test("followAgent debounces a burst to the last target and stays out of the user's way", async () => {
   const gone = []; const views = { v: {} };
-  const s = { program: () => ({ api: ops }), blocked: () => false, views: { getState: () => views.v } };
+  const prog = { api: ops }, s = { program: () => prog, blocked: () => false, views: { getState: () => views.v } };
   const f = followAgent(s, async (a) => { gone.push(a); }, 10);
   f("decompile", { function: "0x20" }); f("decompile", { function: "main" });
   await new Promise((r) => setTimeout(r, 60)); assert.deepEqual(gone, ["0x401000"]);

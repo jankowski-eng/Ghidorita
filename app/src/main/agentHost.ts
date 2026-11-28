@@ -87,7 +87,7 @@ export async function startHost(o: HostOpts): Promise<Host | null> {
   async function quit(code?: number) {
     if (finished) return;
     const r = await stop();
-    finished = true; lock.release(); await Promise.race([ctl?.close().catch(() => {}), new Promise((r) => setTimeout(r, 1000))]);
+    finished = true; const closing = ctl?.close().catch(() => {}); lock.release(); await Promise.race([closing, new Promise((r) => setTimeout(r, 1000))]); // the control socket is unlinked before the lock goes
     o.exit(code ?? (r.code === 0 ? 0 : 1));
   }
   const rearm = () => {
@@ -98,12 +98,15 @@ export async function startHost(o: HostOpts): Promise<Host | null> {
 
   const started = (async () => {
     await agent.start(); // listening early: a client that connects while the sidecar boots is told to wait, and a second host sees the lock and the socket
+    if (stopping) { await agent.stop(); return; } // shut down while the listener was starting: it must not outlive the lock
     if (!agent.listening()) { log("could not listen on the agent socket (see above)"); return void quit(1); }
     // close() unlinks the control socket at once (before the lock goes, so a successor's is never unlinked) and keeps the app's connection open for the reply
     ctl = await serveControl(o.place.path, async () => { const r = await stop(); void ctl?.close().catch(() => {}); lock.release(); log(`handover: saved=${r.saved}${r.saveError ? ` (${r.saveError})` : ""}, backend exit ${r.code}; quitting`); return { saved: r.saved, saveError: r.saveError }; }, log, () => void quit());
+    if (stopping) { await ctl.close().catch(() => {}); return; }
     let port: number;
     try { port = await o.provider.start(o.launch, (why) => { if (stopping) return; dead = true; log(`the analysis backend exited unexpectedly (${why})`); void quit(1); }); }
     catch (e) { log(`backend startup failed: ${e}`); o.provider.kill(); return void quit(1); }
+    if (stopping) { o.provider.kill(); return; } // stop() began while the backend was starting
     backend = o.makeBackend ? o.makeBackend(headless.hooks) : new WebSocketBackend(headless.hooks);
     try { await backend.connect(port, o.token); await headless.bind(backend); } catch (e) { log(`could not connect to the backend: ${e}`); return void quit(1); }
     backend.events.onError((m) => log(`backend: ${m}`));

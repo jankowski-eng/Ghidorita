@@ -141,7 +141,11 @@ export function createAgent(o: AgentOpts) {
     };
     sock.on("error", () => {});
     let run = 0; // bytes since the last newline
-    sock.on("data", (d: Buffer) => { const i = d.lastIndexOf(10); run = i < 0 ? run + d.length : d.length - i - 1; if (run > MAX_REQUEST_LINE) { log("closing a connection: request line too long"); sock.destroy(); } });
+    sock.on("data", (d: Buffer) => {
+      let from = 0, over = false;
+      for (let i; (i = d.indexOf(10, from)) >= 0; from = i + 1) { if (run + i - from > MAX_REQUEST_LINE) over = true; run = 0; } // each completed line counts, not only the tail
+      run += d.length - from;
+      if (over || run > MAX_REQUEST_LINE) { log("closing a connection: request line too long"); sock.destroy(); } });
     sock.on("close", () => { server.close().catch(() => {}); });
     server.connect(new StdioServerTransport(sock, sock)).catch((e) => { log(`connection failed: ${e}`); sock.destroy(); });
   }

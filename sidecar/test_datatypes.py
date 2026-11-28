@@ -404,6 +404,13 @@ def test_parse_c_types_use_of_a_type_in_the_target_category_leaves_it_alone(sc):
     assert len(sc.get_data_type("/net/InNet")["components"]) == 2  # never replaced by the parser's empty placeholder
 
 
+def test_parse_c_types_a_root_type_does_not_hide_a_declaration_for_another_category(sc):
+    sc.parse_c_types("struct Pt { int x; };")
+    assert sc.parse_c_types("struct Pt { int x; };", category="/net") == {"created": ["/net/Pt"], "replaced": []}
+    assert sc.parse_c_types("struct Pt { int x; int y; };", category="/net") == {"created": [], "replaced": ["/net/Pt"]}
+    assert len(sc.get_data_type("/Pt")["components"]) == 1  # the root one is untouched
+
+
 def test_parse_c_types_errors_roll_back_whole(sc):
     cprog(sc, "t_cparse_err")
     before = top(sc)

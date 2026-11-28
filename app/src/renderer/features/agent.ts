@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Address, FunctionInfo, Token } from "../../../../protocol";
 import { agentName } from "../../agent/attribution";
 import { changeView, createAgentExecutor, type AgentHost, type ConfirmFn } from "../../agent/host";
-import type { AccessMode, AgentState, AgentView } from "../../agent/types";
+import { ToolError, type AccessMode, type AgentState, type AgentView } from "../../agent/types";
 import { followAgent, followingAgent } from "./agentFollow";
 import { changeLog } from "../changeLog";
 import { tokenAt } from "../editActions";
@@ -91,12 +91,26 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
           return tab && d ? { entry: tab.entry, text: d.text, tokens: d.tokens } : null;
         } }),
         goto: (a) => latest.current.go(a, "agent"),
-        openProgram: async (t) => {
-          if ("path" in t) { await s.open(t.path, {}, undefined, "background"); return; }
-          const entry = (await s.backend.projects.list()).find((e) => e.programId === t.programId);
-          if (entry) await s.open(entry.name, {}, entry, "background");
+        // s.open and s.closeProgram swallow their failures (the window shows them), so the outcome is read back from the store
+        openProgram: async (t, signal) => {
+          const before = s.program()?.session.sessionId, onAbort = () => s.cancelOpen();
+          signal?.addEventListener("abort", onAbort, { once: true });
+          try {
+            if (signal?.aborted) throw new ToolError("cancelled before it started");
+            if ("path" in t) await s.open(t.path, {}, undefined, "background");
+            else {
+              const entry = (await s.backend.projects.list()).find((e) => e.programId === t.programId);
+              if (!entry) throw new ToolError("That stored program no longer exists.");
+              await s.open(entry.name, {}, entry, "background");
+            }
+          } finally { signal?.removeEventListener("abort", onAbort); }
+          const now = s.program()?.session;
+          if (!now || now.sessionId === before || ("programId" in t && now.programId !== t.programId)) throw new ToolError("The program did not open (the old one is still open, or none). The user can see why in the window; call status.");
         },
-        closeProgram: () => s.closeProgram(),
+        closeProgram: async () => {
+          await s.closeProgram();
+          if (s.program()) throw new ToolError("The program is still open: it could not be saved and closed, or the window is busy. The user can see why in the window.");
+        },
         highlight: async (h) => s.views.dispatch({ type: "set", patch: { agentHl: h } }),
         clearHighlight: async () => s.views.dispatch({ type: "set", patch: { agentHl: null } }),
       },

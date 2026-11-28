@@ -33,9 +33,20 @@ export async function acquireLock(sock: string, o: { answers?(sock: string): Pro
         const live = h.pid === null ? h.ageMs < 5000 : isAlive(h.pid); // no pid yet: its creator is between mkdir and write
         if (live && !(h.ageMs > REUSED_PID_MS && o.answers && !(await o.answers(sock)))) return null;
       }
-      const old = `${dir}.old.${pid}`;
-      try { renameSync(dir, old); } catch { continue; } // someone else replaced it first: look again
-      rmSync(old, { recursive: true, force: true });
+      // reclaiming is serialised by a guard directory, and the holder is looked at again under it: a starter that looked before another one took the lock must not delete the new lock
+      const guard = `${dir}.reclaim`;
+      try { mkdirSync(guard, { mode: 0o700 }); } catch (e2) {
+        if ((e2 as NodeJS.ErrnoException).code !== "EEXIST") throw e2;
+        try { if (Date.now() - statSync(guard).mtimeMs > 10_000) rmSync(guard, { recursive: true, force: true }); } catch { /* gone */ }
+        await new Promise((r) => setTimeout(r, 25)); continue;
+      }
+      try {
+        const again = holderOf(dir);
+        if (again && (again.pid !== h?.pid || again.ageMs < (h?.ageMs ?? 0))) continue; // replaced or refreshed since: look again
+        const old = `${dir}.old.${pid}`;
+        try { renameSync(dir, old); } catch { continue; }
+        rmSync(old, { recursive: true, force: true });
+      } finally { rmSync(guard, { recursive: true, force: true }); }
       continue;
     }
     writeFileSync(path.join(dir, "pid"), String(pid));

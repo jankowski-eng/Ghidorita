@@ -35,7 +35,7 @@ export async function serveControl(sock: string, onHandover: () => Promise<Hando
     c.on("data", (d) => {
       buf += d.toString();
       const nl = buf.indexOf("\n");
-      if (nl < 0) { if (buf.length > MAX_LINE) c.destroy(); return; }
+      if ((nl < 0 ? buf.length : nl) > MAX_LINE) return void c.destroy(); // a complete line counts too
       let req: { op?: unknown } | null = null;
       try { req = JSON.parse(buf.slice(0, nl)); } catch { /* answered below */ }
       buf = "";
@@ -50,7 +50,8 @@ export async function serveControl(sock: string, onHandover: () => Promise<Hando
   finally { if (!win32) process.umask(oldMask); }
   srv.on("error", (e) => log(`control socket error: ${e}`));
   if (!win32) try { chmodSync(p, 0o600); } catch { /* the umask already made it 0600 */ }
-  return { close: () => new Promise<void>((r) => { srv.close(() => r()); if (!win32) try { unlinkSync(p); } catch { /* gone */ } }) };
+  let closing: Promise<void> | null = null; // once: a second call must not unlink a successor's socket at the same path
+  return { close: () => closing ??= new Promise<void>((r) => { srv.close(() => r()); if (!win32) try { unlinkSync(p); } catch { /* gone */ } }) };
 }
 
 export type HandoverReply = { kind: "none" } | { kind: "done"; saved: boolean; saveError?: string; pid?: number } | { kind: "failed"; error: string };

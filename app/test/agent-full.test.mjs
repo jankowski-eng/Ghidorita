@@ -65,6 +65,16 @@ test("patch that fits is applied without the flag; bytes mode checks the unit le
   assert.match(await msg(tool("patch").handler(w.ctx, { address: "0x401000" })), /exactly one/);
 });
 
+test("patch: at most 16 bytes (the provider's limit); a call cancelled during preparation writes nothing", async () => {
+  const w = world({ rowLength: 32 });
+  assert.match(await msg(tool("patch").handler(w.ctx, { address: "0x401000", bytes: Array(17).fill("90").join(" ") })), /At most 16 bytes/);
+  const ac = new AbortController(), slow = world({ rowLength: 8 });
+  slow.ctx.signal = ac.signal;
+  const rows = slow.ctx.ops.listing.rows; slow.ctx.ops.listing.rows = async (p) => { const r = await rows(p); ac.abort(); return r; };
+  assert.match(await msg(tool("patch").handler(slow.ctx, { address: "0x401000", bytes: "90" })), /cancelled/);
+  assert.ok(!slow.calls.some((c) => c[0] === "apply"));
+});
+
 test("save and list_patches", async () => {
   const w = world();
   assert.match(await tool("save").handler(w.ctx, {}), /undo history is gone/);
