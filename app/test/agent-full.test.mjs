@@ -137,6 +137,19 @@ test("load_coverage summarises per function; relative path refused", async () =>
   assert.match(await msg(tool("load_coverage").handler(w.ctx, { path: "cov.txt" })), /absolute/);
 });
 
+test("load_coverage: a range spanning functions, a function with two ranges, and a large input stays linear", async () => {
+  const w = world(), hex = (n) => "0x" + n.toString(16);
+  w.ctx.functions = async () => [{ name: "a", entry: "0x1000", size: 0x10 }, { name: "b", entry: "0x1010", size: 0x10 }, { name: "c", entry: "0x1020", size: 0x10 }, { name: "d", entry: "0x2000", size: 0x20 }];
+  w.ctx.ops.coverage.load = async () => ({ ranges: [{ start: "0x1008", end: "0x1027" }, { start: "0x2000", end: "0x2003" }, { start: "0x2010", end: "0x2013" }] }); // one range over the end of a, all of b, the start of c; d has two
+  const r = await tool("load_coverage").handler(w.ctx, { path: "/tmp/c" });
+  assert.match(r, /a\s+0x1000\s+8\/16\s+50%/); assert.match(r, /b\s+0x1010\s+16\/16\s+100%/); assert.match(r, /c\s+0x1020\s+8\/16\s+50%/); assert.match(r, /d\s+0x2000\s+8\/32\s+25%/);
+  const N = 100_000;
+  w.ctx.functions = async () => Array.from({ length: N }, (_, i) => ({ name: "f" + i, entry: hex(0x100000 + i * 16), size: 16 }));
+  w.ctx.ops.coverage.load = async () => ({ ranges: Array.from({ length: N }, (_, i) => ({ start: hex(0x100000 + i * 16 + 4), end: hex(0x100000 + i * 16 + 7) })) });
+  const t = Date.now(), big = await tool("load_coverage").handler(w.ctx, { path: "/tmp/c" });
+  assert.match(big, new RegExp(`touching ${N} of ${N} functions`)); assert.ok(Date.now() - t < 1000, `${Date.now() - t} ms`);
+});
+
 test("no program is a tool error; visibility follows the mode", async () => {
   const w = world({ session: false });
   assert.match(await msg(tool("save").handler(w.ctx, {})), /No program is open/);
