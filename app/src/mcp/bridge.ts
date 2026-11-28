@@ -1,14 +1,20 @@
 // stdio <-> app socket bridge (docs/AGENTS_MCP.md "Bridge"). A byte pipe while the app is there; otherwise it answers for the app and keeps retrying.
 // It never launches the app by itself: only the fallback's `status {launch:true}` does. It exits only when stdin ends. `--no-launch` is accepted and ignored.
+// `--headless [binary]`: that launch starts the headless host (`Ghidorita --agent-host [--open=<binary>]`, no window) instead of the app.
 import net from "node:net";
+import path from "node:path";
+import { lstatSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { INSTRUCTIONS } from "../agent/instructions";
 import { agentSocketPath } from "../agent/socketPath";
+import { agentSocketPath, socketProblem } from "../agent/socketPath";
 
 const sockPath = agentSocketPath();
 const retryMs = Number(process.env.GHIDORITA_RETRY_MS) || 2000;
 const HANDOVER_MS = 10_000;
 const MAX_PENDING = 10_000;
+const headless = process.argv.includes("--headless");
+const binary = headless ? process.argv.slice(2).find((a) => !a.startsWith("-")) : undefined; // opened by the host when this bridge is what starts it
 const log = (s: string) => process.stderr.write(`ghidorita-mcp: ${s}\n`);
 
 type Msg = { id?: unknown; method?: string; result?: { protocolVersion?: unknown }; error?: unknown; params?: { protocolVersion?: string; name?: string; arguments?: { launch?: unknown } } };
@@ -39,20 +45,31 @@ function framer(onLine: (l: Buffer) => void) {
 }
 
 let launchedAt = 0;
+const shq = (a: string) => "'" + a.replace(/'/g, "'\\''") + "'";
+/** What starts the host or the app; null when this platform cannot be asked to. */
+function launchCommand(o: { headless: boolean; binary?: string; env: NodeJS.ProcessEnv; platform: string; electron: boolean; execPath: string }): { cmd: string; args: string[]; shell: boolean; env?: NodeJS.ProcessEnv } | null {
+  const host = o.headless ? ["--agent-host", ...(o.binary ? [`--open=${path.resolve(o.binary)}`] : [])] : [];
+  if (o.env.GHIDORITA_APP_CMD) return { cmd: [o.env.GHIDORITA_APP_CMD, ...host.map(shq)].join(" "), args: [], shell: true };
+  // packaged: this bridge runs inside the app's own executable (ELECTRON_RUN_AS_NODE), which can start itself without LaunchServices swallowing the flag
+  if (o.headless && o.electron) { const env = { ...o.env }; delete env.ELECTRON_RUN_AS_NODE; return { cmd: o.execPath, args: host, shell: false, env }; }
+  if (o.platform === "darwin") return { cmd: "open", args: ["-b", "li.jankowski.ghidorita", ...(host.length ? ["--args", ...host] : [])], shell: false };
+  return null;
+}
 /** whether a launch was attempted; a repeat within 15 s is not another process (a custom command may not be idempotent) */
 function startApp(): boolean {
   if (Date.now() - launchedAt < 15_000) return true;
   launchedAt = Date.now();
-  const cmd = process.env.GHIDORITA_APP_CMD;
-  const child = cmd ? spawn(cmd, { shell: true, detached: true, stdio: "ignore" })
-    : process.platform === "darwin" ? spawn("open", ["-b", "li.jankowski.ghidorita"], { stdio: "ignore" }) : null;
+  const c = launchCommand({ headless, binary, env: process.env, platform: process.platform, electron: !!process.versions.electron, execPath: process.execPath });
+  const child = c ? spawn(c.cmd, c.args, { shell: c.shell, detached: true, stdio: "ignore", ...(c.env ? { env: c.env } : {}) }) : null;
   child?.on("error", (e) => log(`could not start Ghidorita: ${e.message}`)).unref();
   return !!child;
 }
 
-const HOW = "Call status with launch: true to start it (the tools appear here when it is ready). The user must have Agent > Access turned on in Ghidorita.";
+const HOW = headless ? "Call status with launch: true to start Ghidorita without a window (the tools appear here when it is ready). The user must have Agent > Access turned on in Ghidorita; the headless host has no menu, so they open the app for that (it takes over from the host)."
+  : "Call status with launch: true to start it (the tools appear here when it is ready). The user must have Agent > Access turned on in Ghidorita.";
 const NOT_RUNNING = `Ghidorita is not running. ${HOW}`;
-const STARTED = "Asked Ghidorita to start. This server switches to the app by itself and the tools will appear when it is ready; call tools/list again or wait for the list change. The user must have Agent > Access turned on in Ghidorita.";
+const STARTED = headless ? "Asked Ghidorita to start without a window. This server switches to it by itself and the tools will appear when it is ready (a minute for a big program); call tools/list again or wait for the list change. Access follows the user's Agent > Access setting."
+  : "Asked Ghidorita to start. This server switches to the app by itself and the tools will appear when it is ready; call tools/list again or wait for the list change. The user must have Agent > Access turned on in Ghidorita.";
 const NO_LAUNCH = "Ghidorita is not running and cannot be started from here. Ask the user to start it and turn on Agent > Access.";
 const INITIALIZED = Buffer.from('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
 
@@ -87,7 +104,8 @@ function answer(line: Buffer) {
     case "tools/list": return send(m.id, { result: { tools: [{ name: "status", description: "Report whether Ghidorita is running; with launch: true, ask it to start.", inputSchema: { type: "object", properties: { launch: { type: "boolean", description: "Start Ghidorita if it is not running" } } } }] } });
     case "tools/call": {
       if (m.params?.name !== "status") return send(m.id, { error: { code: -32602, message: `Unknown tool: ${m.params?.name}. ${NOT_RUNNING}` } });
-      const text = m.params.arguments?.launch === true ? (startApp() ? STARTED : NO_LAUNCH) : NOT_RUNNING;
+      const text = refused ? `Ghidorita's agent socket was not used: ${refused}. Ask the user to fix its owner and permissions (or remove the file).`
+        : m.params.arguments?.launch === true ? (startApp() ? STARTED : NO_LAUNCH) : NOT_RUNNING;
       return send(m.id, { result: { content: [{ type: "text", text }] } });
     }
     default: return send(m.id, { error: { code: -32601, message: `Method not found: ${m.method}` } });
@@ -152,8 +170,18 @@ function adopt(s: net.Socket) {
   timer = setTimeout(() => s.destroy(), HANDOVER_MS); // an app that never answers initialize
 }
 
+let refused = "", warned = "";
+/** A socket that is not ours (owner, mode) is not connected to: a path in a shared directory can hold someone else's server. */
+function refusal(): string | null {
+  const why = socketProblem(sockPath, (p, follow) => { try { return follow ? statSync(p) : lstatSync(p); } catch { return null; } });
+  if (why !== (warned || null)) { warned = why ?? ""; if (why) log(`not connecting: ${why}`); }
+  return why;
+}
 function attempt() {
   if (closing) return;
+  const bad = refusal();
+  if (bad) { refused = bad; if (phase === "queue") { phase = "fallback"; const q = queue; queue = []; q.forEach(answer); } timer = setTimeout(attempt, retryMs); return; }
+  refused = "";
   const s = attempting = net.connect(sockPath);
   s.once("connect", () => { attempting = null; s.removeAllListeners("error"); closing ? s.destroy() : adopt(s); });
   s.once("error", () => { // ENOENT, or ECONNREFUSED from a stale socket file

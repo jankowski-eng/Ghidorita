@@ -16,7 +16,7 @@ type Result<M extends Method> = Methods[M]["result"];
 type Pending = { sessionId?: string; accept(value: unknown): void; reject(error: Error): void };
 type Hooks = {
   onEdit?(command: string, params: unknown, result: unknown): void;
-  onSessionChanged?(): void;
+  onSessionChanged?(session: ActiveSession | null): void; // the new session, for a caller with no store to ask (the headless host)
   onHistory?(undo: UndoState): void; // the undo state every program_changed of the current session carries
   onRequest?(method: string, params: unknown): void;
 };
@@ -123,7 +123,7 @@ export class WebSocketBackend implements ApplicationBackend {
       this.pending.delete(id);
       p.reject(this.stale());
     }
-    this.hooks.onSessionChanged?.();
+    this.hooks.onSessionChanged?.(session);
   }
 
   readonly lifecycle: ProgramLifecycle = {

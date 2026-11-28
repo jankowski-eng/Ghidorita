@@ -10,6 +10,9 @@ import { CAPABILITIES } from "../../../protocol";
 import { providerLaunch } from "./providers";
 import { ProviderProcess } from "./providerProcess";
 import { createAgent, setupText, type Agent } from "./agent";
+import { agentSocketPlace } from "../agent/socketPath";
+import { claimSocket } from "./hostControl";
+import { startHost, type Host } from "./agentHost";
 
 const appDir = path.resolve(__dirname, "../.."); // app/ (this file is app/out/main/index.js)
 const outDir = app.isPackaged ? path.join(app.getPath("userData"), "out") : path.join(appDir, "out");
@@ -17,7 +20,12 @@ const provider = new ProviderProcess();
 let quitting = false;
 let recovery: { snapshotIntervalSeconds: number } | undefined;
 let agent: Agent | undefined;
-const stopSidecar = () => { quitting = true; agent?.stop().catch(() => {}); return provider.stop(); };
+// `Ghidorita --agent-host [--open=<path>]`: no window, no dock icon; the agent server runs here (agentHost.ts). The bridge starts it for `ghidorita-mcp --headless`.
+const hostMode = process.argv.includes("--agent-host");
+const openArg = process.argv.find((a) => a.startsWith("--open="))?.slice(7) || undefined;
+let host: Host | undefined;
+if (hostMode) app.dock?.hide();
+const stopSidecar = () => { quitting = true; if (host) return host.stop().then((r) => r.code); agent?.stop().catch(() => {}); return provider.stop(); };
 let stopped = false;
 let rendererReady = false;          // the renderer mounted and can run the save-before-quit step
 let exitCode: number | null = null; // set by the autotest to end through the real quit path
@@ -39,6 +47,7 @@ async function saveBeforeQuit(): Promise<boolean> {
 app.on("before-quit", (e) => {
   if (stopped) return;
   e.preventDefault();
+  if (host) return void host.quit(); // saves, ends the sidecar, releases the socket lock, exits
   if (quitSave) return; // a save is already in flight
   saveBeforeQuit().then((go) => {
     if (!go) return;
@@ -57,8 +66,8 @@ app.on("before-quit", (e) => {
 });
 ipcMain.handle("quit-ready", (e, r: unknown) => { const o = r as { ok?: unknown; error?: unknown } | null; if (fromWin(e) && o && typeof o.ok === "boolean") quitSave?.({ ok: o.ok, error: typeof o.error === "string" ? o.error.slice(0, 2000) : undefined }); });
 process.on("exit", () => provider.kill());
-for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopSidecar().then(() => process.exit(1)); });
-process.on("uncaughtException", (e) => { console.error("uncaughtException", e); stopSidecar().then(() => process.exit(1)); });
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { if (host) void host.quit(1); else stopSidecar().then(() => process.exit(1)); });
+process.on("uncaughtException", (e) => { console.error("uncaughtException", e); if (host) void host.quit(1); else stopSidecar().then(() => process.exit(1)); });
 
 /** The backend died under a running app (out of memory, kill): say so once. Restarting reopens the program and restores the sidecar's recovery snapshot. */
 function sidecarDied(why: unknown) {
@@ -147,8 +156,36 @@ app.on("web-contents-created", (_e, contents) => {
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
 });
 app.setName("Ghidorita");
+/** The user opened the app while this host runs (macOS hands that to the running process): quit like a handover and start again as the app. */
+let handing = false;
+app.on("activate", () => {
+  if (!host || handing) return;
+  handing = true;
+  app.relaunch({ args: process.argv.slice(1).filter((a) => a !== "--agent-host" && !a.startsWith("--open=")) });
+  void host.quit(0);
+});
 app.whenReady().then(async () => {
+  if (hostMode) {
+    try {
+      const grace = Number(process.env.GHIDORITA_HOST_GRACE_MS);
+      host = await startHost({ place: agentSocketPlace(), settingsFile: path.join(app.getPath("userData"), "agent.json"), version: app.getVersion(), env: process.env, ignoreEnvMode: app.isPackaged,
+        graceMs: process.env.GHIDORITA_HOST_GRACE_MS && grace >= 0 ? grace : undefined, provider, token, open: openArg ? path.resolve(openArg) : undefined,
+        launch: providerLaunch({ appDir, resourcesPath: process.resourcesPath, userData: app.getPath("userData"), packaged: app.isPackaged, electron: process.execPath, token, env: process.env }),
+        exit: (code) => { stopped = true; app.exit(code); } }) ?? undefined;
+    } catch (e) { console.error("agent-host: startup failed:", e); provider.kill(); app.exit(1); }
+    return;
+  }
   if (process.platform === "darwin") app.dock?.setIcon(path.join(appDir, "build/icon.png"));
+  // Before a sidecar starts on the projects dir: take the agent socket lock, asking a running headless host to save and quit first (never two sidecars on one dir)
+  let claim = await claimSocket(agentSocketPlace(), { log: (m) => console.error("agent:", m) });
+  while (claim.error) {
+    console.error("agent:", claim.error);
+    if (autotest || dialog.showMessageBoxSync({ type: "error", buttons: ["Try again", "Quit"], defaultId: 0, cancelId: 1, message: "The headless agent host did not quit", detail: `${claim.error}\n\nGhidorita cannot use the projects folder until it has. Quit it (Activity Monitor or \`kill\`), then try again.` }) === 1) { app.exit(1); return; }
+    claim = await claimSocket(agentSocketPlace(), { log: (m) => console.error("agent:", m) });
+  }
+  const socketLock = claim.lock;
+  process.on("exit", () => socketLock?.release());
+  if (claim.saveError) void dialog.showMessageBox({ type: "warning", message: "The agent's last edits may not have been saved", detail: claim.saveError });
   let port: number;
   try {
     port = await provider.start(providerLaunch({ appDir, resourcesPath: process.resourcesPath, userData: app.getPath("userData"),
@@ -162,7 +199,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("get-config", (e) => !fromWin(e) ? null : ({ expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null, only: process.env.AUTOTEST_ONLY ?? null, flow: process.env.AUTOTEST_FLOW ?? null, decompileTimeout: Number(process.env.AUTOTEST_DECOMPILE_TIMEOUT) || null }));
   win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidorita", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   const send = (ch: string, payload: unknown) => { if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(ch, payload); };
-  const ag = agent = createAgent({ send, settingsFile: path.join(app.getPath("userData"), "agent.json"), version: app.getVersion(), ignoreEnvMode: app.isPackaged });
+  const ag = agent = createAgent({ send, settingsFile: path.join(app.getPath("userData"), "agent.json"), version: app.getVersion(), ignoreEnvMode: app.isPackaged, lock: socketLock ?? undefined });
   ipcMain.handle("agent-reply", (e, r: unknown) => { if (fromWin(e)) ag.reply(r); });
   ipcMain.handle("agent-ready", (e, r: unknown) => { if (fromWin(e) && typeof r === "boolean") ag.setReady(r); });
   ipcMain.handle("agent-menu", (e) => { if (fromWin(e)) menu.popupAgent(); });

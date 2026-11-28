@@ -16,3 +16,15 @@ test("renderer features import application operations and data types only", asyn
     assert.doesNotMatch(source, /\b(?:Methods|Notifications|ErrorCode)\b[^;]*from\s*["'][^"']*\/protocol["']/, `${path} imports wire names`);
   }
 });
+
+test("outside main.tsx, exactly one file may import rpc.ts: the headless host in the main process (src/main/agentHost.ts)", async () => {
+  const root = new URL("../src/", import.meta.url);
+  const importers = [];
+  for (const path of await readdir(root, { recursive: true })) {
+    if (!/\.tsx?$/.test(path) || path === "renderer/rpc.ts" || path === "renderer/main.tsx") continue;
+    const source = await readFile(new URL(path, root), "utf8");
+    for (const [, , target] of source.matchAll(/(?:\b(?:from|import|require)\s*(?:\(\s*)?)(["'])([^"']+)\1/g))
+      if (/(?:^|\/)rpc(?:\.|$)/.test(target) && /renderer|\.\/rpc/.test(target)) importers.push(path);
+  }
+  assert.deepEqual(importers, ["main/agentHost.ts"]);
+});

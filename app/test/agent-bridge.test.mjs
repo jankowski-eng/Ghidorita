@@ -11,6 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
+process.umask(0o077); // the bridge refuses a socket others can reach, and net.listen honours the umask
 const dir = fs.mkdtempSync(path.join("/tmp", "gb-")); // short: sun_path is 104 bytes on macOS
 const bridge = path.join(dir, "bridge.cjs");
 before(() => build({ entryPoints: [new URL("../src/mcp/bridge.ts", import.meta.url).pathname], outfile: bridge, bundle: true, platform: "node", format: "cjs" }));

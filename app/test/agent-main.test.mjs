@@ -10,6 +10,7 @@ import { StdioServerTransport as LineTransport } from "@modelcontextprotocol/sdk
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
 // Main's MCP server (src/main/agent.ts) in plain Node: real SDK Client over a real unix socket, a stub renderer (the `send` callback + reply()/setReady()), fake tool tables.
+process.umask(0o077); // main refuses a socket others can reach (owner check), and net.listen honours the umask
 const out = fs.mkdtempSync("/tmp/ghb"); // a real file: the SDK's CJS deps need import.meta.url for require
 process.on("exit", () => fs.rmSync(out, { recursive: true, force: true }));
 let n = 0;
