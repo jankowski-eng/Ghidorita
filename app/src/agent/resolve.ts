@@ -37,9 +37,15 @@ export async function resolveAddress(input: string, ops: Pick<ProgramOperations,
   if (/^0x/i.test(s)) { const a = addressOf(s); if (a) return a; throw new ToolError(`Not an address: ${s}. Use 0x401000, code:1000 or a symbol name.`); }
   const prefer = (all: SymbolHit[]) => { const fns = all.filter((h) => h.kind === "function"); return functionsOnly && fns.length ? fns : all; };
   let exact: SymbolHit[] | null = null; // null: the provider has no exact lookup
-  try { exact = distinct((await run(ops.searches.searchSymbols({ query: s, limit: SEARCH_LIMIT, exact: true }), signal)).filter((h) => !!h.address)); } catch (e) { if (!isFailure(e, "unsupported")) throw e; }
+  try {
+    const raw = await run(ops.searches.searchSymbols({ query: s, limit: SEARCH_LIMIT, exact: true }), signal);
+    // a full page may have cut off more (a second function behind 499 labels): never treat it as the whole answer, whatever the filtering below leaves
+    if (raw.length >= SEARCH_LIMIT) throw new ToolError(`${SEARCH_LIMIT} or more symbols are named "${esc(s, 80)}", too many to choose one by name. Pass an address.`);
+    exact = distinct(raw.filter((h) => !!h.address));
+  } catch (e) { if (!isFailure(e, "unsupported")) throw e; }
   if (exact) { const found = prefer(exact); if (found.length === 1) return found[0].address; if (found.length > 1) throw ambiguous(s, found); }
-  const hits = (await run(ops.searches.searchSymbols({ query: s, limit: SEARCH_LIMIT }), signal)).filter((h) => !!h.address);
+  let hits: SymbolHit[] = [], searchable = true;
+  try { hits = (await run(ops.searches.searchSymbols({ query: s, limit: SEARCH_LIMIT }), signal)).filter((h) => !!h.address); } catch (e) { if (!isFailure(e, "unsupported")) throw e; searchable = false; } // no symbol search here: addresses still resolve below
   const truncated = hits.length >= SEARCH_LIMIT; // the substring search stops there, in the provider's order: what is missing could be the name, or a second symbol of it
   const level = (match: (n: string) => boolean) => prefer(distinct(hits.filter((h) => match(h.name))));
   const lower = s.toLowerCase();
@@ -51,6 +57,7 @@ export async function resolveAddress(input: string, ops: Pick<ProgramOperations,
   if (BARE_HEX.test(s) && s.length >= 5) return "0x" + BigInt("0x" + s).toString(16);
   const q = addressOf(s);
   if (q) return q;
+  if (!searchable && exact === null) throw new ToolError(`This backend cannot search symbols by name, so "${esc(s, 80)}" is not an address it can use. Pass an address (0x401000, code:1000).`);
   if (truncated) throw new ToolError(`"${esc(s, 80)}" is contained in ${SEARCH_LIMIT} or more symbol names, too many to resolve by name${exact ? " (and no symbol is named exactly that; names are case-sensitive here)" : ""}. Pass an address, or the exact name.`);
   const near = level((n) => n.toLowerCase().startsWith(lower));
   const hint = BARE_HEX.test(s) ? ` If you meant the address, write 0x${s}.` : "";
