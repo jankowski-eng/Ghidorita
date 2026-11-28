@@ -5,6 +5,7 @@ import { WelcomePane } from "./WelcomePane";
 import { Workbench } from "./Workbench";
 import { DropOverlay, useDropOpen } from "./features/drop";
 import { DialogHost } from "./features/DialogHost";
+import { useAgent } from "./features/agent";
 import { useBootstrap, type Api, type TestDriver } from "./features/bootstrap";
 import { coverageActions } from "./features/coverage";
 import { useCopy } from "./features/copy";
@@ -39,6 +40,7 @@ function Main({ onReady }: { onReady?: (driver: TestDriver) => void }) {
   api.current = { go: nav.go, back: nav.back, forward: nav.forward, clickAt: nav.clickAt, edit: editing.edit, handleMenu, selected: () => tabs.state.tabs.find((x) => x.id === tabs.state.active)?.entry ?? null };
 
   useBootstrap(() => api.current, onReady);
+  useAgent(tabs, nav.go);
   useProgramReactions(tabs);
   useMenuState(nav.nav.back.length > 0, nav.nav.forward.length > 0);
   useWindowTitle();

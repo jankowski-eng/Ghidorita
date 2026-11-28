@@ -14,6 +14,8 @@ import { dockCapability } from "../../capabilities";
 
 export type RangeList = { start: Address; end: Address }[] | null;
 export interface EditDialogState { spec: EditSpec; submit: (v: string, k: CommentKind) => Promise<void> }
+/** An agent's question to the user (AgentUi.confirm): `answer` resolves it; DialogHost shows it with Confirm. */
+export interface AgentAsk { client: string; message: string; answer: (ok: boolean) => void }
 export interface FormDialogState { title: string; submit: string; fields: FormField[]; preview?: FormPreview; go: (v: Record<string, string>) => Promise<void> }
 
 /** What the panes show about the open program (position, panels, dialogs). Everything but `visible`, `graphOn`, `callGraphOn`, `pcodeOn`, `covVersion`, `dataVersion`, `typesVersion` and `importFor` is dropped on a reset. */
@@ -34,6 +36,7 @@ export interface Views {
   pcodeOn: boolean;                    // ... or its p-code (at most one of the three)
   searchOpen: boolean; gotoOpen: boolean; typesOpen: boolean;
   dlg: EditDialogState | null; formDlg: FormDialogState | null;
+  agentAsk: AgentAsk | null;           // the oldest pending agent question (the rest wait in features/agent.ts)
   visible: Record<PaneId, boolean>;
   paneOrder: PaneId[];                 // left to right
   paneSizes: Sizes;                    // widths of the functions and listing panes
@@ -45,7 +48,7 @@ export interface Views {
 }
 export const initialViews: Views = {
   nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, trailSeq: 0, useHl: null,
-  dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null,
+  dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null, agentAsk: null,
   visible: { functions: true, listing: true, decompiler: true }, paneOrder: ["functions", "listing", "decompiler"], paneSizes: { functions: 260, listing: 560 }, layoutNames: ["Default"], dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };
 
