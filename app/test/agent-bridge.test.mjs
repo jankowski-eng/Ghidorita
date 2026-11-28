@@ -256,3 +256,48 @@ test("a repeated status launch within a few seconds does not start another proce
   assert.equal(fs.readFileSync(marker, "utf8").trim().split("\n").length, 1);
   await c.close();
 });
+
+test("an app that answers the replayed initialize with another protocol version is not piped: logged, dropped, the client keeps its fallback session", async () => {
+  const sock = sockPath(), seen = [];
+  const p = run([], sock), err = []; p.stderr.on("data", (c) => err.push(c));
+  const told = await rpc(p, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+  assert.equal(told.result.protocolVersion, "2025-03-26"); // the fallback echoes the client's
+  p.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+  let closed = 0;
+  const srv = await server(sock, (c) => { // an app that negotiates a different version
+    c.on("close", () => closed++); c.on("error", () => {});
+    c.on("data", (d) => { for (const l of String(d).split("\n").filter(Boolean)) { const m = JSON.parse(l); seen.push(m.method); if (m.method === "initialize") c.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "1999-01-01", capabilities: {}, serverInfo: { name: "app", version: "1" } } }) + "\n"); } });
+  });
+  await until(() => seen.includes("initialize") && closed >= 1, "the bridge replayed initialize and dropped the connection");
+  await until(() => /protocol version 1999-01-01.*2025-03-26/.test(Buffer.concat(err).toString()), "logged to stderr");
+  assert.ok(!seen.includes("notifications/initialized") && !seen.includes("tools/list")); // nothing of the session was piped to it
+  const text = Buffer.concat(p.out).toString();
+  assert.ok(!text.includes("list_changed") && !text.includes("1999-01-01")); // the client heard nothing of it, and its own session is intact
+  const tools = await rpc(p, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+  assert.deepEqual(tools.result.tools.map((t) => t.name), ["status"]); // still the fallback
+  assert.equal((Buffer.concat(err).toString().match(/protocol version/g) ?? []).length, 1); // logged once, however often it retries
+  p.stdin.end(); assert.equal(await p.exit, 0); srv.close();
+});
+
+test("an app that answers initialize with an error is dropped the same way", async () => {
+  const sock = sockPath();
+  const p = run([], sock), err = []; p.stderr.on("data", (c) => err.push(c));
+  await rpc(p, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
+  let closed = 0;
+  const srv = await server(sock, (c) => { c.on("close", () => closed++); c.on("error", () => {}); c.on("data", (d) => { const m = JSON.parse(String(d).split("\n")[0]); c.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "no" } }) + "\n"); }); });
+  await until(() => closed >= 1 && /an error/.test(Buffer.concat(err).toString()), "dropped, logged");
+  assert.ok(!Buffer.concat(p.out).toString().includes("list_changed"));
+  p.stdin.end(); await p.exit; srv.close();
+});
+
+test("the fallback negotiates the protocol version like the SDK server: the version itself if supported, else the latest; the list is the SDK's", async () => {
+  const { SUPPORTED_PROTOCOL_VERSIONS } = await import("@modelcontextprotocol/sdk/types.js");
+  const src = fs.readFileSync(new URL("../src/mcp/bridge.ts", import.meta.url), "utf8");
+  const mine = JSON.parse(/const SUPPORTED_VERSIONS = (\[.*?\]);/.exec(src)[1]);
+  assert.deepEqual(mine, [...SUPPORTED_PROTOCOL_VERSIONS], "bridge.ts SUPPORTED_VERSIONS drifted from the SDK's");
+  const p = run([], sockPath());
+  assert.equal((await rpc(p, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } })).result.protocolVersion, "2024-11-05");
+  assert.equal((await rpc(p, { jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2099-01-01" } })).result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
+  assert.equal((await rpc(p, { jsonrpc: "2.0", id: 3, method: "initialize", params: {} })).result.protocolVersion, SUPPORTED_PROTOCOL_VERSIONS[0]);
+  p.stdin.end(); await p.exit;
+});

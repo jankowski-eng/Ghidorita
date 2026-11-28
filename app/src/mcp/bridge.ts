@@ -10,10 +10,13 @@ const HANDOVER_MS = 10_000;
 const MAX_PENDING = 10_000;
 const log = (s: string) => process.stderr.write(`ghidorita-mcp: ${s}\n`);
 
-type Msg = { id?: unknown; method?: string; params?: { protocolVersion?: string; name?: string; arguments?: { launch?: unknown } } };
+type Msg = { id?: unknown; method?: string; result?: { protocolVersion?: unknown }; error?: unknown; params?: { protocolVersion?: string; name?: string; arguments?: { launch?: unknown } } };
 const parse = (b: Buffer): Msg | null => { try { const m = JSON.parse(b.toString()); return m && typeof m === "object" ? m : null; } catch { return null; } };
 const hasId = (m: Msg) => m.id !== undefined && m.id !== null;
 
+// The fallback negotiates like the app's SDK Server (the version itself if supported, else the latest), so the app's reply to the replayed initialize matches what the client was told.
+// Keep in sync with SUPPORTED_PROTOCOL_VERSIONS of @modelcontextprotocol/sdk (test/agent-bridge.test.mjs checks).
+const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 const MAX_LINE = 64 << 20;
 /** Splits a byte stream into lines (newline kept) without touching the bytes. Linear: a chunk is scanned once. A line over MAX_LINE is dropped. */
 function framer(onLine: (l: Buffer) => void) {
@@ -57,6 +60,8 @@ let phase: "queue" | "fallback" | "pipe" = "queue";
 let app: net.Socket | null = null, attempting: net.Socket | null = null;
 let queue: Buffer[] = [];
 let initLine: Buffer | null = null, initId: unknown, initialized = false, closing = false;
+let toldVersion: string | null = null; // the protocolVersion the client was told in its initialize reply (by the fallback, or by the app in the first pipe)
+let mismatchLogged = false;
 let owesListChanged = false; // the app took over before the client sent notifications/initialized: tell it once it has
 let timer: NodeJS.Timeout | undefined;
 const pending = new Set<unknown>(); // ids sent to the app and not yet answered
@@ -76,7 +81,7 @@ function answer(line: Buffer) {
   remember(m, line);
   if (!hasId(m)) return;
   switch (m.method) {
-    case "initialize": return send(m.id, { result: { protocolVersion: m.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: { listChanged: true } }, serverInfo: { name: "ghidorita", version: "0.0.0" }, instructions: NOT_RUNNING } });
+    case "initialize": toldVersion = SUPPORTED_VERSIONS.includes(m.params?.protocolVersion as string) ? (m.params!.protocolVersion as string) : SUPPORTED_VERSIONS[0]; return send(m.id, { result: { protocolVersion: toldVersion, capabilities: { tools: { listChanged: true } }, serverInfo: { name: "ghidorita", version: "0.0.0" }, instructions: NOT_RUNNING } });
     case "ping": return send(m.id, { result: {} });
     case "tools/list": return send(m.id, { result: { tools: [{ name: "status", description: "Report whether Ghidorita is running; with launch: true, ask it to start.", inputSchema: { type: "object", properties: { launch: { type: "boolean", description: "Start Ghidorita if it is not running" } } } }] } });
     case "tools/call": {
@@ -106,10 +111,18 @@ function onAppLine(line: Buffer) {
   if (phase === "queue") { // replaying initialize: the client already has the fallback's reply
     if (m && m.id === initId && m.method === undefined && hasId(m)) {
       clearTimeout(timer);
+      const theirs = m.result?.protocolVersion;
+      if (toldVersion !== null && theirs !== toldVersion) { // the client's session was negotiated at another version: piping it to this app would be a mismatched session
+        if (!mismatchLogged) { mismatchLogged = true; log(`the app answers initialize with ${m.error ? "an error" : `protocol version ${String(theirs)}`}, but the client was told ${toldVersion}; staying in the "not running" fallback`); }
+        return void app?.destroy(); // close -> lost(): back to the fallback (and the retry); the client keeps its working session
+      }
       if (initialized) { app?.write(INITIALIZED); listChanged(); } else owesListChanged = true;
       return startPipe();
     }
-  } else if (m && hasId(m) && m.method === undefined) pending.delete(m.id);
+  } else if (m && hasId(m) && m.method === undefined) {
+    pending.delete(m.id);
+    if (toldVersion === null && m.id === initId && typeof m.result?.protocolVersion === "string") toldVersion = m.result.protocolVersion; // the app answered the client's own initialize
+  }
   out(line);
 }
 
