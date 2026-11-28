@@ -105,6 +105,7 @@ ipcMain.handle("menu-state", (e, s: unknown) => {
     layouts: Array.isArray(o.layouts) ? o.layouts.filter((n): n is string => typeof n === "string").slice(0, 100).map((n) => n.slice(0, 40)) : undefined,
     panes: o.panes && typeof o.panes === "object" ? { functions: (o.panes as any).functions !== false, listing: (o.panes as any).listing !== false, decompiler: (o.panes as any).decompiler !== false } : undefined };
   menu?.setState(m);
+  agent?.setCapabilities(new Set(capabilities));
   rendererReady = true;
   if (process.platform === "darwin") win.setDocumentEdited(m.dirty);
 });

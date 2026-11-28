@@ -8,6 +8,7 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { Capability } from "../../../protocol";
 import { ACCESS_MODES, modeAllows, type AccessMode, type AgentCall, type AgentCancel, type AgentState, type ToolDef } from "../agent/types";
 import { TOOLS } from "../agent/tools/index";
+import { visibleTools } from "../agent/access";
 import { INSTRUCTIONS } from "../agent/instructions";
 import { agentSocketPlace, type SocketPlace } from "../agent/socketPath";
 
@@ -17,11 +18,7 @@ import { agentSocketPlace, type SocketPlace } from "../agent/socketPath";
 export const REPLY_MAX = 200_000, ERROR_MAX = 4_000, MARGIN_MS = 10_000, NOT_READY = "Ghidorita's window is not ready (starting, reloading or showing an error). Try again in a moment.";
 const HOW_TO_ENABLE = "Agent access is off. Ask the user to choose Agent > Access > Read or Edit in Ghidorita's menu, then call status again.";
 
-/** The one place that decides what a mode offers: tools/list and call authorisation both go through it. `capabilities` (the provider's) gates tools that name one; undefined = no gating. */
-export function visibleTools(mode: AccessMode, opts: { headless?: boolean; capabilities?: ReadonlySet<Capability> } = {}, table: readonly ToolDef[] = TOOLS): ToolDef[] {
-  return table.filter((t) => modeAllows(mode, t.access) && !(t.appOnly && opts.headless)
-    && (!opts.capabilities || !t.capability || [t.capability].flat().every((c) => opts.capabilities!.has(c))));
-}
+export { visibleTools };
 
 export interface AgentOpts {
   /** main -> renderer; must tolerate a missing window */
@@ -61,6 +58,7 @@ export function createAgent(o: AgentOpts) {
   const table = o.table ?? TOOLS, place = o.socket ?? agentSocketPlace(), win32 = process.platform === "win32", margin = o.marginMs ?? MARGIN_MS;
   const envMode = asMode((o.env ?? process.env).GHIDORITA_AGENT_MODE);
   let mode: AccessMode = envMode ?? loadMode(o.settingsFile);
+  let caps: ReadonlySet<Capability> | undefined; // the provider's, from the renderer's menu-state; unknown = no gating yet
   let ready = false, seq = 0, listener: net.Server | null = null, owned = false;
   const conns = new Set<Conn>(), pending = new Map<string, Pending>(), changed = new Set<() => void>();
   const validators = new WeakMap<ToolDef, (a: unknown) => { valid: boolean; errorMessage?: string }>();
@@ -68,7 +66,7 @@ export function createAgent(o: AgentOpts) {
   const clients = () => [...conns].flatMap((c) => (c.name ? [c.name] : []));
   const state = (): AgentState => ({ mode, clients: clients() });
   const publish = () => { o.send("agent-state", state()); for (const f of changed) f(); };
-  const visible = () => visibleTools(mode, { headless: o.headless, capabilities: o.capabilities?.() }, table);
+  const visible = () => visibleTools(mode, { headless: o.headless, capabilities: caps ?? o.capabilities?.() }, table);
 
   function end(callId: string, r: ToolResult, cancel: boolean) {
     const p = pending.get(callId);
@@ -180,6 +178,12 @@ export function createAgent(o: AgentOpts) {
   return {
     start, stop, visibleTools: visible, clients, state, onChange: (f: () => void) => { changed.add(f); },
     mode: () => mode,
+    /** the provider's capabilities: a tool that needs one it lacks isn't offered; clients re-list when the set changes */
+    setCapabilities(c: ReadonlySet<Capability>) {
+      if (caps && caps.size === c.size && [...c].every((x) => caps!.has(x))) return;
+      caps = c;
+      for (const k of conns) k.server.sendToolListChanged().catch(() => {});
+    },
     setMode(m: AccessMode) {
       if (!asMode(m) || m === mode) return;
       mode = m;

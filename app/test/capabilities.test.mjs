@@ -81,3 +81,31 @@ test("a loader that needs no language: the import needs no language choice and s
   assert.deepEqual(buildOptions({ ...choice, cand: { ...cand, preferred: false } }), { loader: "L" });
   assert.equal(choiceError({ ...choice, cand: { ...cand, requiresLanguage: undefined } }), "Choose a language");
 });
+
+// Agent tools: one table (each ToolDef names the capabilities it needs), gated like the menu.
+const { visibleTools } = await bundle("../src/agent/access.ts");
+const { TOOLS } = await bundle("../src/agent/tools/index.ts");
+const toolNames = (mode, c) => visibleTools(mode, { capabilities: c }).map((t) => t.name);
+
+test("agent tools: a tool whose capability is missing isn't listed, in any mode", () => {
+  assert.deepEqual(toolNames("edit", caps()).filter((n) => TOOLS.find((t) => t.name === n).capability), []);
+  for (const t of TOOLS.filter((t) => t.capability)) {
+    const need = [t.capability].flat();
+    assert.ok(toolNames("full", new Set(need)).includes(t.name), `${t.name} listed with ${need}`);
+    for (const c of need) assert.ok(!toolNames("full", new Set(need.filter((x) => x !== c))).includes(t.name), `${t.name} hidden without ${c}`);
+  }
+});
+test("agent tools: modes nest, status is always there, no gating until the capabilities are known", () => {
+  assert.deepEqual(toolNames("off", undefined), ["status"]);
+  const all = new Set(TOOLS.flatMap((t) => [t.capability ?? []].flat()));
+  const read = toolNames("read", all), edit = toolNames("edit", all);
+  assert.ok(read.length > 5 && edit.length > read.length && read.every((n) => edit.includes(n)));
+  assert.ok(TOOLS.filter((t) => t.access === "read").every((t) => t.annotations.readOnlyHint), "read tools are read-only");
+  assert.ok(TOOLS.filter((t) => t.access !== "read" && t.access !== "off").every((t) => !t.annotations.readOnlyHint), "edit tools are not");
+  assert.equal(toolNames("edit", undefined).length, TOOLS.filter((t) => t.access !== "full").length);
+});
+test("agent tools: a read-only provider (no editing capabilities) offers no edit tools", () => {
+  const names = toolNames("edit", caps("decompile", "references", "bytes"));
+  for (const n of ["rename_symbol", "rename_variable", "set_comment", "undo_agent_edit", "set_bookmark"]) assert.ok(!names.includes(n), n);
+  assert.ok(names.includes("decompile") && names.includes("status"));
+});
