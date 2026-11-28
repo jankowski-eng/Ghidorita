@@ -1,5 +1,6 @@
 import type { ToolDef } from "../types";
 import { editTools } from "./edit";
+import { fullTools } from "./full";
 import { readTools } from "./read";
 import { status } from "./status";
 import { typesTools } from "./types";
@@ -13,6 +14,7 @@ export const TOOLS: readonly ToolDef[] = [
   status,
   ...readTools,
   ...editTools,
+  ...fullTools,
   ...uiTools,
   ...typesTools,
 ];

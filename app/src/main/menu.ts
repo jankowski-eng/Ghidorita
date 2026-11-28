@@ -6,7 +6,7 @@ import { KEYS, isHint, showKey } from "../keys";
 import { addRecent, clearRecent, getRecent } from "./recent";
 import { agentName } from "../agent/attribution";
 
-/** What the Agent menu needs of the agent server (main/agent.ts). Full is accepted by the server but not offered here: phase 2 has no Full tools. */
+/** What the Agent menu needs of the agent server (main/agent.ts). Full adds save, patching, export and program changes without asking. */
 export interface AgentMenu { mode(): AccessMode; setMode(m: AccessMode): void; clients(): string[]; setupText(): string }
 type Deps = { getWin: () => BrowserWindow | undefined; pick: () => Promise<string | null>; agent?: AgentMenu };
 
@@ -31,8 +31,8 @@ export function createMenu({ getWin, pick, agent }: Deps) {
     if (!agent) return [];
     const ids = agent.clients(), names = ids.map((id) => agentName(id, ids));
     return [
-      { label: "Access", submenu: (["off", "read", "edit"] as const).map((m): MenuItemConstructorOptions =>
-        ({ id: "agent-" + m, label: { off: "Off", read: "Read", edit: "Edit" }[m], type: "radio", checked: agent.mode() === m, click: () => agent.setMode(m) })) },
+      { label: "Access", submenu: (["off", "read", "edit", "full"] as const).map((m): MenuItemConstructorOptions =>
+        ({ id: "agent-" + m, label: { off: "Off", read: "Read", edit: "Edit", full: "Full" }[m], type: "radio", checked: agent.mode() === m, click: () => agent.setMode(m) })) },
       { type: "separator" },
       { id: "agent-clients", label: names.length ? "Connected: " + names.join(", ") : "No agent connected", enabled: false },
     ];

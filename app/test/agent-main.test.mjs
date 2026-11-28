@@ -329,12 +329,11 @@ test("native menu: Agent radios follow the mode, clients are listed, Help copies
   const find = () => { const flat = (items) => items.flatMap((i) => [i, ...(i.submenu ?? []).flatMap((s) => flat([s]))]); return (id) => flat(globalThis.__builtMenu).find((i) => i.id === id || i.label === id); };
   let f = find();
   assert.ok(f("Agent")); assert.ok(f("Help") || globalThis.__builtMenu.some((i) => i.role === "help"));
-  assert.deepEqual(["off", "read", "edit"].map((x) => f("agent-" + x).checked), [true, false, false]);
-  assert.equal(f("agent-full"), undefined); // Full is not offered yet
+  assert.deepEqual(["off", "read", "edit", "full"].map((x) => f("agent-" + x).checked), [true, false, false, false]);
   assert.equal(f("agent-clients").label, "No agent connected"); assert.equal(f("agent-clients").enabled, false);
   f("agent-edit").click();
   clients = ["Claude Code", "codex"]; m.refresh(); f = find();
-  assert.deepEqual(["off", "read", "edit"].map((x) => f("agent-" + x).checked), [false, false, true]);
+  assert.deepEqual(["off", "read", "edit", "full"].map((x) => f("agent-" + x).checked), [false, false, true, false]);
   assert.equal(f("agent-clients").label, "Connected: Claude Code, codex");
   f("agent-setup").click();
   assert.equal(globalThis.__clipboard, "SETUP");
