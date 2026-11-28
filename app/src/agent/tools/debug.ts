@@ -69,6 +69,7 @@ async function stoppedState(ctx: ToolCtx): Promise<DebugState> {
 const regMemo = new Map<string, { stop: number; was: Record<string, string>; now: Record<string, string> }>();
 function regLine(sessionId: string | undefined, s: DebugState): string {
   const key = sessionId ?? "", regs = s.registers ?? [], now = Object.fromEntries(regs.map((r) => [r.name, r.value]));
+  if (!regMemo.has(key)) regMemo.clear(); // one session at a time: a new one drops the old ones
   let m = regMemo.get(key);
   if (!m || m.stop !== s.stop) regMemo.set(key, m = { stop: s.stop, was: m?.now ?? {}, now });
   return `Registers: ${regs.map((r) => `${esc(r.name, 24)}=${esc(r.value, 40)}${m!.was[r.name] !== undefined && m!.was[r.name] !== r.value ? "*" : ""}`).join(" ")}${Object.keys(m.was).length ? "  (* changed since the stop before)" : ""}`;
