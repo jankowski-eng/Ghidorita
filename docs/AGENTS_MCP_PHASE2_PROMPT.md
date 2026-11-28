@@ -1,9 +1,9 @@
-Implement phase 2 of Ghidorita's agent access over MCP: the headless host, Full mode, more reads, debugger tools, UI annotations, C type parsing and atomic agent undo.
+Implement phase 2 of Ghidorita's agent access over MCP: the headless host, Full mode, more reads, debugger tools, UI annotations, and C type parsing.
 
 Phase 1 (app mode, Read and Edit) is built on branch `agent-mcp-phase1`.
 
 - **Spec:** `docs/AGENTS_MCP.md`, especially "Phase 1 as built" at the end. Where that section and the earlier design disagree, the as-built section is the truth.
-- **Plan:** `docs/AGENTS_MCP_PLAN.md`. Phase 2 = step 0b, wave 2 with streams F–L, step 3.
+- **Plan:** `docs/AGENTS_MCP_PLAN.md`. Phase 2 = step 0b, wave 2 with streams F–K, step 3. (Stream L, atomic agent undo, was done in phase 1: `undo {expect}`, commit 32569bc.)
 
 Read both completely first. Then read the phase 1 code you'll build on:
 
@@ -30,9 +30,9 @@ You are the orchestrator. Do step 0b and step 3 yourself, and delegate wave 2 to
    - Update the layering test so `src/agent/host.ts` follows the same import rules as the rest of `src/agent/`.
    - Tests pass, commit.
 
-### 2. Wave 2: seven subagents in parallel
+### 2. Wave 2: six subagents in parallel
 
-Send all seven Agent calls in one message, each with `isolation: "worktree"`, so each branches from the step 0b commit.
+Send all six Agent calls in one message, each with `isolation: "worktree"`, so each branches from the step 0b commit.
 
 Each subagent knows nothing but its prompt, so each prompt must contain:
 
@@ -40,12 +40,11 @@ Each subagent knows nothing but its prompt, so each prompt must contain:
 - the paths of the design doc (including "Phase 1 as built"), the plan, and the phase 1 files it builds on, to read first
 - **file ownership:** the files it may create or change. Everything else is read-only, except one import + spread line in `app/src/agent/tools/index.ts`, and its own additions to `AUTOTEST_FLOW=agent` in a separate function the orchestrator will call. **No stream changes `src/agent/host.ts`.** If a stream needs a change there, or in `types.ts` beyond what its row allows, it stops and reports the change instead of making it.
 - **who else touches shared files**, so it keeps its edits small and local:
-  - F, K and L all touch `rpc.ts`
-  - K and L both touch `protocol.md`, `protocol.ts`, `wire.ts`, `backend.ts`
+  - F and K both touch `rpc.ts`
   - G and J both touch `main/menu.ts`
 - **setup:**
   - The worktree has no `node_modules`: run `npm ci` in `app/`, or symlink `app/node_modules` from the main checkout if that fails.
-  - Streams with sidecar tests (K, L) use the main checkout's `sidecar/.venv/bin/python`, running pytest from the worktree's `sidecar/`. They set `GHIDRA_INSTALL_DIR` and `JAVA_HOME` as in `docs/DEVELOPMENT.md`, pointing at the main checkout's `ghidra-install`. `git worktree list` shows the main checkout's path.
+  - The stream with sidecar tests (K) use the main checkout's `sidecar/.venv/bin/python`, running pytest from the worktree's `sidecar/`. They set `GHIDRA_INSTALL_DIR` and `JAVA_HOME` as in `docs/DEVELOPMENT.md`, pointing at the main checkout's `ghidra-install`. `git worktree list` shows the main checkout's path.
 - **constraints:**
   - follow `app/ARCHITECTURE.md`; `src/agent/` imports only what the layering test allows
   - main validates every IPC payload
@@ -106,16 +105,13 @@ Stream-specific points to put in the prompts:
   - Parse errors are `InvalidArgument` with Ghidra's message and line.
   - Gated by a new capability. Documented in `protocol.md` and `protocol.ts`, added to `wire.ts` / `backend.ts` / `rpc.ts`, plus a mock implementation.
   - Then a `define_types` tool (`access: "edit"`) whose change-log entry is attributed like the other edits. `changeLog.ts` must know the new edit name.
-- **L (atomic agent undo):**
-  - An optional `expect` on the sidecar's `undo` (`domains/program.py`): undo only if the top step's name still equals it, else `InvalidArgument`. Gated by a capability, plus the mock.
-  - `undo_agent_edit` passes the undo name it checked, and keeps the phase 1 behaviour when the provider lacks the capability.
 
-While they run, don't do their work yourself. Wait for all seven reports. If a stream reports a needed change in a file it doesn't own, make it yourself on `agent-mcp-phase2` after the merges, or hand it back to that stream with SendMessage.
+While they run, don't do their work yourself. Wait for all six reports. If a stream reports a needed change in a file it doesn't own, make it yourself on `agent-mcp-phase2` after the merges, or hand it back to that stream with SendMessage.
 
 ### 3. Step 3, yourself
 
-1. Merge in this order: K, L, G, H, I, F, J. Run typecheck and tests after each merge and resolve conflicts.
-2. Combine the streams' autotest additions into `AUTOTEST_FLOW=agent`: a Full-mode run, a headless run, the debugger steps against the mock, a highlight, `define_types`, and `undo_agent_edit` with `expect`. Run it against the mock, and against PyGhidra through `sidecar/test_provider_ui.py` if the setup is available here. If it isn't, say so; don't fake it.
+1. Merge in this order: K, G, H, I, F, J. Run typecheck and tests after each merge and resolve conflicts.
+2. Combine the streams' autotest additions into `AUTOTEST_FLOW=agent`: a Full-mode run, a headless run, the debugger steps against the mock, a highlight, `define_types`. Run it against the mock, and against PyGhidra through `sidecar/test_provider_ui.py` if the setup is available here. If it isn't, say so; don't fake it.
 3. Spawn one review subagent with no worktree. Give it the diff of `agent-mcp-phase2` against `agent-mcp-phase1` and the design doc, but not your conclusions. Ask it for correctness bugs and security holes, prioritising:
    - the headless handover and anything that could lose unsaved edits or let two sidecars share a projects dir
    - socket ownership and the single-instance guard

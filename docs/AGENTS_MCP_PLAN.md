@@ -10,10 +10,10 @@ Defaults chosen for the design's open questions, so the work isn't blocked (chan
 
 ```
 Phase 1     0 ──▶ [ A  B  C  D  E ] ──▶ 1 ──▶ 2
-Phase 2     0b ──▶ [ F  G  H  I  J  K* L ] ──▶ 3   * K's sidecar half can start any time
+Phase 2     0b ──▶ [ F  G  H  I  J  K* ] ──▶ 3   * K's sidecar half can start any time
 ```
 
-Phase 2 is what used to be phases 2 and 3, run as one wave. The order between them was a priority, not a dependency: all streams build on phase 1, and none needs another's output. Stream L picks up a phase 1 follow-up.
+Phase 2 is what used to be phases 2 and 3, run as one wave. The order between them was a priority, not a dependency: all streams build on phase 1, and none needs another's output.
 
 ## Phase 1: app mode, Read and Edit
 
@@ -66,7 +66,7 @@ Notes:
 
 `createAgentExecutor` in `renderer/features/agent.ts` is already React-free. Move it, with `changeView`, into `app/src/agent/host.ts`, with no behaviour change, so the headless host (F) can reuse it. Add an `onCall(tool, args, client)` observer to `ExecutorDeps` for J's "Follow agent". Update the layering test, run the tests and commit. Afterwards neither F nor J needs to change the executor, which removes their only real collision.
 
-### Wave 2: seven parallel streams
+### Wave 2: six parallel streams (L is done)
 
 | Step | Owns | Does | Size |
 |---|---|---|---|
@@ -76,21 +76,21 @@ Notes:
 | **I** Debugger tools | `app/src/agent/tools/debug.ts` | `debug_attach`, `debug_step`, `debug_continue`, `debug_values`, `debug_memory`. They wait for the next `debug_state` stop with a timeout. E2E with the mock's debugger, like `AUTOTEST_FLOW=debug` | M |
 | **J** UI annotations | `app/src/renderer/` (`Listing.tsx`, `Decompiler.tsx`, the `AgentUi` implementation), `app/src/agent/types.ts` (`AgentUi` additions), `app/src/agent/tools/ui.ts`, the "Follow agent" item in `app/src/main/menu.ts`; not the executor | A `highlight` tool (addresses or decompiler lines, reusing the value-trail highlighting) and a "Follow agent" toggle (the view tracks what the agent reads) | M |
 | **K** C type parsing | Sidecar: `domains/datatypes.py`, `protocol.md`, `protocol.ts`, `test_datatypes.py`. App: `wire.ts`, `backend.ts`, `rpc.ts`, `app/src/agent/tools/types.ts` | A `parse_c_types` RPC with Ghidra's `CParser` (one transaction, undo label), then a `define_types` tool. **The sidecar half has no dependency on any agent work and can start right now**, in parallel with phase 1 | M |
-| **L** Atomic agent undo | Sidecar: `domains/program.py` (`undo`), `protocol.md`, `protocol.ts`, sidecar tests. App: `wire.ts`, `backend.ts`, `rpc.ts` (the `undo` params only), `app/src/agent/tools/edit.ts` | An optional `expect` on `undo` (the undo name the caller saw): the sidecar undoes only if the top step still has that name, else `InvalidArgument`. `undo_agent_edit` passes it. This closes the gap phase 1 left between the guard's check and the undo. Capability-gated, so providers without it keep the phase 1 behaviour | S |
+| ~~**L** Atomic agent undo~~ | | **Done in phase 1** (`32569bc`): every edit result carries `undoName`, `undo {expect}` undoes only if the top step still has that name (checked on thread R), `undo_agent_edit` uses it and the label patterns are gone. | done |
 
 Ownership rules (they are what keeps the streams from colliding):
 
 - **Nobody changes the executor in `src/agent/host.ts`** (step 0b). F builds a headless `ExecutorDeps` around it. J uses the `onCall` observer and adds `highlight` to `AgentUi`. A stream that finds it needs an executor change stops and reports it.
 - **G and J both touch `main/menu.ts`**: G adds Full to the access items, J adds "Follow agent". Separate lines in the same menu.
-- **F, K and L all touch `rpc.ts`** (and K and L also `protocol.*`, `wire.ts`, `backend.ts`). F only for whatever `WebSocketBackend` needs under Node's `WebSocket`; K only for its new method; L only for the `undo` params. Small, separate edits: tell each stream about the others.
+- **F and K both touch `rpc.ts`** (K also `protocol.*`, `wire.ts`, `backend.ts`). F only for whatever `WebSocketBackend` needs under Node's `WebSocket`; K only for its new method. Small, separate edits: tell each stream about the others.
 - Everything else shared is trivial: one import line per stream in `src/agent/tools/index.ts`, and each stream's additions to the `AUTOTEST_FLOW=agent` flow, which step 3 combines.
 - G does not wait for F. Its tools work in app mode; whether they also run headless is checked in step 3.
 
-If seven streams are too many to merge and review at once, run F, J and K first (the large or risky ones) and G, H, I and L after (small, conflict-free).
+If six streams are too many to merge and review at once, run F, J and K first (the large or risky ones) and G, H and I after (small, conflict-free).
 
 ### Step 3: integration (serial, M)
 
-Merge F–L. Suggested order: K, L, G, H, I, then F, then J. Extend the agent autotest flow with a Full-mode run, a headless run (two bridges share one host, then the app takes over), the debugger steps against the mock, and a highlight. Update the docs.
+Merge F–K. Suggested order: K, G, H, I, then F, then J. Extend the agent autotest flow with a Full-mode run, a headless run (two bridges share one host, then the app takes over), the debugger steps against the mock, and a highlight. Update the docs.
 
 ## Running it
 
