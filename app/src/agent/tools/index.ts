@@ -1,4 +1,5 @@
 import type { ToolDef } from "../types";
+import { readTools } from "./read";
 import { status } from "./status";
 
 /**
@@ -7,5 +8,6 @@ import { status } from "./status";
  */
 export const TOOLS: readonly ToolDef[] = [
   status,
+  ...readTools,
 ];
 export const toolByName = (name: string): ToolDef | undefined => TOOLS.find((t) => t.name === name);
