@@ -4,7 +4,7 @@
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
-    "build": "electron-vite build && node scripts/build-fixture.mjs",
+    "build": "electron-vite build && node scripts/build-fixture.mjs && node scripts/build-bridge.mjs",
     "postinstall": "node scripts/dev-app.cjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
@@ -68,6 +68,14 @@
       {
         "from": "out/providers/fixture.cjs",
         "to": "providers/fixture.cjs"
+      },
+      {
+        "from": "out/mcp/bridge.cjs",
+        "to": "mcp/bridge.cjs"
+      },
+      {
+        "from": "../packaging/ghidorita-mcp",
+        "to": "mcp/ghidorita-mcp"
       },
       {
         "from": "bundle/THIRD_PARTY_NOTICES",
