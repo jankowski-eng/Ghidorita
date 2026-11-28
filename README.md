@@ -120,7 +120,7 @@ command = "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
 tool_timeout_sec = 120   # decompiling a big function can take over a minute
 ```
 
-If Ghidorita is not running the wrapper starts it (`--no-launch` turns that off; the agent then only gets a `status` tool that says so). In a development checkout use `node app/out/mcp/bridge.cjs` as the command (after `npm run build`).
+If Ghidorita is not running the wrapper starts it (`--no-launch` turns that off; the agent then only gets a `status` tool that says so). In a development checkout use `node app/out/mcp/bridge.cjs --no-launch` as the command (after `npm run build` and with the app running from `npm start`; without `--no-launch` the bridge would start an installed Ghidorita).
 
 Everything the binary contains (strings, comments, symbol names) reaches the agent as untrusted data. Edits can be undone with Cmd+Z; `undo_agent_edit` only ever undoes the agent's own newest change. Full design: [docs/AGENTS_MCP.md](docs/AGENTS_MCP.md).
 
