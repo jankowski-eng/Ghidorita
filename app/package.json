@@ -27,6 +27,7 @@
     "ws": "^8.23.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-virtual": "^3.14.28",
     "monaco-editor": "^0.58.0",
