@@ -1,5 +1,5 @@
 import net from "node:net";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { lockPath } from "../agent/socketPath";
 
@@ -26,7 +26,7 @@ export async function acquireLock(sock: string, o: { answers?(sock: string): Pro
   if (process.platform === "win32") return { release() {} }; // a named pipe cannot be bound twice (EADDRINUSE): that is the lock
   const dir = lockPath(sock), pid = o.pid ?? process.pid;
   for (let tries = 0; tries < 4; tries++) {
-    try { mkdirSync(dir, { mode: 0o700 }); } catch (e) {
+    try { mkdirSync(path.dirname(dir), { recursive: true, mode: 0o700 }); mkdirSync(dir, { mode: 0o700 }); } catch (e) { // the socket's directory may not exist yet (first start of a host)
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       const h = holderOf(dir);
       if (h) {
@@ -40,7 +40,15 @@ export async function acquireLock(sock: string, o: { answers?(sock: string): Pro
     }
     writeFileSync(path.join(dir, "pid"), String(pid));
     let held = true;
-    return { release() { if (held) { held = false; rmSync(dir, { recursive: true, force: true }); } } };
+    // a live holder may stay silent for longer than REUSED_PID_MS (a cold JVM start before it listens): its heartbeat keeps the lock young, so it is never taken for a reused pid
+    const beat = setInterval(() => { try { const t = new Date(); utimesSync(dir, t, t); } catch { /* the lock is gone: release() will notice */ } }, REUSED_PID_MS / 4);
+    beat.unref();
+    return { release() {
+      if (!held) return;
+      held = false; clearInterval(beat);
+      try { if (readFileSync(path.join(dir, "pid"), "utf8") !== String(pid)) return; } catch { return; } // someone else holds it now: not ours to delete
+      rmSync(dir, { recursive: true, force: true });
+    } };
   }
   return null;
 }

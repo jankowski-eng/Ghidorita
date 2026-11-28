@@ -397,6 +397,13 @@ def test_parse_c_types_category_and_existing_references(sc):
     assert sc.get_data_type("/Sz")["size"] == 16
 
 
+def test_parse_c_types_use_of_a_type_in_the_target_category_leaves_it_alone(sc):
+    sc.parse_c_types("struct InNet { int a; int b; };", category="/net")
+    r = sc.parse_c_types("struct Msg { struct InNet n; };", category="/net")
+    assert r == {"created": ["/net/Msg"], "replaced": []}
+    assert len(sc.get_data_type("/net/InNet")["components"]) == 2  # never replaced by the parser's empty placeholder
+
+
 def test_parse_c_types_errors_roll_back_whole(sc):
     cprog(sc, "t_cparse_err")
     before = top(sc)

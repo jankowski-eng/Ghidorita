@@ -185,3 +185,10 @@ test("values and memory: formatted, escaped, bounded", async () => {
   assert.equal(f.log.at(-1)[2], 4096);
   await fails(t("debug_memory").handler(f.ctx, {}), /address is required/);
 });
+
+test("afterSend never sends a command when the call was cancelled before it", async () => {
+  const ac = new AbortController(); ac.abort(); let sent = 0;
+  const ctx = { session: { sessionId: "s" }, backend: { events: { onDebug: () => () => {} } }, signal: ac.signal };
+  await assert.rejects(afterSend(ctx, 1, () => true, async () => { sent++; }), /Cancelled/);
+  assert.equal(sent, 0);
+});

@@ -97,6 +97,14 @@ test("lock: exactly one of many concurrent starters wins; release lets the next 
   fs.rmSync(dir, { recursive: true });
 });
 
+test("lock: the socket's directory is created when missing; release leaves a lock someone else holds now; a live holder keeps its lock young", async () => {
+  const base = tmp(), sock = path.join(base, "new", "dir", "s");
+  const l = await acquireLock(sock); assert.ok(l, "the host's first start: no directory yet");
+  fs.writeFileSync(path.join(lockPath(sock), "pid"), "999999"); // stolen by another holder
+  l.release(); assert.ok(fs.existsSync(lockPath(sock)), "not ours any more: not deleted");
+  fs.rmSync(base, { recursive: true });
+});
+
 test("lock: a dead holder's lock is replaced by exactly one of the racers; a live one is respected; a reused pid is told by the silent socket", async () => {
   const dir = tmp(), sock = path.join(dir, "s");
   fs.mkdirSync(lockPath(sock)); fs.writeFileSync(path.join(lockPath(sock), "pid"), String(await deadPid()));

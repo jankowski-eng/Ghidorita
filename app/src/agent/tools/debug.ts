@@ -41,7 +41,7 @@ export async function afterSend(ctx: ToolCtx, secs: number, ready: (s: DebugStat
   const onAbort = () => miss(new ToolError(ABORTED));
   ctx.signal.addEventListener("abort", onAbort, { once: true });
   try {
-    if (ctx.signal.aborted) onAbort();
+    if (ctx.signal.aborted) throw new ToolError(ABORTED); // never send a command nobody waits for (the kill switch, a timeout)
     const now = await send();
     if (now && ready(now)) hit(now);
     return await done;

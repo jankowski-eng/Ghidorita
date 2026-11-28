@@ -391,6 +391,8 @@ class DataTypes:
             for m in (parser.getComposites(), parser.getEnums(), parser.getTypes(), parser.getFunctions()):
                 for dt in m.values():
                     old = dtm.getDataType(dt.getDataTypePath())
+                    if old is None and not cp.isRoot():
+                        old = dtm.getDataType(cp, dt.getName())  # the program's type of that name in the target category
                     if old is None:
                         declared[str(dt.getPathName())] = dt
                     elif isinstance(dt, Composite) and dt.getNumComponents() == 0 and not old.isEquivalent(dt):

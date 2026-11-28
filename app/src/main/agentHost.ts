@@ -99,7 +99,8 @@ export async function startHost(o: HostOpts): Promise<Host | null> {
   const started = (async () => {
     await agent.start(); // listening early: a client that connects while the sidecar boots is told to wait, and a second host sees the lock and the socket
     if (!agent.listening()) { log("could not listen on the agent socket (see above)"); return void quit(1); }
-    ctl = await serveControl(o.place.path, async () => { const r = await stop(); lock.release(); log(`handover: saved=${r.saved}${r.saveError ? ` (${r.saveError})` : ""}, backend exit ${r.code}; quitting`); return { saved: r.saved, saveError: r.saveError }; }, log, () => void quit());
+    // close() unlinks the control socket at once (before the lock goes, so a successor's is never unlinked) and keeps the app's connection open for the reply
+    ctl = await serveControl(o.place.path, async () => { const r = await stop(); void ctl?.close().catch(() => {}); lock.release(); log(`handover: saved=${r.saved}${r.saveError ? ` (${r.saveError})` : ""}, backend exit ${r.code}; quitting`); return { saved: r.saved, saveError: r.saveError }; }, log, () => void quit());
     let port: number;
     try { port = await o.provider.start(o.launch, (why) => { if (stopping) return; dead = true; log(`the analysis backend exited unexpectedly (${why})`); void quit(1); }); }
     catch (e) { log(`backend startup failed: ${e}`); o.provider.kill(); return void quit(1); }

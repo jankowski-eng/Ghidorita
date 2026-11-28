@@ -121,7 +121,7 @@ const export_: ToolDef<{ kind: typeof KINDS[number]; path: string }> = {
 
 /** Below Full in the app: the user decides. Nothing to protect when no program is open. */
 async function confirmReplace(ctx: ToolCtx, message: string) {
-  if (ctx.mode === "full" || !ctx.ui || !ctx.session) return;
+  if (ctx.mode === "full" || !ctx.ui) return; // also with no program open: opening an arbitrary file is the user's call
   if (!(await ctx.ui.confirm(message))) throw new ToolError("The user declined. Do not try again unless they ask you to.");
 }
 const label = (s: { name: string }) => esc(s.name, 100, true);

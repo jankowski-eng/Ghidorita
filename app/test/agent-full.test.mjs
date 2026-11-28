@@ -95,6 +95,9 @@ test("open/close: confirmed below Full, declined, no prompt in Full or headless"
   w = world({ mode: "full" });
   await tool("open_program").handler(w.ctx, { program: "def" }); await tool("close_program").handler(w.ctx, {});
   assert.equal(w.prompts.length, 0);
+  w = world({ mode: "edit", session: false }); // no program open: still asked (an arbitrary file would be imported)
+  await tool("open_program").handler(w.ctx, { path: "/bin/ls" });
+  assert.equal(w.prompts.length, 1); assert.match(w.prompts[0], /open "?\/bin\/ls/);
   w = world({ mode: "edit", ui: "none" }); // headless
   await tool("open_program").handler(w.ctx, { program: "abc" }); await tool("open_program").handler(w.ctx, { path: "/bin/ls" }); await tool("close_program").handler(w.ctx, {});
   assert.deepEqual(w.calls.map((c) => c[0]), ["reopen", "open", "close"]); assert.equal(w.prompts.length, 0);
