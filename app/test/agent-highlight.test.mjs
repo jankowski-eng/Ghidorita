@@ -5,9 +5,9 @@ import { build } from "esbuild";
 const r = await build({ stdin: { resolveDir: new URL("../src/", import.meta.url).pathname, loader: "ts", contents: `
 export { uiTools } from "./agent/tools/ui"; export { MAX_HL_ADDRESSES } from "./agent/tools/ui";
 export { agentMarks } from "./renderer/features/agentHighlight";
-export { followTarget, debounced, followAgent } from "./renderer/features/agentFollow";
+export { followTarget, debounced, followAgent, setFollowAgent } from "./renderer/features/agentFollow";
 export { viewsReducer, initialViews } from "./renderer/store/views";` }, bundle: true, format: "esm", write: false, platform: "node" });
-const { uiTools, MAX_HL_ADDRESSES, agentMarks, followTarget, debounced, followAgent, viewsReducer, initialViews } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
+const { uiTools, MAX_HL_ADDRESSES, agentMarks, followTarget, debounced, followAgent, setFollowAgent, viewsReducer, initialViews } = await import("data:text/javascript," + encodeURIComponent(r.outputFiles[0].text));
 const highlight = uiTools.find((t) => t.name === "highlight");
 const hit = (name, address) => ({ name, address, kind: "function" });
 const ops = { searches: { searchSymbols: ({ query }) => ({ result: Promise.resolve(query === "main" ? [hit("main", "0x401000")] : []), cancel() {} }) }, functions: { containing: async ({ address }) => ({ name: "main", entry: "0x401000", size: 9, signature: "" , address }) } };
@@ -90,6 +90,21 @@ test("followAgent debounces a burst to the last target and stays out of the user
   await new Promise((r) => setTimeout(r, 40)); assert.equal(gone.length, 2);
 });
 
+test("followAgent: a slow lookup never moves the view after a newer call, a cancel or the setting changing", async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms)), gone = [], prog = { api: { searches: { searchSymbols: ({ query }) => ({ result: wait(query === "slow" ? 60 : 1).then(() => [hit(query, query === "slow" ? "0x1" : "0x2")]), cancel() {} }) } } };
+  const s = { program: () => prog, blocked: () => false, views: { getState: () => ({}) } };
+  const f = followAgent(s, async (a) => { gone.push(a); }, 5);
+  f("decompile", { function: "slow" }); await wait(20); f("decompile", { function: "fast" }); // the slow lookup is in flight when a newer call arrives
+  await wait(150); assert.deepEqual(gone, ["0x2"]);
+  f("decompile", { function: "slow" }); await wait(20); f.cancel(); await wait(120); assert.deepEqual(gone, ["0x2"], "cancel drops the lookup in flight");
+  f("decompile", { function: "fast" }); setFollowAgent(false); await wait(60); assert.deepEqual(gone, ["0x2"], "turning it off drops the pending move");
+});
+test("highlight: a call cancelled during the last lookup highlights nothing", async () => {
+  const ac = new AbortController(), { c, ui } = rec();
+  const o = { ...ops, searches: { searchSymbols: (p) => { ac.abort(); return ops.searches.searchSymbols(p); } } };
+  await assert.rejects(highlight.handler({ ops: o, ui, signal: ac.signal }, { lines: [{ function: "main", from: 1, to: 2 }] }), /cancelled/);
+  assert.equal(c.length, 0);
+});
 test("Agent > Follow Agent: an unchecked checkbox that survives rebuilds and sends agent-follow to the renderer", async () => {
   const m = await build({ entryPoints: [new URL("../src/main/menu.ts", import.meta.url).pathname], bundle: true, format: "esm", write: false, platform: "node", alias: { electron: new URL("./stub-electron.mjs", import.meta.url).pathname } });
   const { createMenu } = await import("data:text/javascript," + encodeURIComponent(m.outputFiles[0].text));

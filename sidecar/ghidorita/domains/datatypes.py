@@ -392,14 +392,22 @@ class DataTypes:
                 for dt in m.values():
                     # a type is classified against where it will live (the target category); the lookup at its parsed (root) path is only for what the C merely refers to
                     old = dtm.getDataType(cp, dt.getName()) if not cp.isRoot() else dtm.getDataType(dt.getDataTypePath())
-                    if old is None and not cp.isRoot() and isinstance(dt, Composite) and dt.getNumComponents() == 0:
-                        old = dtm.getDataType(dt.getDataTypePath())  # an empty composite is `struct Base b;`: the program's `Base`, wherever it is
+                    empty = isinstance(dt, Composite) and dt.getNumComponents() == 0
+                    if old is None and empty:
+                        old = dtm.getDataType(dt.getDataTypePath())
+                    if old is None and empty:  # `struct Base b;` makes the parser declare an empty `Base`: the program's `Base`, in whatever category
+                        same = [c for c in dtm.getAllComposites() if str(c.getName()) == str(dt.getName())]
+                        if len(same) > 1:
+                            raise RpcError(INVALID, "%s is ambiguous: the program has %s. Declare it in the C source, or give a category that holds it" % (dt.getName(), ", ".join(sorted(str(c.getPathName()) for c in same)[:6])))
+                        old = same[0] if same else None
                     if old is None:
                         declared[str(dt.getPathName())] = dt
-                    elif isinstance(dt, Composite) and dt.getNumComponents() == 0 and not old.isEquivalent(dt):
-                        uses.append((dt, old))  # `struct Base b;` makes the parser declare an empty `Base` (it does not look the tag up in the program)
+                    elif empty and not old.isEquivalent(dt):
+                        uses.append((dt, old))  # the parser does not look the tag up in the program
                     elif not old.isEquivalent(dt):
                         declared[str(dt.getPathName())] = dt
+                    elif str(old.getDataTypePath()) != str(dt.getDataTypePath()):
+                        uses.append((dt, old))  # equivalent: not redefined, but what points at the parsed copy must point at the real one
             tx = scratch.startTransaction("prepare")
             for ph, old in uses:  # put the program's real type in the placeholder's place, so nothing declared points at the empty one and it never replaces the real one
                 real = scratch.resolve(old, DataTypeConflictHandler.REPLACE_HANDLER)

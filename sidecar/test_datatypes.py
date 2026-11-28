@@ -415,6 +415,26 @@ def test_parse_c_types_a_root_type_does_not_hide_a_declaration_for_another_categ
     assert len(sc.get_data_type("/Pt")["components"]) == 1  # the root one is untouched
 
 
+def test_parse_c_types_references_resolve_across_categories_and_equivalent_declarations_remap(sc):
+    cprog(sc, "t_cparse_xcat")
+    sc.parse_c_types("struct Base { int a; int b; };", category="/model")
+    assert sc.parse_c_types("struct Use { struct Base b; };") == {"created": ["/Use"], "replaced": []}  # default category: Base is found in /model
+    u = sc.get_data_type("/Use")
+    assert u["size"] == 8 and u["components"][0]["typePath"] == "/model/Base"
+    with pytest.raises(RpcError):
+        sc.get_data_type("/Base")  # no empty copy
+    sc.parse_c_types("struct InNet { int a; int b; };", category="/net")
+    r = sc.parse_c_types("struct InNet { int a; int b; }; struct Msg { struct InNet n; };", category="/net")
+    assert r == {"created": ["/net/Msg"], "replaced": []}  # the equivalent declaration is not a change
+    assert sc.get_data_type("/net/Msg")["components"][0]["typePath"] == "/net/InNet"
+    with pytest.raises(RpcError):
+        sc.get_data_type("/InNet")
+    sc.parse_c_types("struct Twin { int a; };", category="/p"); sc.parse_c_types("struct Twin { int a; int b; };", category="/q")
+    with pytest.raises(RpcError) as e:
+        sc.parse_c_types("struct Holder { struct Twin t; };")
+    assert e.value.code == INVALID and "/p/Twin" in str(e.value) and "/q/Twin" in str(e.value)
+
+
 def test_parse_c_types_errors_roll_back_whole(sc):
     cprog(sc, "t_cparse_err")
     before = top(sc)

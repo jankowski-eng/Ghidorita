@@ -36,6 +36,7 @@ export async function serveControl(sock: string, onHandover: () => Promise<Hando
       buf += d.toString();
       const nl = buf.indexOf("\n");
       if ((nl < 0 ? buf.length : nl) > MAX_LINE) return void c.destroy(); // a complete line counts too
+      if (nl < 0) return; // a request split across data events: wait for its newline
       let req: { op?: unknown } | null = null;
       try { req = JSON.parse(buf.slice(0, nl)); } catch { /* answered below */ }
       buf = "";

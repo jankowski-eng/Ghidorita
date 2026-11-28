@@ -103,7 +103,7 @@ export async function runHeadless(o = {}) {
     kids.push(app);
     await until(() => !alive(host2), "the host to quit when the app starts", 150_000);
     const lines = fs.readFileSync(log, "utf8");
-    check(/handover: .*saved/.test(lines) || standIn, "the host logs its handover: " + lines.slice(-400));
+    check(/handover: saved=true/.test(lines), "the host logs a confirmed save in its handover (both takeover variants): " + lines.slice(-400));
     // both bridges follow the app (retry, replay of initialize, list_changed), and calls work again
     await until(() => c1.changes > changes0, "bridge C to follow the app", 60_000);
     const onApp = await until(async () => { const s = await call(c2, "status"); return !s.error && /Access: edit/.test(s.text) ? s.text : null; }, "calls through the app", 120_000);

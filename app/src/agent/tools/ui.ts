@@ -64,6 +64,7 @@ const highlight: ToolDef<HlArgs> = {
       if (!(from >= 1) || !(to >= from) || to - from >= MAX_HL_LINES) throw new ToolError(`Lines ${r.from}-${r.to}: from must be at least 1, to at least from, and at most ${MAX_HL_LINES} lines per range.`);
       lines.push({ entry: (await resolveFunction(r.function, ops, ctx.signal)).entry, from, to });
     }
+    if (ctx.signal?.aborted) throw new ToolError("cancelled: nothing was highlighted."); // the last lookups cannot be cancelled themselves
     const unique = [...new Set(addresses)];
     await u.highlight({ addresses: unique, lines, label: a.label?.slice(0, 80) });
     return `Highlighted ${unique.length} addresses and ${lines.length} line ranges${a.label ? ` (${esc(a.label, 80)})` : ""}. Lines show in the function's decompiler tab.`;

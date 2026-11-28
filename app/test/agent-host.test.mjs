@@ -177,6 +177,18 @@ test("control socket: an oversized line is refused even when it ends in a newlin
   await next.close(); fs.rmSync(dir, { recursive: true });
 });
 
+test("control socket: a request split across data events is still one request", async () => {
+  const dir = tmp(), sock = path.join(dir, "s");
+  const srv = await serveControl(sock, async () => ({ saved: true }), () => {});
+  const c = net.connect(ctlPath(sock)); let got = "";
+  c.on("data", (d) => { got += d; });
+  await new Promise((r) => c.on("connect", r));
+  c.write('{"op":"hand'); await sleep(50); c.write('over"}\n');
+  await until(() => got.includes('"done":true'), 3000);
+  assert.match(got, /"ok":true/); assert.ok(!/unknown request/.test(got));
+  c.destroy(); await srv.close(); fs.rmSync(dir, { recursive: true });
+});
+
 test("handover: a failed save is reported; a hung host times out; garbage is refused", async () => {
   const dir = tmp(), sock = path.join(dir, "s");
   const srv = await serveControl(sock, async () => ({ saved: false, saveError: "disk full" }), () => {});
