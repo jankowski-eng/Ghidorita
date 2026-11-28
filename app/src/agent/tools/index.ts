@@ -2,6 +2,7 @@ import type { ToolDef } from "../types";
 import { editTools } from "./edit";
 import { readTools } from "./read";
 import { status } from "./status";
+import { typesTools } from "./types";
 import { uiTools } from "./ui";
 
 /**
@@ -13,5 +14,6 @@ export const TOOLS: readonly ToolDef[] = [
   ...readTools,
   ...editTools,
   ...uiTools,
+  ...typesTools,
 ];
 export const toolByName = (name: string): ToolDef | undefined => TOOLS.find((t) => t.name === name);

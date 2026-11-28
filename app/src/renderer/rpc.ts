@@ -206,6 +206,12 @@ export class WebSocketBackend implements ApplicationBackend {
         renameDataType: (p) => edit("typeEditing", "renameDataType", "rename_data_type", p),
         editStruct: (p) => edit("typeEditing", "editStruct", "edit_struct", p),
         editEnum: (p) => edit("typeEditing", "editEnum", "edit_enum", p),
+        parseCTypes: async (p) => { // not recorded when nothing changed: the provider committed no undo step then, and a change-log entry would claim one
+          const r = await read("parse_c_types", p, "parseCTypes");
+          if (sessionId !== this.sessionId) throw this.stale();
+          if (r.created.length + r.replaced.length) this.hooks.onEdit?.("parseCTypes", p, r);
+          return r;
+        },
       },
       bookmarks: {
         list: (p) => job("bookmarks", "list_bookmarks", p, "cancel_search"),

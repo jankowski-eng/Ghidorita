@@ -119,6 +119,7 @@ export const results = {
   clear_code: object,
   create_struct_from_data: shape({ path: str }),
   auto_create_structure: shape({ path: str }),
+  parse_c_types: shape({ created: array(str), replaced: array(str) }),
   create_data_type: shape({ path: str }),
   delete_data_type: object,
   rename_data_type: shape({ path: str }),

@@ -223,7 +223,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "exactSymbolSearch", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail"] };
+  "references", "variableReferences", "exactSymbolSearch", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "parseCTypes"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -820,6 +820,43 @@ const handlers = {
       if (apply) S.data.set(n, { mnemonic: name, length, ref: { path: t.path, count: 1 } });
       return { path: t.path };
     });
+  },
+  parse_c_types({ c, category = "/" }, notify) { // a tiny C reader: struct/union/enum bodies and `typedef TYPE NAME;`, no preprocessor, like the sidecar's; the error names the line
+    if (typeof c !== "string" || !c.trim()) bad("c must be non-empty C source");
+    if (c.length > 200000) bad("c is too long");
+    const cat = catOf(category), src = c.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, " "));
+    const lineOf = (at) => src.slice(0, at).split("\n").length, clean = (t) => t.replace(/^(struct|union|enum)\s+/, "");
+    const run = () => { // applies declaration by declaration (a later one sees the earlier) and returns the paths it created and replaced
+      const out = { created: [], replaced: [] }, re = /\s*(?:(struct|union|enum)\s+(\w+)\s*\{([^{}]*)\}|typedef\s+([^;{}]+?)\s+(\w+))\s*;/y;
+      for (let at = 0, m; src.slice(at).trim(); at = re.lastIndex) {
+        re.lastIndex = at;
+        const start = at + src.slice(at).length - src.slice(at).trimStart().length;
+        if (!(m = re.exec(src))) bad(`C parse error near line ${lineOf(start)}: unexpected token`);
+        const [, kind, name, body, base, alias] = m, path = join(cat, name ?? alias);
+        let t;
+        try {
+          if (kind === "enum") {
+            let next = 0n;
+            t = { kind, name, path, size: 4, comps: [], values: body.split(",").map((x) => x.trim()).filter(Boolean).map((x) => { const e = /^(\w+)(?:\s*=\s*(-?\w+))?$/.exec(x); if (!e) bad("enum"); next = e[2] === undefined ? next : BigInt(e[2]); return { name: e[1], value: String(next++) }; }) };
+          } else if (kind) {
+            t = { kind, name, path, size: 0, comps: body.split(";").map((x) => x.trim()).filter(Boolean).map((x) => {
+              const f = /^(.+?[\s*])(\w+)(?:\[(\d+)\])?$/.exec(x); if (!f) bad("field");
+              const r = resolveType(clean(f[1].trim()) + (f[3] ? `[${f[3]}]` : ""));
+              return { len: r.size, display: r.display, typePath: r.path, name: f[2] };
+            }) };
+          } else { const r = resolveType(clean(base)); t = { kind: "typedef", name: alias, path, size: r.size, base: r.display, basePath: r.path, comps: [], values: [] }; }
+        } catch (e) { bad(`C parse error near line ${lineOf(start)}: ${String(e.message).replace(/^InvalidArgument: /, "")}`); }
+        const old = S.dt.get(path);
+        if (!old) out.created.push(path); else if (JSON.stringify(old) !== JSON.stringify(t)) out.replaced.push(path);
+        S.dt.set(path, t); S.cats.add(cat);
+      }
+      return { created: out.created.sort(), replaced: out.replaced.sort() };
+    };
+    const saved = structuredClone(S);
+    let dry;
+    try { dry = run(); } finally { S = saved; } // a parse error leaves nothing behind; a clean run is repeated inside the one undo step
+    if (!dry.created.length && !dry.replaced.length) return dry; // nothing changed: no undo step, no undoName
+    return edit("Define types from C", notify, null, ["type"], run);
   },
   get_comments({ address }) {
     const n0 = parseAddr(address);

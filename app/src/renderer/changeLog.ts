@@ -29,6 +29,7 @@ export function describe(method: string, p: any): { label: string; address?: Add
     case "deleteDataType": return { label: `Delete type ${p.path}` };
     case "renameDataType": return { label: `Rename type ${p.path} to ${p.newName}` };
     case "editStruct": return { label: `Edit structure ${p.path}` };
+    case "parseCTypes": { const n = (p.c as string).match(/\btypedef\b|\b(?:struct|union|enum)\s+\w*\s*\{/g)?.length ?? 0; return { label: `Define types from C${p.category && p.category !== "/" ? ` in ${p.category}` : ""} (${n})` }; }
     case "editEnum": return { label: `Edit enum ${p.path}` };
     default: return null;
   }
