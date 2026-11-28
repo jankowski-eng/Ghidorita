@@ -121,6 +121,20 @@ test("lock: a dead holder's lock is replaced by exactly one of the racers; a liv
   fs.rmSync(dir, { recursive: true });
 });
 
+test("lock: a starter that judged the old holder dead never deletes the fresh lock another starter took meanwhile", async () => {
+  const dir = tmp(), sock = path.join(dir, "s"), lock = lockPath(sock);
+  fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, "pid"), String(process.pid)); // an old holder whose pid lives on but whose socket is silent: a reused pid
+  const old = new Date(Date.now() - 10 * 60_000); fs.utimesSync(lock, old, old);
+  const a = process.ppid; // the other starter, alive
+  const b = await acquireLock(sock, { answers: async () => { // B is busy probing; meanwhile A replaces the lock
+    fs.rmSync(lock, { recursive: true }); fs.mkdirSync(lock); fs.writeFileSync(path.join(lock, "pid"), String(a));
+    return false;
+  } });
+  assert.equal(b, null, "B does not claim a lock A took");
+  assert.equal(fs.readFileSync(path.join(lock, "pid"), "utf8"), String(a), "and A's lock is untouched");
+  fs.rmSync(dir, { recursive: true });
+});
+
 test("agent.start takes the lock itself when none is given, and stop gives it back; a second agent does not listen", async () => {
   const dir = tmp(), sock = path.join(dir, "s"), logs = [];
   const mk = () => createAgent({ send() {}, settingsFile: path.join(dir, "a.json"), socket: { path: sock, ownDir: null }, table: [], env: {}, log: (m) => logs.push(m) });
