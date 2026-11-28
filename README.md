@@ -117,8 +117,10 @@ claude mcp add ghidorita -- "/Applications/Ghidorita.app/Contents/Resources/mcp/
 # ~/.codex/config.toml
 [mcp_servers.ghidorita]
 command = "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
-tool_timeout_sec = 120   # decompiling a big function can take over a minute
+tool_timeout_sec = 300   # a slow tool (decompile, wait_for_analysis) answers within about 270 s; Codex's default of 60 would cut it off
 ```
+
+No tool runs longer than about 270 s (the decompiler's `timeoutSecs` defaults to 90 and is capped at 240, `wait_for_analysis` waits at most 240 s), so a client timeout of 300 s always lets the tool's own answer (a Timeout error that says what to retry) arrive first.
 
 The connector never starts Ghidorita by itself, so having it configured costs nothing in sessions that don't use it. While the app is not running the agent sees one `status` tool that says so; calling it with `launch: true` asks macOS to start the app. The connector switches to the app by itself when it appears (about 2 s) and back when it quits, and tells the agent its tools changed; no restart of the agent is needed. In a development checkout use `node app/out/mcp/bridge.cjs` as the command (after `npm run build`; the app runs from `npm start`).
 

@@ -60,7 +60,7 @@ claude mcp add ghidorita -- "/Applications/Ghidorita.app/Contents/Resources/mcp/
 # ~/.codex/config.toml
 [mcp_servers.ghidorita]
 command = "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
-tool_timeout_sec = 120   # decompiling a big function can take over a minute
+tool_timeout_sec = 300   # a slow tool (decompile, wait_for_analysis) answers within about 270 s; Codex's default of 60 would cut it off
 ```
 
 ### Main ⇄ renderer

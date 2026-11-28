@@ -54,7 +54,7 @@ export function setupText(p: { packaged: boolean; resourcesPath: string; appDir:
   const q = (s: string) => JSON.stringify(s);
   return [`# Claude Code`, `claude mcp add ghidorita -- ${[cmd, ...args].map(q).join(" ")}`, ``,
     `# Codex: add to ~/.codex/config.toml`, `[mcp_servers.ghidorita]`, `command = ${q(cmd)}`, ...(args.length ? [`args = [${args.map(q).join(", ")}]`] : []),
-    `tool_timeout_sec = 120   # decompiling a big function can take over a minute`, ``].join("\n");
+    `tool_timeout_sec = 300   # a slow tool (decompile, wait_for_analysis) answers within about 270 s; Codex's default of 60 would cut it off`, ``].join("\n");
 }
 
 export function createAgent(o: AgentOpts) {

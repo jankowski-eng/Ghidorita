@@ -38,7 +38,9 @@ const sym = (s: unknown) => esc(s, 160);
 const OFFSET = { type: "integer", minimum: 0, default: 0, description: "Lines to skip (use the offset a continuation line names)." };
 const limitOf = (def: number, max: number) => ({ type: "integer", minimum: 1, maximum: max, default: def, description: "Lines per call." });
 const FUNCTION = (what = "Function name or an address inside it (0x401000, main, FUN_00401000).") => ({ type: "string", description: what });
-const TIMEOUT = { type: "integer", minimum: 1, maximum: 600, description: "Decompiler timeout in seconds; raise it on a Timeout error for a big function." };
+// Every tool must answer within MAX_CALL_SECS (main allows the caller's timeoutSecs + 30 s): MCP clients cut a call off at their own tool timeout (Codex: tool_timeout_sec, suggested 300 in the setup text)
+const MAX_TIMEOUT = 240, DEFAULT_DECOMPILE = 90;
+const TIMEOUT = { type: "integer", minimum: 1, maximum: MAX_TIMEOUT, default: DEFAULT_DECOMPILE, description: `Decompiler timeout in seconds (default ${DEFAULT_DECOMPILE}, at most ${MAX_TIMEOUT}); raise it on a Timeout error for a big function.` };
 const addrText = (a: Address | null | undefined, fallback = "?") => a ?? fallback;
 
 export const list_functions = tool({
@@ -63,13 +65,13 @@ export const list_functions = tool({
 });
 
 export const decompile = tool({
-  name: "decompile", title: "Decompile", timeoutSecs: 150, capability: "decompile",
+  name: "decompile", title: "Decompile", timeoutSecs: 120, capability: "decompile",
   description: "Decompiles a function to C, then the decompiler's warnings. addresses=true appends `// @0x…` (the instruction behind each line), which xrefs on variables and edits need. Large functions are paged with offset.",
   inputSchema: schema({ function: FUNCTION(), timeoutSecs: TIMEOUT, addresses: { type: "boolean", default: false }, offset: OFFSET }, ["function"]),
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     const f = await resolveFunction(need(a.function, "function"), ops, ctx.signal);
-    const r = await run(ctx, ops.decompiler.decompile({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, 120, 1, 600) }));
+    const r = await run(ctx, ops.decompiler.decompile({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, DEFAULT_DECOMPILE, 1, MAX_TIMEOUT) }));
     const first = new Map<number, Address>();
     if (a.addresses === true) for (const t of r.tokens) if (t.address && !first.has(t.line)) first.set(t.line, t.address);
     const lines = r.text.split("\n").map((l, i) => esc(l, 400) + (first.has(i) ? `  // @${first.get(i)}` : ""));
@@ -352,12 +354,12 @@ const analysisText = (s: AnalysisState) =>
   `Analysis is still running: ${s.pct >= 0 ? `${s.pct}%` : "progress unknown"} (${esc(s.analyzer, 80)}). Call wait_for_analysis again.`;
 
 export const wait_for_analysis = tool({
-  name: "wait_for_analysis", title: "Wait for analysis", timeoutSecs: 600, capability: "analysis",
+  name: "wait_for_analysis", title: "Wait for analysis", timeoutSecs: MAX_TIMEOUT + 30, capability: "analysis",
   description: "Returns when the background analysis is done, cancelled or failed (at once if none is running), or after timeoutSecs with the progress. Edits fail with Busy while analysis runs; reads work.",
-  inputSchema: schema({ timeoutSecs: { type: "number", minimum: 0, maximum: 570, default: 60 } }),
+  inputSchema: schema({ timeoutSecs: { type: "number", minimum: 0, maximum: MAX_TIMEOUT, default: 60 } }),
   async handler(ctx, a) {
     const ops = needProgram(ctx);
-    const secs = num(a.timeoutSecs, 60, 0, 570);
+    const secs = num(a.timeoutSecs, 60, 0, MAX_TIMEOUT);
     const first = await ops.analysis.status();
     if (FINAL.has(first.state)) return analysisText(first);
     const sessionId = ctx.session?.sessionId;

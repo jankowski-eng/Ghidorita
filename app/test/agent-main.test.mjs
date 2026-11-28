@@ -314,7 +314,7 @@ test("helpers: client names are sanitised; the setup text carries the real path"
   assert.equal(cleanName(""), "agent"); assert.equal(cleanName(7), "agent"); assert.equal(cleanName("\u0007"), "agent");
   const packaged = setupText({ packaged: true, resourcesPath: "/Applications/Ghidorita.app/Contents/Resources", appDir: "/x" });
   assert.match(packaged, /claude mcp add ghidorita -- "\/Applications\/Ghidorita.app\/Contents\/Resources\/mcp\/ghidorita-mcp"/);
-  assert.match(packaged, /command = "\/Applications\/Ghidorita.app\/Contents\/Resources\/mcp\/ghidorita-mcp"\ntool_timeout_sec = 120/);
+  assert.match(packaged, /command = "\/Applications\/Ghidorita.app\/Contents\/Resources\/mcp\/ghidorita-mcp"\ntool_timeout_sec = 300/);
   const dev = setupText({ packaged: false, resourcesPath: "/r", appDir: "/dev/app" });
   assert.match(dev, /claude mcp add ghidorita -- "node" "\/dev\/app\/out\/mcp\/bridge.cjs"/);
   assert.match(dev, /command = "node"\nargs = \["\/dev\/app\/out\/mcp\/bridge.cjs"\]/);
@@ -433,4 +433,18 @@ test("calls in flight are capped per connection and in all: over the limit is an
   await Promise.all([...first.slice(1), ...second, again]);
   assert.equal(r.agent.pendingCount(), 0);
   await r.close();
+});
+
+test("the suggested client timeout covers the slowest tool: its own timeout answer always arrives first", async () => {
+  const { TOOLS } = await bundle("../src/agent/tools/index.ts");
+  const suggested = Number(/tool_timeout_sec = (\d+)/.exec(setupText({ packaged: true, resourcesPath: "/R", appDir: "/A" }))[1]);
+  let slowest = 0;
+  for (const t of TOOLS) {
+    const asked = t.inputSchema.properties.timeoutSecs?.maximum ?? 0; // main allows a caller-raised timeoutSecs plus 30 s
+    slowest = Math.max(slowest, t.timeoutSecs, asked ? asked + 30 : 0);
+  }
+  assert.ok(slowest <= 270, `the slowest call may take ${slowest} s`);
+  assert.ok(suggested >= slowest + 30, `tool_timeout_sec ${suggested} must exceed ${slowest} s`);
+  const def = TOOLS.find((t) => t.name === "decompile").inputSchema.properties.timeoutSecs;
+  assert.equal(def.default, 90); assert.equal(def.maximum, 240);
 });
