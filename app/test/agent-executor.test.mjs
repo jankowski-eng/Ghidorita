@@ -234,3 +234,18 @@ test("trackFunctions: trusted once loaded; a symbol/function/broad change makes 
   st = { ...st, reading: false, map: null }; assert.equal(t.list(), null);
   t.dispose(); assert.equal(fire, null);
 });
+
+test("a queued edit does not run against a program opened while it waited", async () => {
+  const gate = deferred(); let ran = [];
+  const w = (name, wait) => ({ name, access: "edit", handler: async (c) => { await wait; ran.push([name, c.session.sessionId]); return name; } });
+  const { ex, replies, set } = setup([w("first", gate.promise), w("second", Promise.resolve())]);
+  const a = ex.handle(call("first", { callId: "1" })), b = ex.handle(call("second", { callId: "2" })); // both made against program 1
+  await tick();
+  set({ api: { who: "two" }, session: { sessionId: "s2" } }); // the user opens another program while the first edit runs
+  gate.resolve(); await Promise.all([a, b]);
+  assert.deepEqual(ran, [["first", "s1"]]); // the second never ran, least of all against s2
+  assert.match(replies.find((x) => x.callId === "2").error, /opened, replaced or closed the program/);
+  set(null); // closed meanwhile: also refused
+  const c = ex.handle(call("first", { callId: "3" })); set(ONE); await c;
+  assert.match(replies.find((x) => x.callId === "3").error, /nothing was done/);
+});

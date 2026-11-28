@@ -59,12 +59,14 @@ export function createAgentExecutor(d: ExecutorDeps) {
     if (running.has(callId)) return; // a repeated id would otherwise get two replies
     const ac = new AbortController();
     running.set(callId, ac); d.onBusy?.(running.size);
+    const bound = d.program()?.session.sessionId ?? null; // the program this call was made against: an edit that waited its turn must not run against a different one
     try {
       const tool = tools.find((t) => t.name === call.tool);
       if (!tool) throw new Error(`Unknown tool ${call.tool}.`);
       const exec = () => {
         if (ac.signal.aborted) throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
         const p = d.program();
+        if ((p?.session.sessionId ?? null) !== bound) throw new ToolError("The user opened, replaced or closed the program while this call waited; nothing was done. Call status to see what is open, then retry.");
         return tool.handler({
         ops: p?.api ?? null, session: p?.session ?? null, backend: d.backend,
         functions: async () => { if (!p) throw new ToolError("No program is open. Ask the user to open one in Ghidorita (call status to see what is open)."); return d.functions?.() ?? p.api.functions.list(); },

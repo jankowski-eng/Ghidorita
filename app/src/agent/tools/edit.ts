@@ -9,7 +9,9 @@ import { needProgram, ToolError, type JsonSchema, type ToolAnnotations, type Too
  * change log, so the identity is the attribution. Never copy or spread between tag and call.
  * One retry when the backend says `cancelled` (a variable edit that another write raced); a fresh tagged object per attempt, none once aborted.
  */
-async function attempt<T>(ctx: ToolCtx, call: () => Promise<T>): Promise<T> {
+async function attempt<T>(ctx: ToolCtx, send: () => Promise<T>): Promise<T> {
+  // a call cancelled (or access switched off) while the name was still being resolved must not reach the sidecar: check right before each write
+  const call = () => { if (ctx.signal.aborted) throw new ToolError("Cancelled."); return send(); };
   try { return await call(); } catch (e) {
     if (!isKind(e, "cancelled") || ctx.signal.aborted) throw toToolError(e);
     try { return await call(); } catch (e2) { throw toToolError(e2); }
@@ -31,7 +33,7 @@ const renameSymbol: ToolDef<{ target: string; newName: string }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx), address = await resolveAddress(a.target, ops, ctx.signal);
     await attempt(ctx, () => ops.edits.renameSymbol(ctx.tag({ address, newName: a.newName })));
-    return `Renamed ${a.target} to ${a.newName} at ${address}.`;
+    return `Renamed ${clip(a.target, 120)} to ${clip(a.newName, 120)} at ${address}.`;
   },
 };
 
@@ -43,7 +45,7 @@ const createLabel: ToolDef<{ address: string; name: string }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx), address = await resolveAddress(a.address, ops, ctx.signal);
     await attempt(ctx, () => ops.edits.createLabel(ctx.tag({ address, name: a.name })));
-    return `Created label ${a.name} at ${address}.`;
+    return `Created label ${clip(a.name, 120)} at ${address}.`;
   },
 };
 
@@ -55,7 +57,7 @@ const renameVariable: ToolDef<{ function: string; variable: string; newName: str
   async handler(ctx, a) {
     const ops = needProgram(ctx), f = await resolveFunction(a.function, ops, ctx.signal);
     await attempt(ctx, () => ops.edits.renameVariable(ctx.tag({ entry: f.entry, name: a.variable, newName: a.newName })));
-    return `Renamed ${a.variable} to ${a.newName} in ${f.name} (${f.entry}). Decompile again: other names may have changed.`;
+    return `Renamed ${clip(a.variable, 120)} to ${clip(a.newName, 120)} in ${clip(f.name, 120)} (${f.entry}). Decompile again: other names may have changed.`;
   },
 };
 
@@ -67,7 +69,7 @@ const retypeVariable: ToolDef<{ function: string; variable: string; type: string
   async handler(ctx, a) {
     const ops = needProgram(ctx), f = await resolveFunction(a.function, ops, ctx.signal);
     await attempt(ctx, () => ops.edits.retypeVariable(ctx.tag({ entry: f.entry, name: a.variable, dataType: a.type })));
-    return `Retyped ${a.variable} as ${a.type} in ${f.name} (${f.entry}). Decompile again to see the effect.`;
+    return `Retyped ${clip(a.variable, 120)} as ${clip(a.type, 120)} in ${clip(f.name, 120)} (${f.entry}). Decompile again to see the effect.`;
   },
 };
 
@@ -79,7 +81,7 @@ const setSignature: ToolDef<{ function: string; signature: string }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx), f = await resolveFunction(a.function, ops, ctx.signal), signature = a.signature.trim();
     await attempt(ctx, () => ops.edits.setFunctionSignature(ctx.tag({ entry: f.entry, signature })));
-    return `Set the signature of ${f.name} (${f.entry}) to: ${signature}`;
+    return `Set the signature of ${clip(f.name, 120)} (${f.entry}) to: ${clip(signature, 300)}`;
   },
 };
 
@@ -104,7 +106,7 @@ const defineData: ToolDef<{ address: string; type: string }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx), address = await resolveAddress(a.address, ops, ctx.signal);
     await attempt(ctx, () => ops.edits.defineData(ctx.tag({ address, dataType: a.type })));
-    return `Defined ${a.type} at ${address}.`;
+    return `Defined ${clip(a.type, 120)} at ${address}.`;
   },
 };
 
@@ -116,7 +118,7 @@ const createFunction: ToolDef<{ address: string; name?: string }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx), address = await resolveAddress(a.address, ops, ctx.signal);
     const r = await attempt(ctx, () => ops.edits.createFunction(ctx.tag({ address, ...(a.name ? { name: a.name } : {}) })));
-    return `Created function ${r.name} at ${r.entry}.`;
+    return `Created function ${clip(r.name, 120)} at ${r.entry}.`;
   },
 };
 
@@ -128,7 +130,7 @@ const setBookmark: ToolDef<{ address: string; comment: string; category?: string
   async handler(ctx, a) {
     const ops = needProgram(ctx), address = await resolveAddress(a.address, ops, ctx.signal), category = a.category ?? "agent";
     await attempt(ctx, () => ops.bookmarks.set(ctx.tag({ address, category, comment: a.comment })));
-    return `Bookmarked ${address} (${category}).`;
+    return `Bookmarked ${address} (${clip(category, 60)}).`;
   },
 };
 
@@ -145,7 +147,7 @@ const createType: ToolDef<{ kind: TypeKind; name?: string; category?: string; si
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     const r = await attempt(ctx, () => ops.typeEdits.createDataType(ctx.tag({ kind: a.kind, ...(a.name ? { name: a.name } : {}), ...(a.category ? { category: a.category } : {}), ...(a.size !== undefined ? { size: a.size } : {}), ...(a.base ? { base: a.base } : {}) })));
-    return `Created ${a.kind} ${r.path}.`;
+    return `Created ${a.kind} ${clip(r.path, 200)}.`;
   },
 };
 
@@ -165,7 +167,7 @@ const editStruct: ToolDef<{ path: string; op: StructOp }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     await attempt(ctx, () => ops.typeEdits.editStruct(ctx.tag({ path: a.path, op: a.op })));
-    return `Edited ${a.path}: ${a.op.op}.`;
+    return `Edited ${clip(a.path, 200)}: ${clip(a.op.op, 20)}.`;
   },
 };
 
@@ -182,7 +184,7 @@ const editEnum: ToolDef<{ path: string; op: EnumOp }> = {
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     await attempt(ctx, () => ops.typeEdits.editEnum(ctx.tag({ path: a.path, op: a.op })));
-    return `Edited ${a.path}: ${a.op.op}.`;
+    return `Edited ${clip(a.path, 200)}: ${clip(a.op.op, 20)}.`;
   },
 };
 
@@ -206,7 +208,7 @@ const undoAgentEdit: ToolDef<Record<string, never>> = {
       if (isKind(e, "invalid")) throw new ToolError("Nothing to undo: the program has no undo history left (it was saved, or analysis ran).");
       throw toToolError(e);
     }
-    return `Undid: ${n.label}.`;
+    return `Undid: ${clip(n.label, 200)}.`;
   },
 };
 
