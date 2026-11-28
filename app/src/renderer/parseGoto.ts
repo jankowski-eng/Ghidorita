@@ -23,14 +23,16 @@ export function pickHit(hits: SymbolHit[], query: string): SymbolHit | null {
   return best;
 }
 
-/** Go-to input: 0x-hex; else a symbol whose name is exactly the input (so "add" stays a name); else bare hex or a space-qualified address; else the best name match. */
-export async function resolveGoto(input: string, search: Search): Promise<GotoResult> {
+/** Go-to input: 0x-hex; else (with `exact`, the provider's exact-name lookup) a symbol whose name is exactly the input; else a symbol whose name is exactly the input among the substring hits (so "add" stays a name); else bare hex or a space-qualified address; else the best name match. */
+export async function resolveGoto(input: string, search: Search, exact?: Search): Promise<GotoResult> {
   const s = input.trim();
   if (!s) return { error: "enter an address or symbol name" };
   if (/^0x/i.test(s)) return HEX.test(s) ? norm(s) : { error: `not an address: ${s}` };
+  const named = exact ? await exact(s) : []; // the provider's name index: found however many other names contain the text (the substring search below stops after its limit)
+  if (named.length) return { address: named[0].address };
   const hits = await search(s);
-  const exact = hits.find((h) => h.name === s);
-  if (exact) return { address: exact.address };
+  const exactHit = hits.find((h) => h.name === s);
+  if (exactHit) return { address: exactHit.address };
   if (HEX.test(s)) return norm(s);
   if (QUAL.test(s)) return qual(s);
   const h = pickHit(hits, s);

@@ -15,7 +15,7 @@ from .project import FAST_PROFILE, RAW, analysis_disabled, program_key
 CAPABILITIES = [
     "importOptions", "decompile", "editing", "variableEditing", "undo", "save", "symbolSearch",
     "symbolTable", "strings", "memorySearch", "references", "variableReferences", "dataTypes",
-    "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail",
+    "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "exactSymbolSearch",
 ]
 
 
@@ -430,12 +430,16 @@ class Program:
     def undo_state(self, prog=None):
         return undo_state(prog or self.ses.need())
 
-    def _undo_redo(self, undo):
+    def _undo_redo(self, undo, expect=None):
         prog = self.ses.need()
         if self.ses.analyzing:
             raise RpcError(BUSY, "analysis running")
         if not (prog.canUndo() if undo else prog.canRedo()):
             raise RpcError(INVALID, "nothing to %s" % ("undo" if undo else "redo"))
+        if expect is not None:  # on R, so no edit can land between this check and the undo
+            top = str(prog.getUndoName())
+            if top != expect:
+                raise RpcError(CANCELLED, "the top undo step is %r, not %r; nothing was undone" % (top, expect))
         try:
             prog.undo() if undo else prog.redo()
         except Exception as e:  # noqa
@@ -446,8 +450,10 @@ class Program:
         return self.ctx.session.refresh_undo(prog)
 
     @rpc(lane="R")
-    def undo(self):
-        return self._undo_redo(True)
+    def undo(self, expect=None):
+        if expect is not None and not isinstance(expect, str):
+            raise RpcError(INVALID, "expect must be a string")
+        return self._undo_redo(True, expect)
 
     @rpc(lane="R")
     def redo(self):

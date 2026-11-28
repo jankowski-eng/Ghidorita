@@ -219,3 +219,50 @@ def test_list_undefined_refs(sc, tmp_path, monkeypatch):
                     await asyncio.wait_for(req, 3)
                 assert caught.value.code == CANCELLED
     run(go())
+
+
+async def _free_code_addresses(c, fns, n):
+    """n code units without a label, in address order (from the biggest functions)."""
+    out = []
+    for f in sorted(fns, key=lambda f: -f["size"]):
+        for r in await c.ok("listing_rows", address=f["entry"], count=300):
+            if "label" not in r and r.get("address") and r["address"] not in out:
+                out.append(r["address"])
+        if len(out) >= n:
+            break
+    assert len(out) >= n, "not enough unlabeled code units"
+    return sorted(out[:n], key=lambda a: int(a, 16))
+
+
+def test_substring_search_limit_can_miss_the_exact_name_and_exact_search_finds_it(env):
+    """search_symbols is a substring glob that stops after `limit` hits in Ghidra's iterator order, not exact matches first: in a big binary
+    "main" can fall outside the first 50 hits (and a second symbol of the same name outside them silently). Measured here with a small limit."""
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            at = await _free_code_addresses(c, fns, 10)
+            for i, a in enumerate(at[:8]):
+                await c.ok("create_label", address=a, name="aordq_%02d" % i)  # decoys: sort before the target by name and by address
+            await c.ok("create_label", address=at[8], name="ordq")  # the exact name, last by address and after the decoys by name
+            await c.ok("create_label", address=at[9], name="ordq")  # and a second symbol of the same name
+            try:
+                few = await c.ok("search_symbols", query="ordq", limit=5)
+                assert len(few) == 5 and not any(h["name"] == "ordq" for h in few), few  # the exact matches are not among the first hits
+                allhits = await c.ok("search_symbols", query="ordq", limit=100)
+                assert [h["name"] for h in allhits].count("ordq") == 2  # they exist: only the cutoff hides them
+                # exact: every symbol of exactly that name, whatever else contains the text (Ghidra's name index), by address; case-sensitive
+                ex = await c.ok("search_symbols", query="ordq", exact=True)
+                assert [(h["name"], h["address"], h["kind"]) for h in ex] == [("ordq", at[8], "label"), ("ordq", at[9], "label")], ex
+                assert all(set(h) == {"name", "address", "kind", "refs"} for h in ex)
+                assert await c.ok("search_symbols", query="ORDQ", exact=True) == []
+                assert await c.ok("search_symbols", query="ordq_", exact=True) == []  # a substring is not a name
+                assert len(await c.ok("search_symbols", query="ordq", exact=True, limit=1)) == 1
+                assert await c.ok("search_symbols", query="  ", exact=True) == []
+                fn = fns[len(fns) // 2]  # a function's own name finds exactly it
+                assert [(h["address"], h["kind"]) for h in await c.ok("search_symbols", query=fn["name"], exact=True)] == [(fn["entry"], "function")]
+                await c.err("search_symbols", INVALID, query="ordq", exact="yes")
+            finally:
+                for _ in range(10):
+                    await c.ok("undo")
+    run(go())

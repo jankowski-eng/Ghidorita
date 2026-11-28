@@ -1,7 +1,7 @@
 """Data type manager RPCs (tree, detail, struct/enum editors, apply) against real Ghidra on /bin/ls; one analysis copied per test."""
 import asyncio, time
 
-from testlib import BIN, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, run
+from testlib import BIN, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, bare, run
 from test_persist import base, change, projects  # noqa: F401  (fixtures)
 
 
@@ -57,7 +57,7 @@ def test_no_program_and_tree(projects):
 def test_struct_editor_undo_and_filler(projects):
     async def go(c):
         u = lambda: c.ok("undo_state")
-        assert (await c.ok("create_data_type", kind="struct", name="S1")) == {"path": "/S1"}
+        assert bare(await c.ok("create_data_type", kind="struct", name="S1")) == {"path": "/S1"}
         d = await c.ok("get_data_type", path="/S1")
         assert d["kind"] == "struct" and d["size"] == 0 and d["components"] == [] and d["packed"] is False
         await c.err("create_data_type", INVALID, kind="struct", name="S1")  # no silent "S1.conflict"
@@ -162,21 +162,21 @@ def test_enum_typedef_pointer_category_delete_rename(projects):
         await c.err("edit_enum", INVALID, path="/E1", op={"op": "bogus"})
         await c.err("edit_enum", INVALID, path="/E1", op=5)
         # typedef / pointer / category
-        assert await c.ok("create_data_type", kind="typedef", name="mytype_t", base="E1 *") == {"path": "/mytype_t"}
+        assert bare(await c.ok("create_data_type", kind="typedef", name="mytype_t", base="E1 *")) == {"path": "/mytype_t"}
         t = await c.ok("get_data_type", path="/mytype_t")
         assert t["kind"] == "typedef" and t["base"] == "E1 *" and t["size"] == 8
         await c.err("create_data_type", INVALID, kind="typedef", name="bad", base="nosuchtype")
         assert (await c.ok("create_data_type", kind="pointer", base="E1"))["path"] == "/E1 *"
         assert (await c.ok("get_data_type", path="/E1 *"))["kind"] == "pointer"
-        assert await c.ok("create_data_type", kind="category", name="Mine") == {"path": "/Mine"}
-        assert await c.ok("create_data_type", kind="struct", name="In", category="/Mine") == {"path": "/Mine/In"}
+        assert bare(await c.ok("create_data_type", kind="category", name="Mine")) == {"path": "/Mine"}
+        assert bare(await c.ok("create_data_type", kind="struct", name="In", category="/Mine")) == {"path": "/Mine/In"}
         await c.err("create_data_type", INVALID, kind="category", name="Mine")
         kids = await c.ok("dt_children", path="/Mine")
         assert [t["path"] for t in kids["types"]] == ["/Mine/In"] and kids["categories"] == []
         assert any(c_["path"] == "/Mine" for c_ in (await c.ok("dt_children"))["categories"])
         await c.err("delete_data_type", INVALID, path="/Mine", category=True)  # not empty
         r = await c.ok("rename_data_type", path="/Mine/In", newName="Out")
-        assert r == {"path": "/Mine/Out"}
+        assert bare(r) == {"path": "/Mine/Out"}
         await c.err("rename_data_type", INVALID, path="/Mine/Out", newName="has space")
         await c.ok("delete_data_type", path="/Mine/Out")
         await c.ok("delete_data_type", path="/Mine", category=True)
@@ -280,7 +280,7 @@ def test_create_struct_from_data(projects):
         await c.ok("define_data", address=hex(a + 4), dataType="short")
         n = len(c.notes)
         r = await c.ok("create_struct_from_data", address=base_, length=8, name="FromData")
-        assert r == {"path": "/FromData"}
+        assert bare(r) == {"path": "/FromData"}
         ev = await change(c, n, "Create structure FromData")
         assert "type" in ev["kinds"] or "data" in ev["kinds"]
         d = await c.ok("get_data_type", path="/FromData")
@@ -321,7 +321,7 @@ def test_auto_create_structure(projects):
                 break
         assert found, "no variable with inferable field accesses in the 60 largest functions"
         f, v, res, n, base = found
-        assert res == {"path": "/auto_structs/AutoS"}, res
+        assert bare(res) == {"path": "/auto_structs/AutoS"}, res
         await c.wait_note("program_changed", since=n)  # (failed attempts fire their own rolled-back ones too)
         assert (await c.ok("undo_state"))["undoName"].startswith("Auto create structure")
         d = await c.ok("get_data_type", path=res["path"])

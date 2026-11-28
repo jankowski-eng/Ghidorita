@@ -15,6 +15,11 @@ BIN = os.environ.get("SPIKE_BINARY", "/bin/ls")
 NO_PROGRAM, CANCELLED, NOT_FOUND, BUSY, INVALID = -32001, -32002, -32004, -32005, -32602
 
 
+def bare(result):
+    """An edit's result without `undoName` (every edit result also names the undo step it committed; additive)."""
+    return {k: v for k, v in result.items() if k != "undoName"}
+
+
 def ghidra_dir():
     d = os.environ.get("GHIDRA_INSTALL_DIR") or (sorted(glob.glob(os.path.join(HERE, "..", "ghidra-install", "ghidra_*/")) or [None])[-1])
     assert d, "no Ghidra install"

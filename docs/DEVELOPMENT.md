@@ -168,3 +168,11 @@ Data types: View > Data Type Manager or "Data Type Manager" in the command bar (
 - Benchmarks wait for a quiet machine (`bench/common.py: wait_quiet`) and exit 3 instead of measuring under load. `bench/run_round9.sh` runs the repeats.
 - A failed replacement open preserves the active program and undo history (protocol.md).
 - `MANUAL_TEST.md`: the 30-minute checklist for what scripts cannot do.
+
+## Agent access (MCP)
+
+Design and status: [AGENTS_MCP.md](AGENTS_MCP.md). Try it by hand: `cd app && npm run build && npm start`, open a program, choose Agent > Access > Edit, then point a client at `node app/out/mcp/bridge.cjs` (Help > Copy Agent Setup has the exact commands), or inspect it with `npx @modelcontextprotocol/inspector --cli -e GHIDORITA_AGENT_SOCKET=<socket> node app/out/mcp/bridge.cjs --method tools/list`.  The bridge starts the app only when the fallback's `status` tool is called with `launch: true` (`open -b`, or the command in `GHIDORITA_APP_CMD`), so scripts and tests are safe by default; `GHIDORITA_RETRY_MS` sets how often it retries the socket (default 2000).
+
+Env for development and tests: `GHIDORITA_AGENT_SOCKET` (socket path for app and bridge; keep it under ~100 bytes on macOS), `GHIDORITA_AGENT_MODE=off|read|edit|full` (not persisted; ignored by a packaged app), `GHIDORITA_APP_CMD` (what the bridge runs to start the app).
+
+End to end: `cd sidecar && .venv/bin/python -m pytest test_provider_ui.py -k agent_access` (mock and PyGhidra; builds the app, runs it with `AUTOTEST_FLOW=agent`, and `app/scripts/agent-autotest-client.mjs` as the MCP client).

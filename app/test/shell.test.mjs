@@ -61,6 +61,14 @@ test("resolveGoto", async () => {
   assert.equal(await ok("0xffffffffffffffff"), "0xffffffffffffffff");
   for (const bad of ["", "  ", "0x", "0xzz", "0x1ffffffffffffffff", "nope"]) assert.ok("error" in (await resolveGoto(bad, search)), bad);
 });
+test("resolveGoto: the exact-name lookup finds a name the capped substring search cuts off; without it the old path is unchanged", async () => {
+  const capped = async () => Array.from({ length: 100 }, (_, i) => ({ name: "_main_" + i, address: "0x" + (0x9000 + i).toString(16), kind: "function" })); // 100 hits, none of them "main"
+  const exact = async (q) => (q === "main" ? [{ name: "main", address: "0x401000", kind: "function" }] : []);
+  assert.equal((await resolveGoto("main", capped, exact)).address, "0x401000");
+  assert.ok("error" in (await resolveGoto("main", capped)));                       // today's limit
+  assert.equal((await resolveGoto("_main_7", capped, exact)).address, "0x9007"); // not an exact name: the substring path still answers
+  assert.equal((await resolveGoto("0x10", capped, exact)).address, "0x10");       // addresses never ask
+});
 test("latest: only the newest request resolves", async () => {
   const run = latest();
   const slow = new Promise((r) => setTimeout(() => r("old"), 30));

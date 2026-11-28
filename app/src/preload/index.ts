@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { Capability } from "../../../protocol";
+import type { AgentCall, AgentCancel, AgentReply, AgentState } from "../agent/types";
 
 // ---- IPC contract (main <-> renderer). Main must validate every payload it receives. ----
 export type Pane = "functions" | "listing" | "decompiler";
@@ -46,6 +47,16 @@ export interface Host {
   autotestQuit(result: unknown): Promise<void>;
   /** autotest only: click an application-menu item by id (save, undo, redo). */
   autotestMenu(id: string): Promise<boolean>;
+  /** Agent access (docs/AGENTS_MCP.md): main -> renderer tool calls and their cancellation; the reply goes back through agentReply (main validates it). */
+  onAgentCall(cb: (call: AgentCall) => void): () => void;
+  onAgentCancel(cb: (cancel: AgentCancel) => void): () => void;
+  agentReply(reply: AgentReply): Promise<void>;
+  /** main -> renderer, "agent-state": the access mode and the connected clients (status bar). */
+  onAgentState(cb: (state: AgentState) => void): () => void;
+  /** renderer -> main, "agent-ready": the executor is listening (true) or going away (false). Until true, main answers calls with "window not ready". */
+  agentReady(ready: boolean): Promise<void>;
+  /** renderer -> main, "agent-menu": pop up the Agent menu (the status bar's kill switch). */
+  agentMenu(): Promise<void>;
 }
 
 const host: Host = {
@@ -70,5 +81,11 @@ const host: Host = {
   quitReady: (r) => ipcRenderer.invoke("quit-ready", r),
   autotestQuit: (result) => ipcRenderer.invoke("autotest-quit", result),
   autotestMenu: (id) => ipcRenderer.invoke("autotest-menu", id),
+  onAgentCall: (cb) => { const h = (_e: unknown, c: AgentCall) => cb(c); ipcRenderer.on("agent-call", h); return () => { ipcRenderer.removeListener("agent-call", h); }; },
+  onAgentCancel: (cb) => { const h = (_e: unknown, c: AgentCancel) => cb(c); ipcRenderer.on("agent-cancel", h); return () => { ipcRenderer.removeListener("agent-cancel", h); }; },
+  agentReply: (reply) => ipcRenderer.invoke("agent-reply", reply),
+  onAgentState: (cb) => { const h = (_e: unknown, s: AgentState) => cb(s); ipcRenderer.on("agent-state", h); return () => { ipcRenderer.removeListener("agent-state", h); }; },
+  agentReady: (ready) => ipcRenderer.invoke("agent-ready", ready),
+  agentMenu: () => ipcRenderer.invoke("agent-menu"),
 };
 contextBridge.exposeInMainWorld("host", host);

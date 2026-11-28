@@ -4,7 +4,7 @@ import { resolveGoto } from "./parseGoto";
 import { useRestoreFocus } from "./hooks";
 
 /** Go to address bar: Enter navigates, Escape closes, an invalid entry shows an inline error and stays open. */
-export function GoTo({ search, onGo, onClose }: { search: (q: string) => Promise<SymbolHit[]>; onGo: (a: Address) => void; onClose: () => void }) {
+export function GoTo({ search, exact, onGo, onClose }: { search: (q: string) => Promise<SymbolHit[]>; exact?: (q: string) => Promise<SymbolHit[]>; onGo: (a: Address) => void; onClose: () => void }) {
   useRestoreFocus();
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
@@ -12,7 +12,7 @@ export function GoTo({ search, onGo, onClose }: { search: (q: string) => Promise
   useEffect(() => ref.current?.focus(), []);
   const submit = async () => {
     try {
-      const r = await resolveGoto(value, search);
+      const r = await resolveGoto(value, search, exact);
       if ("error" in r) setError(r.error); else { onGo(r.address); onClose(); }
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };

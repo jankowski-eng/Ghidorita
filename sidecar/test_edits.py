@@ -3,7 +3,7 @@
 import pytest
 
 from ghidorita.core.errors import RpcError
-from testlib import Client, INVALID, NOT_FOUND, inproc, run
+from testlib import CANCELLED, Client, INVALID, NOT_FOUND, inproc, run
 
 
 def test_get_comments_and_create_label(env):
@@ -137,4 +137,45 @@ def test_set_function_no_return_redecompiles_callers(sc, tmp_path, monkeypatch):
             assert e.value.code == INVALID
             await call("undo")
             assert (await call("decompile", entry=fns["g"]))["text"] == before["text"]
+    run(go())
+
+
+def test_edit_results_name_their_undo_step_and_undo_can_expect_it(env):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            at = fns[len(fns) // 2]["entry"]
+            first = await c.ok("set_comment", address=at, kind="eol", text="expect-test")
+            assert first["undoName"] == (await c.ok("undo_state"))["undoName"] == "Set eol comment"
+            second = await c.ok("rename_symbol", address=at, newName="expect_renamed")
+            assert second["undoName"].startswith("Rename ") and second["undoName"] == (await c.ok("undo_state"))["undoName"]
+            # a mismatch fails Cancelled, names the actual top step, and undoes nothing
+            before = await c.ok("undo_state")
+            r = await c.call("undo", expect=first["undoName"])
+            assert r["error"]["code"] == CANCELLED and second["undoName"] in r["error"]["message"], r
+            assert await c.ok("undo_state") == before
+            await c.err("undo", INVALID, expect=5)
+            assert await c.ok("undo_state") == before
+            # a match undoes exactly the top step; without expect nothing changed (additive)
+            after = await c.ok("undo", expect=second["undoName"])
+            assert after["undoName"] == first["undoName"]
+            await c.ok("undo", expect=first["undoName"])  # leaves the shared program as it was
+    run(go())
+
+
+def test_a_no_op_edit_does_not_claim_the_previous_undo_step(env):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            at = fns[len(fns) // 2]["entry"]
+            assert await c.ok("get_comments", address=at) == {}
+            mine = await c.ok("rename_symbol", address=at, newName="noop_renamed")  # an earlier step (someone else's)
+            r = await c.ok("set_comment", address=at, kind="pre", text="")  # clearing a comment that is not there changes nothing
+            assert "undoName" not in r, r  # it must not inherit "Rename ..." and let a later undo {expect} revert the rename
+            assert (await c.ok("undo_state"))["undoName"] == mine["undoName"]
+            real = await c.ok("set_comment", address=at, kind="pre", text="x")
+            assert real["undoName"] == "Set pre comment"  # a real edit still names its step
+            await c.ok("undo", expect=real["undoName"]); await c.ok("undo", expect=mine["undoName"])  # leaves the shared program as it was
     run(go())

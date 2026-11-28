@@ -26,6 +26,7 @@ class Session:
         self.revision = 0                 # bumped after every write; protects prepared variable edits
         self.lock = threading.Lock()      # the program swap: program + epoch (+ lanes.running/active)
         self.undo_snap = clean_undo()
+        self._tl = threading.local()      # the current call's cell: the undo name of the edit it committed (begin_call / take_committed; lanes.on_r hands it to thread R)
         self.save_lock = threading.Lock()  # held for the duration of every save; shutdown never exits while it is held
         self.analyzing = False            # an analysis owns the program's one open transaction: edits, undo and redo are Busy (domains/analysis.py)
 
@@ -102,6 +103,7 @@ class Session:
         prog = self.need()
         if self.analyzing:  # a second transaction would join the analysis one: not undoable alone, and a rollback would abort the analysis
             raise RpcError(BUSY, "analysis running")
+        mod = int(prog.getModificationNumber())
         tx, ok = prog.startTransaction(name), False
         try:
             r = fn(prog)
@@ -114,7 +116,25 @@ class Session:
             with self.lock:
                 self.revision += 1
         self.refresh_undo(prog)
+        cell = getattr(self._tl, "cell", None)
+        if cell is not None and int(prog.getModificationNumber()) != mod:  # a no-op transaction leaves no undo step: the top one is someone else's, never name it
+            cell["undoName"] = self.undo_snap.get("undoName")  # what `undo {expect}` compares with
         return r
+
+    def begin_call(self):
+        self._tl.cell = {}
+
+    def current_cell(self):
+        return getattr(self._tl, "cell", None)
+
+    def adopt_cell(self, cell):
+        """A call that hops to another thread (lanes.on_r) continues in the caller's cell."""
+        self._tl.cell = cell
+
+    def take_committed(self):
+        """The undo name of the last transaction this call committed through edit(), or None (a read, or a failed edit)."""
+        cell, self._tl.cell = getattr(self._tl, "cell", None), None
+        return cell.get("undoName") if cell else None
 
     @staticmethod
     def cmd(cmd):

@@ -33,10 +33,11 @@ export function TopBars({ go, run }: { go: (a: Address, source: Source) => unkno
   const searchLocation = (q: string): Promise<SymbolHit[]> => symbolSearch
     ? symbolSearch({ query: q, limit: 100 }).result
     : Promise.resolve(funcs.filter((f) => f.name.toLowerCase().startsWith(q.toLowerCase())).map((f) => ({ name: f.name, address: f.entry, kind: "function" })));
+  const exactLocation = s.caps.has("exactSymbolSearch") && program ? (q: string): Promise<SymbolHit[]> => program.api.searches.searchSymbols({ query: q, limit: 100, exact: true }).result : undefined;
   return (
     <>
       {searchOpen && opened && <SearchPanel layouts={layouts} capabilities={s.caps} searchSymbols={symbolSearch} topSymbols={s.caps.has("suggestions") ? program?.api.searches.topSymbols : undefined} listStrings={s.caps.has("strings") ? program?.api.searches.listStrings : undefined} onGo={(a) => go(a, "search")} onRun={run} onClose={() => close("searchOpen")} />}
-      {gotoOpen && opened && <GoTo search={searchLocation} onGo={(a) => go(a, "goto")} onClose={() => close("gotoOpen")} />}
+      {gotoOpen && opened && <GoTo search={searchLocation} exact={exactLocation} onGo={(a) => go(a, "goto")} onClose={() => close("gotoOpen")} />}
     </>
   );
 }

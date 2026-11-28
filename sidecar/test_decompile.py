@@ -63,6 +63,8 @@ def test_edits_undo_redo_and_cache(env):
                 if "error" in res:
                     continue
                 await c.wait_note("program_changed", since=n)
+                # the edit runs on the edit lane and commits on R: its result still names the undo step it committed (what `undo {expect}` takes)
+                assert res["result"]["undoName"].startswith("Rename variable in ") and res["result"]["undoName"] == (await c.ok("undo_state"))["undoName"]
                 t2 = await c.ok("decompile", entry=f["entry"])
                 assert t2["cached"] is False and "my_renamed_var" in t2["text"] and t2["text"] != r["text"]
                 # retype the renamed variable
@@ -70,6 +72,7 @@ def test_edits_undo_redo_and_cache(env):
                 rt = await c.call("retype_variable", entry=f["entry"], name="my_renamed_var", dataType="long")
                 if "result" in rt:
                     await c.wait_note("program_changed", since=n)
+                    assert rt["result"]["undoName"].startswith("Retype variable in ")
                     assert "type" in (await c.ok("undo_state"))["undoName"].lower() or True
                     await c.ok("undo")
                 await c.ok("undo")

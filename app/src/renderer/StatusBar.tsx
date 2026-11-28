@@ -3,9 +3,19 @@ import type { AnalysisState, Capability, DebugState } from "../../../protocol";
 import { KEYS, hintLine, showKey, type HintView } from "../keys";
 import { isMac } from "./platform";
 import { debugLabel } from "./debug";
+import { agentBadge, agentStatus } from "./features/agent";
+import { useStore } from "./store/createStore";
 import { ACTION_LABEL, analysisAction, analysisLabel, type AnalysisAction } from "./analysis";
 
 const viewOf = (el: Element | null): HintView => (el?.closest(".graph") ? "graph" : el?.closest(".lbox") ? "listing" : el?.closest(".monaco-editor") ? "decompiler" : "other");
+
+/** "Agent: <client>" while an MCP client is connected, pulsing while a call runs; a click opens the Agent menu (the kill switch). */
+function AgentBadge() {
+  const state = useStore(agentStatus, (s) => s.state), busy = useStore(agentStatus, (s) => s.busy); // stable values: a fresh object from the selector would re-render forever
+  const badge = agentBadge(state, busy);
+  if (!badge) return null;
+  return <span> | <button className={"agent" + (badge.pulsing ? " pulse" : "")} aria-label={`${badge.label}. Open the Agent menu`} title="Agent access: click for the menu" onClick={() => void (window as any).host?.agentMenu?.()}>{badge.label}</button></span>;
+}
 
 export type Stats = { listingMs?: number; decompileMs?: number };
 
@@ -35,6 +45,7 @@ export function StatusBar({ address, func, bytes, funcs, stats, error, dirty, sa
       {(label || action) && <span role="status" aria-label="Analysis" className={analysis?.state === "failed" ? "err" : ""}> | {label} {action && <button aria-label={ACTION_LABEL[action]} onClick={() => onAnalysis(action)}>{action === "cancel" ? "Cancel" : action === "resume" ? "Resume" : "Run full analysis"}</button>}</span>}
       {debug && <span role="status" aria-label="Debugger" className={debug.state === "detached" && debug.error ? "err" : ""}> | Debugger: {debugLabel(debug)}{debugNote}</span>}
       <span role="status" aria-label="Save state">{saving ? " | Saving…" : dirty ? " | ● unsaved changes" : ""}</span>{flash && <span role="status"> | {flash}</span>}{trail && <span role="status" aria-label="Value trail"> | {trail}</span>}
+      <AgentBadge />
       {error && <span className="err" role="alert"> | {error}</span>}
       </div>
       <span className="keyhint" title={hint} aria-label="Keys">{hint}</span>

@@ -156,7 +156,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "exactSymbolSearch",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -223,7 +223,8 @@ export interface Methods {
   stack_frame: { params: { entry: Address }; result: StackFrame };
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
-  search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
+  // `exact` (capability exactSymbolSearch): the symbols named exactly `query` (case-sensitive, every namespace, memory addresses), by address, through Ghidra's name index; the substring search stops after `limit` hits in iterator order, so an exact name can fall outside them
+  search_symbols: { params: { query: string; limit?: number; exact?: boolean }; result: SymbolHit[] };
   top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions (the client scores and orders them: kind weight + 10·log2(1 + refs), app/src/renderer/rank.ts)
   // Exports (protocol.md "Exports"): the sidecar writes the file at an absolute `path` the client picked.
   export_symbols: { params: { path: string }; result: { path: string; functions: number; labels: number; data: number; comments: number } };
@@ -256,35 +257,36 @@ export interface Methods {
   undo_state: { params: {}; result: UndoState };
   load_coverage: { params: { path: string }; result: { ranges: { start: Address; end: Address }[] } }; // text file: `0xSTART-0xEND` (inclusive) or `0xADDR` per line, `#` comments; the client tints the listing
   // ---- edits: one Ghidra transaction each; the transaction name is the undo label ----
-  rename_symbol: { params: { address: Address; newName: string }; result: {} };
-  create_label: { params: { address: Address; name: string }; result: {} }; // where no symbol exists; InvalidArgument if one does (use rename_symbol)
-  set_comment: { params: { address: Address; kind: CommentKind; text: string }; result: {} }; // empty text clears
+  rename_symbol: { params: { address: Address; newName: string }; result: Edited };
+  create_label: { params: { address: Address; name: string }; result: Edited }; // where no symbol exists; InvalidArgument if one does (use rename_symbol)
+  set_comment: { params: { address: Address; kind: CommentKind; text: string }; result: Edited }; // empty text clears
   create_function: { params: { address: Address; name?: string }; result: { entry: Address; name: string } };
-  set_function_signature: { params: { entry: Address; signature: string }; result: {} };
+  set_function_signature: { params: { entry: Address; signature: string }; result: Edited };
   // rename/retype_variable decompile first (thread R): Timeout after timeoutSecs (default 30), cancellable with cancel_decompile {id}
-  rename_variable: { params: { entry: Address; name: string; newName: string; timeoutSecs?: number }; result: {} };
-  retype_variable: { params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }; result: {} };
+  rename_variable: { params: { entry: Address; name: string; newName: string; timeoutSecs?: number }; result: Edited };
+  retype_variable: { params: { entry: Address; name: string; dataType: string; timeoutSecs?: number }; result: Edited };
   // ---- decompiler edits on a token (capability "decompilerEdits"; protocol.md "Decompiler edits") ----
   // Ghidra's Set Equate on ONE operand: `value`/`size` are the Token's constValue/constSize, `address` its address. name = an equate (existing or new) or, with `enum` (a program enum's path), one of its members. Lane R.
-  set_equate: { params: { address: Address; value: string; size: number; name: string; enum?: string }; result: {} };
+  set_equate: { params: { address: Address; value: string; size: number; name: string; enum?: string }; result: Edited };
   // Edit Function Signature's No Return flag. The decompile cache of every caller is dropped (the whole cache is). Lane R.
-  set_function_no_return: { params: { entry: Address; noReturn?: boolean }; result: {} }; // noReturn default true
+  set_function_no_return: { params: { entry: Address; noReturn?: boolean }; result: Edited }; // noReturn default true
   // Split Out As New Variable: the use of `name` at `address` (the token's) becomes its own variable `newName`. Edit lane (cancel_decompile), as rename_variable.
-  split_variable: { params: { entry: Address; name: string; address: Address; newName: string; timeoutSecs?: number }; result: {} };
+  split_variable: { params: { entry: Address; name: string; address: Address; newName: string; timeoutSecs?: number }; result: Edited };
   // Force Field: the union access shown by the token `text` (Token.union set) at `address` (its unionAt) is shown as `field` (null = no field); occurrence = index among the union tokens with that text and unionAt. Edit lane.
-  force_union_field: { params: { entry: Address; address: Address; text: string; field: string | null; occurrence?: number; timeoutSecs?: number }; result: {} };
-  undo: { params: {}; result: UndoState };
+  force_union_field: { params: { entry: Address; address: Address; text: string; field: string | null; occurrence?: number; timeoutSecs?: number }; result: Edited };
+  // `expect`: undo only if the top undo step's name equals it (the `undoName` an edit result carried), else Cancelled naming the actual top step and nothing is undone; checked on thread R, so no edit can land in between
+  undo: { params: { expect?: string }; result: UndoState };
   redo: { params: {}; result: UndoState };
   // define_data: Ghidra's CreateDataCmd (clears conflicting code/data at the target); dataType is a name or path ("int", "char[4]", "/dword"). InvalidArgument for unknown/dynamic types or no room.
-  define_data: { params: { address: Address; dataType: string }; result: {} };
+  define_data: { params: { address: Address; dataType: string }; result: Edited };
   // clear_code: Ghidra's ClearCmd (code, data, references; not symbols/comments); `length` bytes from `address` (default: the code unit at address).
-  clear_code: { params: { address: Address; length?: number }; result: {} };
+  clear_code: { params: { address: Address; length?: number }; result: Edited };
   // ---- data type edits (program's own types only; one transaction each, undo label in protocol.md) ----
   create_data_type: { params: { kind: "struct" | "union" | "enum" | "typedef" | "pointer" | "category"; name?: string; category?: string; size?: number; base?: string }; result: { path: string } };
-  delete_data_type: { params: { path: string; category?: boolean }; result: {} };
+  delete_data_type: { params: { path: string; category?: boolean }; result: Edited };
   rename_data_type: { params: { path: string; newName: string }; result: { path: string } };
-  edit_struct: { params: { path: string; op: StructOp }; result: {} };
-  edit_enum: { params: { path: string; op: EnumOp }; result: {} };
+  edit_struct: { params: { path: string; op: StructOp }; result: Edited };
+  edit_enum: { params: { path: string; op: EnumOp }; result: Edited };
   // Struct from the data items in [address, address+length) (instructions refused), applied at address unless apply=false; one transaction.
   create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
   // Ghidra's Auto Create Structure on a decompiler variable: infers a struct from the field accesses through it, retypes the variable to a pointer to it; one transaction. structName default: Ghidra's unique name in /auto_structs.
@@ -397,6 +399,8 @@ export type EnumOp =
   | { op: "set"; name: string; value: string; oldName?: string } // add, or change value; oldName renames
   | { op: "remove"; name: string }
   | { op: "resize"; size: 1 | 2 | 4 | 8 };
+/** Every edit's result also carries `undoName`: the name of the undo step it committed (what `undo_state.undoName` shows right after it). Additive; absent from providers that predate it. */
+export interface Edited { undoName?: string }
 export interface UndoState { canUndo: boolean; canRedo: boolean; undoName?: string; redoName?: string; dirty: boolean } // dirty = unsaved changes since open or last save
 
 /** Coarse classification of a program change; the client refetches what it shows for these kinds. */

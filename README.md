@@ -102,6 +102,30 @@ Right-click a listing row for **Copy Address**, **Copy Bytes (Hex)** and **Copy 
 
 ![Right-click menu on a listing row](screenshots/copy.png)
 
+### Use with an agent (Claude Code, Codex, any MCP client)
+
+Ghidorita can let an AI agent read and annotate the program you have open, live, without computer use. You see its edits in the Changes panel (tagged with the agent's name), can undo them, and can point it at what you are looking at.
+
+1. Turn it on: **Agent > Access > Read** (reads, plus showing you things) or **Edit** (also renames, retypes, comments, signatures, data, types, bookmarks). The default is Off; the status bar shows "Agent: <name>" while a client is connected, and clicking it opens the Agent menu, so the kill switch is one click away.
+2. Connect the agent: **Help > Copy Agent Setup** puts the commands on the clipboard with the real path.
+
+```bash
+claude mcp add ghidorita -- "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
+```
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.ghidorita]
+command = "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
+tool_timeout_sec = 300   # a slow tool (decompile, wait_for_analysis) answers within about 270 s; Codex's default of 60 would cut it off
+```
+
+No tool runs longer than about 270 s (the decompiler's `timeoutSecs` defaults to 90 and is capped at 240, `wait_for_analysis` waits at most 240 s), so a client timeout of 300 s always lets the tool's own answer (a Timeout error that says what to retry) arrive first.
+
+The connector never starts Ghidorita by itself, so having it configured costs nothing in sessions that don't use it. While the app is not running the agent sees one `status` tool that says so; calling it with `launch: true` asks macOS to start the app. The connector switches to the app by itself when it appears (about 2 s) and back when it quits, and tells the agent its tools changed; no restart of the agent is needed. In a development checkout use `node app/out/mcp/bridge.cjs` as the command (after `npm run build`; the app runs from `npm start`).
+
+Everything the binary contains (strings, comments, symbol names) reaches the agent as untrusted data. Edits can be undone with Cmd+Z; `undo_agent_edit` only ever undoes the agent's own newest change. Full design: [docs/AGENTS_MCP.md](docs/AGENTS_MCP.md).
+
 ### Save and export
 `Cmd+S` saves; edits are also saved when you open another program, close it or quit, and unsaved changes are snapshotted every two minutes so a crash loses little. Saving ends Ghidra's undo history. File > Export > Symbol Map (JSON)… or C Header… writes your names and types for reports or other tools; **Ghidra Archive (.gzf)…** writes the whole program, unsaved edits included, for Ghidra's own importer (refused while an analysis runs).
 

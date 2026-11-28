@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from ghidorita.core.errors import INTERNAL
-from testlib import BASE, BIN, INVALID, NOT_FOUND, NO_PROGRAM, X86, Client, Proc, blob, run
+from testlib import BASE, BIN, INVALID, NOT_FOUND, NO_PROGRAM, X86, Client, Proc, bare, blob, run
 
 
 @pytest.fixture(scope="module")
@@ -238,7 +238,7 @@ def test_define_data_clear_code_undo_dirty(projects):
                     assert "data" in ev["kinds"]
                     assert ev["ranges"] is None or any(int(r["start"], 16) <= fi <= int(r["end"], 16) for r in ev["ranges"])  # null: a new type was resolved, broad
                     assert (await row())[0]["mnemonic"] == mn, (t, await row())
-                assert (await c.ok("define_data", address=f, dataType="char *")) == {}
+                assert bare(await c.ok("define_data", address=f, dataType="char *")) == {}
                 assert (await row())[0]["length"] == 8
                 for bad in ("no_such_type_zz", "", "void", "string", "int[", "/nope/missing"):
                     await c.err("define_data", INVALID, address=f, dataType=bad)

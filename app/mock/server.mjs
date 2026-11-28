@@ -59,7 +59,7 @@ function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mut
   try { result = fn() ?? {}; } catch (e) { S = before; throw e; } // like a rolled-back Ghidra transaction
   undoStack.push({ name, before, after: structuredClone(S) }); redoStack.length = 0; dirty = true;
   changed(notify, ranges, kinds);
-  return result;
+  return { ...result, undoName: name }; // like the sidecar: every edit result names the undo step it committed
 }
 function assembleAt({ address, text }) {
     if (typeof text !== "string" || !text.trim()) bad("text");
@@ -223,7 +223,7 @@ let activeSession = null, openingRequest = null;
 let failedAutosave = false, failedListing = false;
 const providerInfo = { provider: "mock", version: 1, capabilities: ["importOptions", "decompile", "editing",
   "variableEditing", "undo", "save", "symbolSearch", "symbolTable", "strings", "memorySearch",
-  "references", "variableReferences", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail"] };
+  "references", "variableReferences", "exactSymbolSearch", "dataTypes", "typeEditing", "projects", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail"] };
 // Project contents (fake). Seeded so the welcome pane has something to show.
 const programs = new Map([
   ["a".repeat(64), { programId: "a".repeat(64), name: "demo_arm64", sourcePath: "/mock/demo_arm64", sizeBytes: 1048576, analyzed: true, analysis: "done", analysisProfile: "full", lastOpened: "2026-11-01T10:00:00Z", options: {} }],
@@ -458,9 +458,11 @@ const handlers = {
     const n = Math.min(limit ?? 30, 500), f = (i, group) => ({ name: nameOf(i), address: entryOf(i), kind: "function", refs: (i * 37) % 50 + 1, group });
     return [f(0, "entry"), ...[1, 2, 3].map((i) => f(i, "import")), ...Array.from({ length: n }, (_, k) => f(k + 4, "function")).sort((a, b) => b.refs - a.refs)];
   },
-  search_symbols({ query, limit }) {
+  search_symbols({ query, limit, exact }) {
     if (typeof query !== "string") bad("query");
+    if (exact !== undefined && typeof exact !== "boolean") bad("exact");
     const lim = parseInt0(limit, 100, "limit"), q = query.toLowerCase(), out = [];
+    if (exact) return symbols().filter((r) => r.address && r.name === query.trim()).slice(0, lim).map((r) => ({ name: r.name, address: r.address, kind: r.kind }));
     for (const r of symbols()) {
       if (out.length >= lim) break;
       if (r.address && r.name.toLowerCase().includes(q)) out.push({ name: r.name, address: r.address, kind: r.kind });
@@ -950,7 +952,14 @@ const handlers = {
     notify("program_changed", { ranges: [], kinds: [], undo: undoState() });
     return { saved: true, undoHistoryCleared: true };
   },
-  undo(_, notify) { return step(undoStack, redoStack, "before", notify); },
+  undo({ expect } = {}, notify) {
+    if (expect !== undefined) { // like the sidecar: undo only the step the caller named, else Cancelled and nothing happens
+      if (typeof expect !== "string") bad("expect");
+      const top = undoStack.at(-1)?.name;
+      if (undoStack.length && top !== expect) throw { code: -32002, message: `the top undo step is '${top}', not '${expect}'; nothing was undone` };
+    }
+    return step(undoStack, redoStack, "before", notify);
+  },
   redo(_, notify) { return step(redoStack, undoStack, "after", notify); },
 };
 function step(from, to, side, notify) {

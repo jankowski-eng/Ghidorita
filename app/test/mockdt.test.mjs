@@ -15,10 +15,11 @@ const ok = async (m, p) => { const r = await call(m, p); assert.ok("result" in r
 const err = async (m, p, code = -32602) => { const r = await call(m, p); assert.equal(r.error?.code, code, JSON.stringify([m, p, r])); };
 test.after(() => { ws.close(); proc.kill(); });
 
+const bare = ({ undoName, ...rest }) => rest; // every mock edit result also names its undo step
 test("mock data types: struct editor, apply, undo/redo, enum, categories", async () => {
   await ok("open_binary", { path: "/x/prog", analysis: "blocking" });
   assert.deepEqual((await ok("dt_sources")).map((s) => s.id), ["program", "builtin"]);
-  assert.deepEqual(await ok("create_data_type", { kind: "struct", name: "S1" }), { path: "/S1" });
+  assert.deepEqual(bare(await ok("create_data_type", { kind: "struct", name: "S1" })), { path: "/S1" });
   await err("create_data_type", { kind: "struct", name: "S1" });
   for (const [t, n] of [["dword", "a"], ["char[8]", "nm"], ["S1 *", "next"]]) await ok("edit_struct", { path: "/S1", op: { op: "add", type: t, name: n } });
   let d = await ok("get_data_type", { path: "/S1" });
@@ -71,13 +72,13 @@ test("mock data types: struct editor, apply, undo/redo, enum, categories", async
   assert.deepEqual((await ok("get_data_type", { path: "/E1" })).values, [{ name: "B", value: "-1" }, { name: "A2", value: "3" }]);
   await err("edit_enum", { path: "/E1", op: { op: "set", name: "Z", value: "nope" } });
   await err("edit_enum", { path: "/E1", op: { op: "remove", name: "none" } }, -32004);
-  assert.deepEqual(await ok("create_data_type", { kind: "typedef", name: "mytype_t", base: "S1 *" }), { path: "/mytype_t" });
+  assert.deepEqual(bare(await ok("create_data_type", { kind: "typedef", name: "mytype_t", base: "S1 *" })), { path: "/mytype_t" });
   assert.equal((await ok("create_data_type", { kind: "pointer", base: "E1" })).path, "/E1 *");
   await ok("create_data_type", { kind: "category", name: "Mine" });
   assert.equal((await ok("create_data_type", { kind: "struct", name: "In", category: "/Mine" })).path, "/Mine/In");
   assert.deepEqual((await ok("dt_children", { path: "/Mine" })).types.map((t) => t.path), ["/Mine/In"]);
   await err("delete_data_type", { path: "/Mine", category: true });
-  assert.deepEqual(await ok("rename_data_type", { path: "/Mine/In", newName: "Out" }), { path: "/Mine/Out" });
+  assert.deepEqual(bare(await ok("rename_data_type", { path: "/Mine/In", newName: "Out" })), { path: "/Mine/Out" });
   await ok("delete_data_type", { path: "/Mine/Out" });
   await ok("delete_data_type", { path: "/Mine", category: true });
   await err("dt_children", { path: "/Mine" }, -32004);
@@ -85,13 +86,13 @@ test("mock data types: struct editor, apply, undo/redo, enum, categories", async
   assert.ok(hits.some((h) => h.path === "/S1" && h.kind === "struct"));
   // auto create structure from a decompiler variable
   await err("auto_create_structure", { entry: "0x401000", name: "nope" }, -32004);
-  assert.deepEqual(await ok("auto_create_structure", { entry: "0x401000", name: "param_1", structName: "AutoS" }), { path: "/auto_structs/AutoS" });
+  assert.deepEqual(bare(await ok("auto_create_structure", { entry: "0x401000", name: "param_1", structName: "AutoS" })), { path: "/auto_structs/AutoS" });
   assert.ok((await ok("decompile", { entry: "0x401000" })).text.includes("AutoS *"));
   assert.equal((await ok("undo_state")).undoName, "Auto create structure in entry");
   // from data: instructions refused, defined items become fields
   await err("create_struct_from_data", { address: "0x401200", length: 4, name: "X" });
   await ok("define_data", { address: "0x401200", dataType: "int" }); await ok("define_data", { address: "0x401204", dataType: "short" });
-  assert.deepEqual(await ok("create_struct_from_data", { address: "0x401200", length: 6, name: "FromData" }), { path: "/FromData" });
+  assert.deepEqual(bare(await ok("create_struct_from_data", { address: "0x401200", length: 6, name: "FromData" })), { path: "/FromData" });
   assert.deepEqual((await ok("get_data_type", { path: "/FromData" })).components.map((c) => [c.offset, c.type]), [[0, "int"], [4, "short"]]);
   assert.equal((await ok("listing_rows", { address: "0x401200", count: 1 }))[0].mnemonic, "FromData");
   await ok("undo");
@@ -105,4 +106,16 @@ test("mock open_program opens the requested catalog entry, seeded or not", async
   assert.equal(r.programId, seeded.programId);
   assert.equal(r.persisted, true);
   await err("open_program", { programId: "nope" }, -32004);
+});
+
+test("mock search_symbols: exact finds exactly the name (case-sensitive, by address), the substring search does not stop being a substring search; the capability is advertised", async () => {
+  await ok("open_binary", { path: "/program-a" });
+  const sub = await ok("search_symbols", { query: "fn_1", limit: 1000 });
+  assert.ok(sub.length > 1 && sub.every((h) => h.name.includes("fn_1")));
+  const one = await ok("search_symbols", { query: sub[0].name, exact: true });
+  assert.deepEqual(one.map((h) => h.name), [sub[0].name]);
+  assert.deepEqual(await ok("search_symbols", { query: "FN_1", exact: true }), []);
+  assert.deepEqual(await ok("search_symbols", { query: "fn_", exact: true }), []); // a substring is not a name
+  await err("search_symbols", { query: "x", exact: "yes" });
+  assert.ok((await ok("provider_info")).capabilities.includes("exactSymbolSearch")); // last: it makes the connection versioned (scoped calls then need a session id)
 });

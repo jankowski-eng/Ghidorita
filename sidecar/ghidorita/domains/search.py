@@ -82,18 +82,26 @@ class Search:
         return "other"
 
     @rpc(lane="scan")
-    def search_symbols(self, query, limit=100, scan=None):
+    def search_symbols(self, query, limit=100, exact=False, scan=None):
         """Name substring match (also a hex address: symbols there, else a bare hit if mapped). The match runs inside Ghidra
         (SymbolTable.getSymbolIterator with a glob, so `*`/`?` in the query are wildcards): only hits cross into Python.
-        shortcut: Ghidra has no name index for substrings, so this is still a linear scan, in Java; upgrade with an in-sidecar index on > ~1M symbols."""
+        shortcut: Ghidra has no name index for substrings, so this is still a linear scan, in Java; upgrade with an in-sidecar index on > ~1M symbols.
+        `exact=true` (capability exactSymbolSearch): the symbols named exactly `query` (case-sensitive, every namespace, memory addresses only), by address,
+        through Ghidra's name index (SymbolTable.getSymbols(name)): every one of them is returned however many other symbols contain the text."""
         with self.ctx.lanes.scanning(scan) as prog:
             text_arg(query, "query")
+            if not isinstance(exact, bool):
+                raise RpcError(INVALID, "exact must be a boolean")
             limit = lim(limit, 100, 5000)
             st, out, seen, fa = prog.getSymbolTable(), [], set(), self.ses.fmtr(prog)
             refs = prog.getReferenceManager().getReferenceCountTo
             q = query.strip()
             if not q:
                 return []
+            if exact:
+                found = [s for s in st.getSymbols(q) if s.getAddress().isMemoryAddress()]
+                found.sort(key=lambda s: (str(s.getAddress().getAddressSpace().getName()), int(s.getAddress().getOffset()) & ((1 << 64) - 1)))
+                return [{"name": str(s.getName()), "address": fa(s.getAddress()), "kind": self._sym_kind(prog, s), "refs": int(refs(s.getAddress()))} for s in found[:limit]]
             try:
                 a = self.ses.addr(q if q.lower().startswith("0x") else "0x" + q, prog)
                 if prog.getMemory().contains(a):

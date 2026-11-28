@@ -116,10 +116,17 @@ class Dispatcher:
                 if not isinstance(session_id, str) or session_id != ses.session_id:
                     raise RpcError(STALE_SESSION, "program session is no longer active")
 
+        def with_undo_name(call):
+            """An edit's result also names the undo step it committed (additive: `undoName`), so a client can later undo exactly that step."""
+            ses.begin_call()
+            result = call()
+            name = ses.take_committed()
+            return {**result, "undoName": name} if name is not None and isinstance(result, dict) else result
+
         def run_on_r():
             if scoped and epoch != ses.epoch:
                 raise RpcError(STALE_SESSION, "program session changed before execution")
-            return fn(**params)
+            return with_undo_name(lambda: fn(**params))
 
         if lane == "project":
             if method == "import_candidates":
@@ -171,7 +178,7 @@ class Dispatcher:
                 def run_job():
                     if lane == "R" and epoch != ses.epoch:
                         raise RpcError(STALE_SESSION, "program session changed before execution")
-                    return fn(job=job, **params)
+                    return with_undo_name(lambda: fn(job=job, **params))
                 return await ln.run(run_job, ln.djobs if lane == "decomp" else ln.sjobs if lane == "edit" else None)
             except asyncio.CancelledError:
                 ln.cancel(job)
