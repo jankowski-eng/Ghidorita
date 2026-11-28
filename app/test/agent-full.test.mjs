@@ -33,7 +33,7 @@ function world({ mode = "full", ui = "app", confirm = true, session = true, rowL
     projects: { list: async () => entries, reopen: (e) => (calls.push(["reopen", e.programId]), job((active = { sessionId: "s2", programId: e.programId, name: e.name }))) },
     lifecycle: { active: async () => active, close: async (s) => { calls.push(["close", s.sessionId]); active = null; }, open: (p) => (calls.push(["open", p]), job((active = { sessionId: "s3", programId: "new", name: "new" }))) },
   };
-  const appUi = { confirm: async (m) => (prompts.push(m), confirm), openProgram: async (t) => { calls.push(["uiOpen", t]); active = { sessionId: "s4", programId: "abc", name: "a.out" }; }, closeProgram: async () => { calls.push(["uiClose"]); active = null; } };
+  const appUi = { confirm: async (m) => (prompts.push(m), confirm), openProgram: async (t) => { calls.push(["uiOpen", t]); active = { sessionId: "s4", programId: t.programId ?? "new", name: "x" }; }, closeProgram: async () => { calls.push(["uiClose"]); active = null; } };
   const ctx = {
     ops: session ? ops : null, session: active, backend, mode, client: "claude-code", signal: new AbortController().signal, changes: { newest: () => null },
     ui: ui === "app" ? appUi : undefined,
