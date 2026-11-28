@@ -9,8 +9,9 @@ export async function runAgentUiChecks(c: AutotestCtx, entry: string, result: Re
   const R: Record<string, any> = (result.agentUi = {});
   const rows = () => document.querySelectorAll(".lrow.trail-f").length, lines = () => document.querySelectorAll(".view-lines .trail-forward").length;
   await c.select(entry);
-  R.listingMarked = await waitFor(() => rows() > 0, 30000, "listing rows tinted by highlight").then(() => true, () => false);
-  R.decompilerMarked = await waitFor(() => lines() > 0, 30000, "decompiler marks from highlight").then(() => true, () => false);
+  R.listingMarked = await waitFor(() => rows() > 0, 8000, "listing rows tinted by highlight").then(() => true, () => false);
+  R.decompilerMarked = await waitFor(() => lines() > 0, 8000, "decompiler marks from highlight").then(() => true, () => false);
+  if (!R.decompilerMarked) R.dom = { spans: document.querySelectorAll('[class*="trail"]').length, viewLines: document.querySelectorAll(".view-lines").length, text: c.editorText().slice(0, 120) };
   R.cleared = await waitFor(() => rows() === 0 && lines() === 0, 30000, "highlight cleared").then(() => true, () => false);
   setFollowAgent(true); // what the Agent > Follow Agent menu command does
   R.followed = await waitFor(() => { const at = c.selected(); return !!at && at !== entry; }, 30000, "the view to follow the agent's decompile of another function").then(() => true, () => false);

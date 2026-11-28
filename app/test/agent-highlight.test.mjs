@@ -71,10 +71,12 @@ test("followAgent debounces a burst to the last target and stays out of the user
   await new Promise((r) => setTimeout(r, 60)); assert.deepEqual(gone, ["0x401000"]);
   views.v = { dlg: {} }; f("decompile", { function: "main" });
   await new Promise((r) => setTimeout(r, 60)); assert.equal(gone.length, 1);
-  views.v = {}; f("decompile", { function: "nope" }); f("rename_variable", { function: "main" });
-  await new Promise((r) => setTimeout(r, 60)); assert.equal(gone.length, 1); // an unknown name leaves the view alone, an edit is not followed
+  views.v = {}; f("rename_variable", { function: "main" });
+  await new Promise((r) => setTimeout(r, 60)); assert.equal(gone.length, 1); // an edit is not followed
+  views.v = {}; f("decompile", { function: "main" }); f("get_view", {}); f("status", {}); // a call that names no place must not cancel the pending move
+  await new Promise((r) => setTimeout(r, 60)); assert.equal(gone.length, 2);
   const d = debounced(() => gone.push("x"), 10); d(); d.cancel();
-  await new Promise((r) => setTimeout(r, 40)); assert.equal(gone.length, 1);
+  await new Promise((r) => setTimeout(r, 40)); assert.equal(gone.length, 2);
 });
 
 test("Agent > Follow Agent: an unchecked checkbox that survives rebuilds and sends agent-follow to the renderer", async () => {

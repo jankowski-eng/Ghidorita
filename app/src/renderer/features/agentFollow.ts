@@ -20,11 +20,13 @@ export function followTarget(tool: string, args: Record<string, unknown>): strin
 
 /** Follow agent: the view goes to what a read tool targets, once per burst of calls, and never while the user is in a dialog or the app is busy. Errors (an unknown name) leave the view alone. */
 export function followAgent(s: { program(): { api: ProgramOperations } | null; blocked(): boolean; views: { getState(): Views } }, go: (a: Address) => Promise<void>, ms = 300) {
-  return debounced((tool: string, args: Record<string, unknown>) => {
-    const target = followTarget(tool, args), p = s.program(), v = s.views.getState();
-    if (!target || !p || s.blocked() || v.dlg || v.formDlg || v.gotoOpen || v.searchOpen || v.agentAsk) return;
+  const move = debounced((target: string) => {
+    const p = s.program(), v = s.views.getState();
+    if (!p || s.blocked() || v.dlg || v.formDlg || v.gotoOpen || v.searchOpen || v.agentAsk) return;
     void resolveAddress(target, p.api, undefined, true).then(go).catch(() => {});
   }, ms);
+  // only calls that name a place count: a get_view or status in between must not cancel the pending move
+  return Object.assign((tool: string, args: Record<string, unknown>) => { const t = followTarget(tool, args); if (t) move(t); }, { cancel: move.cancel });
 }
 
 /** Trailing debounce: rapid calls (an agent reading ten functions) move the view once, to the last one. */
