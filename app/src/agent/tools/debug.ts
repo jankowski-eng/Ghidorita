@@ -187,15 +187,16 @@ const debug_pause = tool({
 });
 
 const debug_breakpoint = tool({
-  name: "debug_breakpoint", title: "Toggle a breakpoint", timeoutSecs: 30, hints: {},
-  description: "Toggles a breakpoint at an address or symbol (program address). Works while detached; breakpoints are installed on the next attach. Only needs the target stopped when attached.",
-  inputSchema: schema({ address: { type: "string", description: "0x401000, main, FUN_00401000." } }, ["address"]),
+  name: "debug_breakpoint", title: "Set, clear or toggle a breakpoint", timeoutSecs: 30, hints: {},
+  description: "Sets, clears or toggles a breakpoint at an address or symbol (program address): `set: true` makes sure it is set, `set: false` makes sure it is not, and without `set` it toggles. Prefer `set` so a repeated call cannot undo the first one. Works while detached; breakpoints are installed on the next attach. Only needs the target stopped when attached.",
+  inputSchema: schema({ address: { type: "string", description: "0x401000, main, FUN_00401000." }, set: { type: "boolean", description: "true: set (keep if set); false: clear (keep if clear); omitted: toggle." } }, ["address"]),
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     if (typeof a.address !== "string") throw new ToolError("address is required: a name or an address as a string.");
     const at = await resolveAddress(a.address, ops, ctx.signal), was = (await ops.debug.status()).breakpoints.some((b) => b.toLowerCase() === at.toLowerCase());
-    await ops.debug.breakpoint({ address: at });
-    return `Breakpoint ${was ? "cleared" : "set"} at ${at}.`;
+    if (a.set !== undefined && typeof a.set !== "boolean") throw new ToolError("set must be true, false or left out.");
+    if (a.set === undefined || a.set === !was) await ops.debug.breakpoint({ address: at });
+    return `Breakpoint ${a.set === undefined ? (was ? "cleared" : "set") : a.set ? (was ? "already set" : "set") : (was ? "cleared" : "already clear")} at ${at}.`;
   },
 });
 

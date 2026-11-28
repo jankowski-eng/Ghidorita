@@ -172,6 +172,11 @@ test("pause, breakpoint toggle, detach", async () => {
   assert.match(await t("debug_pause").handler(f.ctx, {}), /^Already stopped/);
   assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "main" }), /^Breakpoint set at 0x401000/);
   assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "0x401000" }), /^Breakpoint cleared/);
+  const n = f.log.filter((x) => x[0] === "bp").length;
+  assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "0x401000", set: false }), /already clear/); assert.equal(f.log.filter((x) => x[0] === "bp").length, n, "nothing sent");
+  assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "0x401000", set: true }), /^Breakpoint set/);
+  assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "0x401000", set: true }), /already set/); assert.equal(f.log.filter((x) => x[0] === "bp").length, n + 1);
+  assert.match(await t("debug_breakpoint").handler(f.ctx, { address: "0x401000", set: false }), /^Breakpoint cleared/);
   assert.equal(await t("debug_detach").handler(f.ctx, {}), "Detached.");
 });
 
