@@ -132,7 +132,7 @@ const listing = (entries: ProgramEntry[]) => entries.slice(0, MAX_LISTED).map((e
 
 const open_program: ToolDef<{ program?: string; path?: string }> = {
   name: "open_program",
-  description: "Open a program, replacing the one that is open (it is saved and closed first). `program` = a stored program's id or name (pass neither to list them); `path` = an absolute path of a binary to import with Ghidra's default options. Below Full access the user is asked first. Analysis keeps running in the background: call wait_for_analysis. Everything you knew about the old program (addresses, variable names) is stale afterwards: call status.",
+  description: "Open a program, replacing the one that is open (it is saved and closed first). `program` = a stored program's id or name (pass neither to list them); `path` = an absolute path of a binary to import with Ghidra's default options. Below Full access the user is asked first (in a headless host nobody can be asked: the replaced program is saved and closed without asking). Analysis keeps running in the background: call wait_for_analysis. Everything you knew about the old program (addresses, variable names) is stale afterwards: call status.",
   inputSchema: obj({ program: str("Program id or name from the project."), path: str("Absolute path of a binary to import.") }),
   annotations: ann("Open program", false, true, false), access: "edit", capability: "projects", timeoutSecs: 240,
   handler: guard(async (ctx, a) => {
@@ -164,7 +164,7 @@ const open_program: ToolDef<{ program?: string; path?: string }> = {
 
 const close_program: ToolDef<Record<string, never>> = {
   name: "close_program",
-  description: "Save and close the open program. Below Full access the user is asked first. Afterwards only open_program and status work.",
+  description: "Save and close the open program. Below Full access the user is asked first (in a headless host nobody can be asked: it is saved and closed without asking). Afterwards only open_program and status work.",
   inputSchema: obj({}),
   annotations: ann("Close program", false, true, true), access: "edit", timeoutSecs: 60,
   handler: guard(async (ctx) => {
