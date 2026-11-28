@@ -91,9 +91,9 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
           return tab && d ? { entry: tab.entry, text: d.text, tokens: d.tokens } : null;
         } }),
         goto: (a) => latest.current.go(a, "agent"),
-        // s.open and s.closeProgram swallow their failures (the window shows them), so the outcome is read back from the store
+        // s.open and s.closeProgram swallow their failures (the window shows them): the tools read the outcome back from the backend
         openProgram: async (t, signal) => {
-          const before = s.program()?.session.sessionId, onAbort = () => s.cancelOpen();
+          const onAbort = () => s.cancelOpen();
           signal?.addEventListener("abort", onAbort, { once: true });
           try {
             if (signal?.aborted) throw new ToolError("cancelled before it started");
@@ -104,13 +104,8 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
               await s.open(entry.name, {}, entry, "background");
             }
           } finally { signal?.removeEventListener("abort", onAbort); }
-          const now = s.program()?.session;
-          if (!now || now.sessionId === before || ("programId" in t && now.programId !== t.programId)) throw new ToolError("The program did not open (the old one is still open, or none). The user can see why in the window; call status.");
         },
-        closeProgram: async () => {
-          await s.closeProgram();
-          if (s.program()) throw new ToolError("The program is still open: it could not be saved and closed, or the window is busy. The user can see why in the window.");
-        },
+        closeProgram: () => s.closeProgram(),
         highlight: async (h) => s.views.dispatch({ type: "set", patch: { agentHl: h } }),
         clearHighlight: async () => s.views.dispatch({ type: "set", patch: { agentHl: null } }),
       },

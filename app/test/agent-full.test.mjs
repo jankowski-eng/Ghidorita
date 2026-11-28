@@ -113,6 +113,14 @@ test("open/close: confirmed below Full, declined, no prompt in Full or headless"
   assert.deepEqual(w.calls.map((c) => c[0]), ["reopen", "open", "close"]); assert.equal(w.prompts.length, 0);
 });
 
+test("app mode: an open or close the store silently refused is an error, not Opened/Closed", async () => {
+  const w = world({ mode: "full" });
+  w.ctx.ui = { ...w.ctx.ui, openProgram: async () => {}, closeProgram: async () => {} }; // blocked, failed or cancelled: the old program stays
+  assert.match(await msg(tool("open_program").handler(w.ctx, { path: "/bin/ls" })), /did not open/);
+  assert.match(await msg(tool("open_program").handler(w.ctx, { program: "def" })), /did not open/);
+  assert.match(await msg(tool("close_program").handler(w.ctx, {})), /still open/);
+});
+
 test("open_program lists, resolves by name, rejects unknown, relative path", async () => {
   const w = world({ mode: "full", ui: "none" });
   assert.match(await tool("open_program").handler(w.ctx, {}), /2 stored programs.*b\.out/);

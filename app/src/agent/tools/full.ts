@@ -149,10 +149,14 @@ const open_program: ToolDef<{ program?: string; path?: string }> = {
     await confirmReplace(ctx, `The agent wants to open ${esc(name, 200, true)}${ctx.session ? `, which saves and closes ${label(ctx.session)}` : ""}. Allow?`);
     let opened: ActiveSession | null;
     if (ctx.ui) {
+      const before = ctx.session?.sessionId;
       await ctx.ui.openProgram(target, ctx.signal);
       opened = await ctx.backend.lifecycle.active();
+      // the store returns quietly when it is busy and reports a failed open to the window: only a new session is success
+      if (opened && opened.sessionId === before && !(target as { programId?: string }).programId) opened = null;
+      if (opened && "programId" in target && opened.programId !== target.programId) opened = null;
     } else opened = await run(ctx, entry ? ctx.backend.projects.reopen(entry, () => {}, "background") : ctx.backend.lifecycle.open((target as { path: string }).path, {}, () => {}, "background"));
-    if (!opened) throw new ToolError("The program did not open. Call status to see what is open; the user may need to look at the window.");
+    if (!opened) throw new ToolError("The program did not open: the window shows why (a file that is not a binary, an open the user cancelled, or a save or another open still in progress). Call status to see what is open.");
     return `Opened ${label(opened)} (id ${esc(opened.programId, 100)}). Analysis may still be running: call wait_for_analysis. Call status: earlier addresses and names no longer apply.`;
   }),
 };
@@ -166,7 +170,10 @@ const close_program: ToolDef<Record<string, never>> = {
     const cur = ctx.session;
     if (!cur) return "No program is open.";
     await confirmReplace(ctx, `The agent wants to close ${label(cur)} (it is saved first). Allow?`);
-    if (ctx.ui) await ctx.ui.closeProgram(); else await ctx.backend.lifecycle.close(cur);
+    if (ctx.ui) {
+      await ctx.ui.closeProgram();
+      if (await ctx.backend.lifecycle.active()) throw new ToolError(`${label(cur)} is still open: it could not be saved and closed, or the window is busy. The window shows why.`);
+    } else await ctx.backend.lifecycle.close(cur);
     return `Closed ${label(cur)}.`;
   }),
 };
