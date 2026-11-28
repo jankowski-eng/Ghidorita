@@ -408,3 +408,29 @@ test("agentName: the plain name, with #n only when two live connections share it
   assert.equal(agentName("Codex#7", []), "Codex"); // not connected any more
   assert.equal(agentName("odd#name#4", ["odd#name#4"]), "odd#name");
 });
+
+test("calls in flight are capped per connection and in all: over the limit is an immediate error, nothing is queued, and a freed slot works again", async () => {
+  const { MAX_CALLS_PER_CONNECTION: PER, MAX_CALLS_TOTAL: ALL } = await bundle("../src/main/agent.ts");
+  assert.deepEqual([PER, ALL], [8, 16]);
+  const r = await rig({ mode: "read" });
+  const a = await r.connect("a"), b = await r.connect("b");
+  const hold = (c, n) => Array.from({ length: n }, (_, i) => c.callTool({ name: "rd", arguments: { x: String(i) } }));
+  const first = hold(a, PER);
+  await until(() => r.calls().length === PER);
+  const over = await a.callTool({ name: "rd", arguments: { x: "over" } });
+  assert.equal(over.isError, true); assert.match(over.content[0].text, /Too many calls in flight/);
+  assert.equal(r.calls().length, PER); // refused before the renderer, not queued
+  const second = hold(b, ALL - PER); // the other connection still has room, up to the global limit
+  await until(() => r.calls().length === ALL);
+  const full = await b.callTool({ name: "rd", arguments: { x: "full" } });
+  assert.equal(full.isError, true); assert.match(full.content[0].text, /Too many calls/);
+  assert.equal(r.calls().length, ALL);
+  r.agent.reply({ callId: r.calls()[0].callId, ok: true, content: "done" }); // a slot frees up
+  assert.equal((await first[0]).content[0].text, "done");
+  const again = a.callTool({ name: "rd", arguments: { x: "again" } });
+  await until(() => r.calls().length === ALL + 1);
+  for (const c of r.calls().slice(1)) r.agent.reply({ callId: c.callId, ok: true, content: "ok" });
+  await Promise.all([...first.slice(1), ...second, again]);
+  assert.equal(r.agent.pendingCount(), 0);
+  await r.close();
+});

@@ -16,6 +16,8 @@ import { agentSocketPlace, type SocketPlace } from "../agent/socketPath";
 // No electron import: index.ts wires ipcMain, the window and userData in through AgentOpts, so the tests run this in plain Node.
 
 export const REPLY_MAX = 200_000, ERROR_MAX = 4_000, MARGIN_MS = 10_000, NOT_READY = "Ghidorita's window is not ready (starting, reloading or showing an error). Try again in a moment.";
+/** Agent calls share the renderer's one sidecar connection (64 outstanding requests): a flood of parallel calls must not stall the UI. Over the limit is an immediate error, never a queue. */
+export const MAX_CALLS_PER_CONNECTION = 8, MAX_CALLS_TOTAL = 16;
 const HOW_TO_ENABLE = "Agent access is off. Ask the user to choose Agent > Access > Read or Edit in Ghidorita's menu, then call status again.";
 
 export { visibleTools };
@@ -102,6 +104,7 @@ export function createAgent(o: AgentOpts) {
     if (!ready) return Promise.resolve(text(NOT_READY, true));
     const id = conn.id;
     if (!id) return Promise.resolve(text("Send notifications/initialized after initialize before calling tools.", true));
+    if (conn.calls.size >= MAX_CALLS_PER_CONNECTION || pending.size >= MAX_CALLS_TOTAL) return Promise.resolve(text(`Too many calls in flight (at most ${MAX_CALLS_PER_CONNECTION} per connection, ${MAX_CALLS_TOTAL} in all); wait for some to finish, then retry.`, true));
     // a caller-raised timeoutSecs (decompile, xrefs) must not be cut off by the tool's default limit
     const asked = (args as { timeoutSecs?: unknown }).timeoutSecs;
     const secs = Math.max(t.timeoutSecs, typeof asked === "number" ? asked + 30 : 0);
