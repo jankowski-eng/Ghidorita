@@ -79,7 +79,7 @@ test("pcode: paged with a continuation, capped", async () => {
 test("value_trail: by name, ops and C lines", async () => {
   const f = fake();
   const out = await call("value_trail", { function: "main", variable: "x" }, f);
-  assert.deepEqual(f.seen.trail, { entry: "0x401000", name: "x", timeoutSecs: 120 });
+  assert.deepEqual(f.seen.trail, { entry: "0x401000", name: "x", timeoutSecs: 90 });
   assert.equal(out, [
     "Value trail of x in main @0x401000",
     "Backward (where it comes from), 1 ops:", "  0x401000  COPY",
@@ -91,7 +91,7 @@ test("value_trail: by name, ops and C lines", async () => {
 test("value_trail: by line and column resolves the token like the UI; misses and missing args are errors", async () => {
   const f = fake();
   await call("value_trail", { function: "main", line: 4, column: 3 }, f);
-  assert.deepEqual(f.seen.trail, { entry: "0x401000", line: 3, colStart: 2, timeoutSecs: 120 });
+  assert.deepEqual(f.seen.trail, { entry: "0x401000", line: 3, colStart: 2, timeoutSecs: 90 });
   await fails(call("value_trail", { function: "main", line: 4, column: 30 }), /No token at line 4, column 30/);
   await fails(call("value_trail", { function: "main" }), /variable.*line/);
   await fails(call("value_trail", { function: "main", variable: "nope" }, fake({ decompiler: { decompile: () => job({ text: "", tokens: [] }), valueTrail: () => job(new BackendError("notFound", "no variable nope")) } })), /Not found: no variable nope/);
