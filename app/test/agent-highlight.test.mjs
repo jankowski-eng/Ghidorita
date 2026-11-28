@@ -19,6 +19,17 @@ test("highlight resolves names and function lines, dedupes, and hands the UI one
   assert.deepEqual(c, [{ addresses: ["0x401000", "0x401010"], lines: [{ entry: "0x401000", from: 2, to: 4 }], label: "the loop" }]);
   assert.match(t, /2 addresses and 1 line ranges \(the loop\)/);
 });
+test("highlight resolves names one at a time (never more than one search in flight) and stops when cancelled", async () => {
+  let now = 0, peak = 0, calls = 0;
+  const slow = { ...ops, searches: { searchSymbols: ({ query }) => { calls++; now++; peak = Math.max(peak, now); return { result: new Promise((r) => setTimeout(() => { now--; r([hit(query, "0x40" + (1000 + calls).toString(16))]); }, 2)), cancel() {} }; } } };
+  const { c, ui } = rec();
+  await highlight.handler({ ops: slow, ui }, { addresses: Array.from({ length: 30 }, (_, i) => "sym" + i) });
+  assert.equal(peak, 1); assert.equal(c[0].addresses.length, 30);
+  const ac = new AbortController(); calls = 0;
+  const stop = { ...slow, searches: { searchSymbols: (p) => { if (calls === 2) ac.abort(); return slow.searches.searchSymbols(p); } } };
+  await assert.rejects(highlight.handler({ ops: stop, ui, signal: ac.signal }, { addresses: ["a", "b", "c", "d", "e"] }), /cancelled|abort/i);
+  assert.equal(c.length, 1, "nothing was highlighted after the cancel");
+});
 test("highlight: clear, nothing, bad ranges, too many, no window, no program", async () => {
   const { c, ui } = rec();
   assert.match(await highlight.handler({ ops, ui }, { clear: true }), /cleared/); assert.deepEqual(c, ["clear"]);

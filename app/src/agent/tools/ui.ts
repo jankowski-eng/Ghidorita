@@ -57,7 +57,7 @@ const highlight: ToolDef<HlArgs> = {
     if (!a.addresses?.length && !a.lines?.length) throw new ToolError("Give addresses or lines to highlight, or clear: true.");
     if ((a.addresses?.length ?? 0) > MAX_HL_ADDRESSES || (a.lines?.length ?? 0) > MAX_HL_RANGES) throw new ToolError(`At most ${MAX_HL_ADDRESSES} addresses and ${MAX_HL_RANGES} line ranges.`);
     const addresses: Address[] = []; // one at a time: a name is a search, and 200 at once would queue behind the sidecar's request limit in front of the user's own
-    for (const x of a.addresses ?? []) addresses.push(await resolveAddress(x, ops, ctx.signal));
+    for (const x of a.addresses ?? []) { if (ctx.signal?.aborted) throw new ToolError("cancelled: nothing was highlighted."); addresses.push(await resolveAddress(x, ops, ctx.signal)); }
     const lines = [];
     for (const r of a.lines ?? []) {
       const from = Math.trunc(r.from), to = Math.trunc(r.to);
