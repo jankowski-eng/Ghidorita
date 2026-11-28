@@ -6,6 +6,7 @@ import type { PaneId } from "../Layout";
 import type { EditSpec } from "../EditDialog";
 import type { FormField, FormPreview } from "../FormDialog";
 import type { XrefTarget } from "../editActions";
+import type { AgentHighlight } from "../../agent/types";
 import type { CommentKind, ValueTrail } from "../../../../protocol";
 import { emptyNav } from "../nav";
 import { createStore } from "./createStore";
@@ -29,6 +30,7 @@ export interface Views {
   xrefTarget: XrefTarget | null;       // pinned "show references" target; null = follow the cursor
   trailSeq: number;                    // bumped whenever a trail starts or is cleared (Esc, command, a program change): a reply for an older one is dropped
   trail: { entry: Address; name: string; trail: ValueTrail } | null; // the value trail shown in the decompiler and listing (Esc clears it)
+  agentHl: AgentHighlight | null;      // the agent's highlight tool (reset with the program)
   useHl: { name: string; address: Address } | null; // a clicked decompiler-variable use: its token is highlighted
   dock: DockId | null;
   graphOn: boolean;                    // the decompiler pane shows the control-flow graph of the active function
@@ -47,7 +49,7 @@ export interface Views {
   importFor: string | null;
 }
 export const initialViews: Views = {
-  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, trailSeq: 0, useHl: null,
+  nav: emptyNav, fn: null, scrollReq: { address: "" as Address, n: 0 }, listingChange: { n: 0, ranges: null }, xrefVersion: 0, cursorAt: null, xrefTarget: null, trail: null, trailSeq: 0, agentHl: null, useHl: null,
   dock: null, graphOn: false, callGraphOn: false, pcodeOn: false, searchOpen: false, gotoOpen: false, typesOpen: false, dlg: null, formDlg: null, agentAsk: null,
   visible: { functions: true, listing: true, decompiler: true }, paneOrder: ["functions", "listing", "decompiler"], paneSizes: { functions: 260, listing: 560 }, layoutNames: ["Default"], dataVersion: 0, typesVersion: 0, covVersion: 0, importFor: null,
 };

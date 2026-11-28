@@ -3,6 +3,7 @@ import type { Address, FunctionInfo, Token } from "../../../../protocol";
 import { agentName } from "../../agent/attribution";
 import { changeView, createAgentExecutor, type AgentHost, type ConfirmFn } from "../../agent/host";
 import type { AccessMode, AgentState, AgentView } from "../../agent/types";
+import { followAgent, followingAgent } from "./agentFollow";
 import { changeLog } from "../changeLog";
 import { tokenAt } from "../editActions";
 import type { Source } from "../nav";
@@ -81,6 +82,7 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
     const host = (window as any).host as Partial<AgentHost> | undefined;
     if (!host?.onAgentCall || !host.onAgentCancel || !host.onAgentState || !host.agentReady || !host.agentReply) return;
     const fns = trackFunctions(s);
+    const follow = followAgent(s, (a) => latest.current.go(a, "agent"));
     const ex = createAgentExecutor({
       backend: s.backend, program: () => s.program(), functions: fns.list, changes: changeView(() => changeLog.items), host: host as AgentHost,
       ui: {
@@ -89,10 +91,13 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
           return tab && d ? { entry: tab.entry, text: d.text, tokens: d.tokens } : null;
         } }),
         goto: (a) => latest.current.go(a, "agent"),
+        highlight: async (h) => s.views.dispatch({ type: "set", patch: { agentHl: h } }),
+        clearHighlight: async () => s.views.dispatch({ type: "set", patch: { agentHl: null } }),
       },
+      onCall: (tool, args) => { if (followingAgent()) follow(tool, args); },
       confirm: createConfirmer(s.views, s.onReset), onBusy: (busy) => agentStatus.dispatch({ busy }),
     });
     const off = ex.listen(host as AgentHost, (state) => agentStatus.dispatch({ state }));
-    return () => { off(); fns.dispose(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
+    return () => { off(); fns.dispose(); follow.cancel(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
   }, []); // eslint-disable-line
 }

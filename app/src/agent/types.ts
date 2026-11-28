@@ -29,11 +29,16 @@ export interface AgentView {
   under: string | null;
   selection: string | null;
 }
+/** What the agent marks: addresses (rows and the decompiler tokens at them) and 1-based decompiler lines of a function, `entry` being resolved. Cleared on a program change. */
+export interface AgentHighlight { addresses: Address[]; lines: { entry: Address; from: number; to: number }[]; label?: string }
 /** UI access for app mode. Absent (`ctx.ui` undefined) in a headless host: tools with `appOnly` aren't listed there. */
 export interface AgentUi {
   view(): Promise<AgentView>;
   /** navigate the user's view (history push, source "agent") */
   goto(address: Address): Promise<void>;
+  /** tint listing rows and decompiler tokens/lines in the value-trail colours; replaces the previous highlight */
+  highlight(h: AgentHighlight): Promise<void>;
+  clearHighlight(): Promise<void>;
   /** ask the user in the app and resolve with the answer; false when declined or the window is closed */
   confirm(message: string): Promise<boolean>;
 }

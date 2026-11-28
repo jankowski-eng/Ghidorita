@@ -23,6 +23,7 @@ export function createMenu({ getWin, pick, agent }: Deps) {
   const acc = (id: string) => (KEYS[id] && !isHint(id) ? KEYS[id] : undefined); // a real accelerator
   // a hint-only key (plain letters, Space, Cmd+L) is shown in the label: a real accelerator would swallow it when typed into text inputs; the views handle it themselves
   const lab = (label: string, id: string) => (KEYS[id] && isHint(id) ? `${label}   (${showKey(KEYS[id], mac)})` : label);
+  let follow = false; // Agent > Follow Agent: the renderer's copy is set by the command, not persisted
   const shown = { functions: true, listing: true, decompiler: true }; // survives menu rebuilds
   const pane = (label: string, p: keyof typeof shown): MenuItemConstructorOptions =>
     ({ id: p, label, enabled: allowsCommand(caps, { type: "toggle-pane", pane: p, visible: true }), type: "checkbox", checked: shown[p], click: (mi) => { shown[p] = mi.checked; send({ type: "toggle-pane", pane: p, visible: mi.checked }); } });
@@ -33,6 +34,7 @@ export function createMenu({ getWin, pick, agent }: Deps) {
     return [
       { label: "Access", submenu: (["off", "read", "edit", "full"] as const).map((m): MenuItemConstructorOptions =>
         ({ id: "agent-" + m, label: { off: "Off", read: "Read", edit: "Edit", full: "Full" }[m], type: "radio", checked: agent.mode() === m, click: () => agent.setMode(m) })) },
+      { id: "agent-follow", label: "Follow Agent", type: "checkbox", checked: follow, click: (mi) => { follow = mi.checked; send({ type: "agent-follow", on: follow }); } },
       { type: "separator" },
       { id: "agent-clients", label: names.length ? "Connected: " + names.join(", ") : "No agent connected", enabled: false },
     ];

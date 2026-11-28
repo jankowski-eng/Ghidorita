@@ -23,7 +23,7 @@ test("goto resolves a name and navigates the user's view; no window or no progra
   await assert.rejects(goto.handler({ ops: null, ui }, { address: "main" }), /No program is open/);
 });
 test("both are app-only read-mode tools: offered in Read, not by a headless host", () => {
-  assert.deepEqual(visibleTools("read", {}, uiTools).map((t) => t.name), ["get_view", "goto"]);
+  assert.deepEqual(visibleTools("read", {}, uiTools).map((t) => t.name), ["get_view", "goto", "highlight"]);
   assert.deepEqual(visibleTools("read", { headless: true }, uiTools), []);
   assert.deepEqual(visibleTools("off", {}, uiTools), []);
 });
