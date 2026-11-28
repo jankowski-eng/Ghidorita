@@ -192,14 +192,14 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * undo name it must correspond to. A label with no pair (a patch, an equate, ...) never matches: the agent did not make it, so undo refuses.
  */
 const UNDO_NAMES: [RegExp, (m: RegExpMatchArray) => RegExp][] = [
-  [/^Rename to (.+)$/s, (m) => new RegExp(`^Rename (?!variable in ).+ to ${esc(m[1])}$`, "s")],
+  [/^Rename to (.+)$/s, (m) => new RegExp(`^Rename (?!variable\b).+ to ${esc(m[1])}$`, "s")],
   [/^Label (.+)$/s, (m) => new RegExp(`^Create label ${esc(m[1])}$`, "s")],
   [/^Comment \((\w+)\)$/, (m) => new RegExp(`^Set ${m[1]} comment$`)],
   [/^Clear comment \((\w+)\)$/, (m) => new RegExp(`^Clear ${m[1]} comment$`)],
   [/^Create function\b/, () => /^Create function at /],
   [/^Signature /, () => /^Edit signature of /],
-  [/^Retype /, () => /^Retype variable in /],
-  [/^Rename .+ to .+$/s, () => /^Rename variable in /],
+  [/^Retype /, () => /^Retype variable\b/],
+  [/^Rename .+ to .+$/s, () => /^Rename variable\b/],
   [/^Define /, () => /^Define data$/],
   [/^Bookmark/, () => /^Set bookmark$/],
   [/^Create (struct|union|enum|typedef|pointer|category)(?: (.+))?$/s, (m) => new RegExp(`^Create ${m[1]} ${esc(m[2] ?? "pointer")}$`, "s")],

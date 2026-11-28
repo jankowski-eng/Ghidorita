@@ -4,6 +4,7 @@ import { LARGE_FUNCTION } from "../tabs";
 import { runShotFlow } from "./autotestShots";
 import { runAnalysisFlow } from "./autotestAnalysis";
 import { runDebugFlow } from "./autotestDebug";
+import { runAgentFlow } from "./autotestAgent";
 
 // Focused flows (AUTOTEST_FLOW=<name>, driven by sidecar/test_ui.py): each checks one thing against the real sidecar, through the real DOM.
 export async function runFocusedFlow(flow: string, file: string, c: AutotestCtx, result: Record<string, any>): Promise<boolean> {
@@ -14,6 +15,7 @@ export async function runFocusedFlow(flow: string, file: string, c: AutotestCtx,
   if (flow === "locked") return lockedFlow(c, result);
   if (flow === "big") return bigFlow(file, c, result);
   if (flow === "debug") return runDebugFlow(file, c, result); // needs a provider with the debugger capability (the mock)
+  if (flow === "agent") return runAgentFlow(file, c, result); // needs scripts/agent-autotest-client.mjs connected through the bridge (sidecar/test_provider_ui.py starts both)
   if (flow === "analysis") { await c.open(file); return runAnalysisFlow(file, c, result); } // fast iteration on the Round 7 flow (the full autotest runs it too)
   throw new Error("unknown AUTOTEST_FLOW " + flow);
 }
