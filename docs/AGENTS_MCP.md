@@ -1,6 +1,6 @@
 # Agent access over MCP (design)
 
-Status: phase 1 (app mode, Read and Edit) is implemented on branch `agent-mcp-phase1`; phases 2 and 3 are proposals. See "Phase 1 as built" at the end for where the code differs from this design.
+Status: phase 1 (app mode, Read and Edit) is implemented on branch `agent-mcp-phase1`; phase 2 (headless host, Full mode, debugger, UI annotations, C types; formerly phases 2 and 3) is a proposal. See "Phase 1 as built" at the end for where the code differs from this design.
 
 Goal: let Claude Code, Codex, or any other MCP client use Ghidorita without computer use. The agent should work on **the program the user has open**, so the user sees its edits live, can undo them, and can point it at what they are looking at. A headless mode (no window) comes second and uses the same tools.
 
@@ -46,7 +46,8 @@ These decide the shape of the design:
 ### Bridge
 
 - Shipped as `Resources/mcp/ghidorita-mcp` (a shell wrapper running `Contents/MacOS/Ghidorita` with `ELECTRON_RUN_AS_NODE=1` and `out/mcp/bridge.cjs`). In dev, run `node app/out/mcp/bridge.cjs` directly.
-- If the socket is missing: with `--launch` (the default) it starts the app (`open -b li.jankowski.ghidorita` on macOS) and waits up to 60 s for the socket. Otherwise it answers MCP `initialize` itself and offers one `status` tool explaining that Ghidorita isn't running. A missing app should produce a readable message, not a client-side "server failed to start".
+- **Never launches at startup** (Claude Code and Codex start MCP servers at the start of every session; configuring Ghidorita for all projects must not open the app and its JVM each time). If the socket is there it is a byte pipe. If not, the bridge answers MCP itself: `initialize` (advertising `tools.listChanged`), `tools/list` with one `status` tool, and `status` says Ghidorita isn't running. `status {launch: true}` starts it (`open -b li.jankowski.ghidorita` on macOS, or the command in `GHIDORITA_APP_CMD`) and returns at once; a repeat within 15 s starts nothing.
+- **It follows the app.** While in fallback it retries the socket every 2 s. When the app appears it replays the client's original `initialize` to it (swallowing the reply: the client already has one), sends `notifications/initialized`, sends `notifications/tools/list_changed` to the client, and becomes a byte pipe; requests that arrive meanwhile are queued, none lost or answered twice. When the app quits, every request in flight gets a JSON-RPC error, the client gets `list_changed`, and the bridge is back in fallback. It exits only when stdin ends. While piping it parses just enough to track the ids of requests not yet answered.
 - Phase 2: when the app isn't running and `--headless` is given, it starts the headless host instead (see below).
 
 Agent setup (Help › Copy Agent Setup puts these on the clipboard with the real path):
@@ -186,9 +187,15 @@ The layering rules in `app/ARCHITECTURE.md` hold: the agent layer uses `Applicat
 
 ## Phases
 
-1. **App mode, Read and Edit.** Socket, bridge with `--launch`, main MCP server, renderer executor, context, UI and read tools, the edit tools, access modes, change-log attribution, status-bar indicator, Help › Copy Agent Setup.
-2. **Headless host and Full mode.** Patch, save, export, lifecycle, coverage, plus the remaining reads (`pcode`, `value_trail`, `function_graph`, `bookmarks` list, `undefined_refs`).
-3. **Debugger tools and UI annotations.** A `highlight` tool that tints addresses or decompiler lines, using the value-trail highlighting that already exists, "follow agent" (the view tracks what the agent reads), and a sidecar `parse_c_types` RPC (Ghidra's `CParser`) so agents can define structs from C text, which is how they naturally write types.
+1. **App mode, Read and Edit.** Done: see "Phase 1 as built" below.
+2. **Everything else, as one wave of parallel streams** (`AGENTS_MCP_PLAN.md`). Phases 2 and 3 used to be separate; the order was a priority, not a dependency, so they now run together:
+   - **Headless host**: Electron with no window, one host shared by every agent, handover to the app.
+   - **Full mode**: patch, save, export, open/close programs, coverage.
+   - **More reads**: `pcode`, `value_trail`, `function_graph`, bookmarks list, `undefined_refs`.
+   - **Debugger tools**, which wait for the next `debug_state` stop.
+   - **UI annotations**: a `highlight` tool that tints addresses or decompiler lines (reusing the value-trail highlighting) and "follow agent" (the view tracks what the agent reads).
+   - **C types**: a sidecar `parse_c_types` RPC (Ghidra's `CParser`), so agents can define structs from C text, which is how they naturally write types.
+   - **Atomic agent undo**: closes the check-then-undo gap left by phase 1.
 
 ## Open questions
 
@@ -208,6 +215,6 @@ Verified: unit tests for every layer, and `AUTOTEST_FLOW=agent` (a real MCP SDK 
 - **Edits.** The one retry on `cancelled` covers every edit tool. Edit calls run one at a time in the renderer executor so that guards reading the change log cannot interleave with another edit. `undo_agent_edit` requires: the newest live change-log entry was made by the same client (`clientInfo.name`), the provider can undo, and the provider's `undoName` matches that entry's kind (per-kind patterns in `tools/edit.ts`; the log's labels and the sidecar's undo names are not one to one, an entry with no pattern is never undone). The change is re-read after the history state is fetched. The remaining gap is a user edit that lands between that check and the undo.
 - **Protocol.** `tools/call` before `notifications/initialized` is refused. Main validates arguments with the SDK's ajv against each tool's schema. Output caps are ~30 000 characters per tool; untrusted text is escaped (control, zero-width and tag characters).
 - **Step 0 additions**: `ToolCtx` also carries `session`, `mode`, `changes` (the `undo_agent_edit` guard's view of the change log) and `tag`; `Host` also has `onAgentState`, `agentReady`, `agentMenu` (status bar, readiness, kill switch); new files `access.ts`, `errors.ts`, `attribution.ts`, `instructions.ts`. Linux without `XDG_RUNTIME_DIR` falls back to `~/.ghidorita/agent.sock`.
-- **Bridge.** `--launch` is the default, `--no-launch` selects the "not running" fallback (always pass it in tests: the default starts an installed Ghidorita); `GHIDORITA_APP_CMD` overrides the macOS `open -b`. The wrapper is `Resources/mcp/ghidorita-mcp`, the script `Resources/mcp/bridge.cjs`.
+- **Bridge.** See "Bridge" above: it never launches at startup, follows the app in both directions, and `--no-launch` is accepted and ignored. `GHIDORITA_APP_CMD` overrides the macOS `open -b`; `GHIDORITA_RETRY_MS` the retry interval (tests). The wrapper is `Resources/mcp/ghidorita-mcp`, the script `Resources/mcp/bridge.cjs`.
 - **Confirm.** The renderer has the confirm machinery (agent questions queue, render on top of other dialogs, answer false when the call is aborted or the program is replaced), but no phase 1 tool asks: `open_program` is phase 2.
-- **Known limits / follow-ups for phase 2**: no single-instance lock (two apps starting after a crash can race for the stale socket); the bridge waits up to 60 s for a launched app that never listens (Claude Code's start timeout may fire first: answer `initialize` from the fallback immediately and retry in the background) and does not check the socket's owner when `GHIDORITA_AGENT_SOCKET`/`XDG_RUNTIME_DIR` is used; attribution is by `clientInfo.name`, so two sessions of one client share an identity (use a per-connection id); no per-connection cap on pending calls or request size; an atomic "undo only if the top step is X" in the sidecar would close the check-then-undo gap; Windows pipe ACLs and the Windows path are untested.
+- **Known limits / follow-ups for phase 2**: no single-instance lock (two apps starting after a crash can race for the stale socket), and the bridge does not check the socket's owner when `GHIDORITA_AGENT_SOCKET`/`XDG_RUNTIME_DIR` is used; attribution is by `clientInfo.name`, so two sessions of one client share an identity (use a per-connection id); no per-connection cap on pending calls or request size; an atomic "undo only if the top step is X" in the sidecar would close the check-then-undo gap; Windows pipe ACLs and the Windows path are untested.

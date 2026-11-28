@@ -76,11 +76,11 @@ test("socket close returns to the fallback; the process lives until stdin ends",
   const sock = sockPath();
   const srv = await server(sock, (c) => c.end("bye\n"));
   const p = run([], sock, { GHIDORITA_RETRY_MS: "60000" });
-  await until(() => lines(p).length >= 2);
+  await until(() => lines(p).length >= 1);
   assert.equal(lines(p)[0], "bye");
-  assert.equal(lines(p)[1].method, "notifications/tools/list_changed");
   const call = await rpc(p, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "status" } });
   assert.match(call.result.content[0].text, /not running/);
+  assert.ok(!lines(p).some((m) => m.method === "notifications/tools/list_changed")); // this client never initialized: nothing to announce
   p.stdin.end();
   assert.equal(await p.exit, 0);
   srv.close();
@@ -220,4 +220,39 @@ test("a stale socket file counts as not running", async () => {
   const call = await rpc(p, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "status" } });
   assert.match(call.result.content[0].text, /not running/);
   p.stdin.end(); await p.exit;
+});
+
+test("the app was already running when the bridge started, then restarts: the new connection gets the client's handshake again (calls work)", async () => {
+  const sock = sockPath();
+  let app = await fakeApp(sock);
+  const c = await sdkClient(sock);
+  assert.deepEqual(await names(c), ["alpha", "slow"]); // piped from the start: the bridge never answered initialize itself
+  await app.kill();
+  await until(async () => (await names(c)).join() === "status", "fallback after the app quit");
+  app = await fakeApp(sock);
+  await until(async () => (await names(c)).includes("alpha"), "the app is back");
+  const r = await c.callTool({ name: "alpha", arguments: {} }); // main refuses tools/call before notifications/initialized: it must have been replayed
+  assert.equal(r.content[0].text, "ran alpha");
+  assert.deepEqual(c.errors, []);
+  await c.close(); await app.kill();
+});
+
+test("stdin ending while the first connect attempt is still deciding still answers what was sent (one-shot use)", async () => {
+  const sock = sockPath();
+  const p = run([], sock);
+  p.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "initialize", params: { protocolVersion: "2025-03-26" } }) + "\n" + JSON.stringify({ jsonrpc: "2.0", id: 8, method: "tools/list" })); // the last line has no newline
+  p.stdin.end();
+  assert.equal(await p.exit, 0);
+  const got = lines(p);
+  assert.deepEqual(got.map((m) => m.id), [7, 8]);
+  assert.equal(got[1].result.tools[0].name, "status");
+});
+
+test("a repeated status launch within a few seconds does not start another process", async () => {
+  const sock = sockPath(), marker = path.join(dir, `count${n}`);
+  const c = await sdkClient(sock, { GHIDORITA_APP_CMD: `echo x >> ${marker}` });
+  for (let i = 0; i < 3; i++) assert.match((await c.callTool({ name: "status", arguments: { launch: true } })).content[0].text, /switches to the app/);
+  await until(() => fs.existsSync(marker), "launcher ran"); await sleep(200);
+  assert.equal(fs.readFileSync(marker, "utf8").trim().split("\n").length, 1);
+  await c.close();
 });

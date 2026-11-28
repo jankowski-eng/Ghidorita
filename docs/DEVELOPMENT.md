@@ -171,7 +171,7 @@ Data types: View > Data Type Manager or "Data Type Manager" in the command bar (
 
 ## Agent access (MCP)
 
-Design and status: [AGENTS_MCP.md](AGENTS_MCP.md). Try it by hand: `cd app && npm run build && npm start`, open a program, choose Agent > Access > Edit, then point a client at `node app/out/mcp/bridge.cjs --no-launch` (Help > Copy Agent Setup has the exact commands), or inspect it with `npx @modelcontextprotocol/inspector --cli -e GHIDORITA_AGENT_SOCKET=<socket> node app/out/mcp/bridge.cjs --no-launch --method tools/list`. Always pass `--no-launch` in scripts and tests: the bridge's default starts an installed Ghidorita.
+Design and status: [AGENTS_MCP.md](AGENTS_MCP.md). Try it by hand: `cd app && npm run build && npm start`, open a program, choose Agent > Access > Edit, then point a client at `node app/out/mcp/bridge.cjs` (Help > Copy Agent Setup has the exact commands), or inspect it with `npx @modelcontextprotocol/inspector --cli -e GHIDORITA_AGENT_SOCKET=<socket> node app/out/mcp/bridge.cjs --method tools/list`.  The bridge starts the app only when the fallback's `status` tool is called with `launch: true` (`open -b`, or the command in `GHIDORITA_APP_CMD`), so scripts and tests are safe by default; `GHIDORITA_RETRY_MS` sets how often it retries the socket (default 2000).
 
 Env for development and tests: `GHIDORITA_AGENT_SOCKET` (socket path for app and bridge; keep it under ~100 bytes on macOS), `GHIDORITA_AGENT_MODE=off|read|edit|full` (not persisted; ignored by a packaged app), `GHIDORITA_APP_CMD` (what the bridge runs to start the app).
 

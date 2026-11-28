@@ -13,9 +13,9 @@ const deadline = Date.now() + 90_000;
 
 async function connect() {
   for (;;) {
-    // --no-launch: the bridge must never start an installed Ghidorita here; until the app listens it answers "not running" itself
+    // the bridge never launches the app by itself; until the app listens it answers "not running" itself (and switches over once it does)
     const client = new Client({ name: "agent-autotest", version: "1" });
-    await client.connect(new StdioClientTransport({ command: process.execPath, args: [bridge, "--no-launch"], env: process.env, stderr: "inherit" }));
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [bridge], env: process.env, stderr: "inherit" }));
     const s = text(await client.callTool({ name: "status", arguments: {} }));
     if (/Program: \S/.test(s) && !/none open/.test(s)) return { client, s };
     await client.close();
