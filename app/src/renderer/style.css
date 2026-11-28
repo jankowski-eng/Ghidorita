@@ -241,3 +241,6 @@ input.num { width: 70px; background: #1e1e1e; color: #ddd; border: 1px solid #55
 /* value trail: seed bold, downstream (forward) underlined blue, upstream (backward) dashed orange; listing rows get the same marks in the gutter */
 .trail-seed { font-weight: 700; background: rgba(255, 255, 255, .16); } .trail-forward { background: rgba(90, 160, 224, .28); border-bottom: 2px solid #5aa0e0; } .trail-backward { background: rgba(224, 169, 59, .25); border-bottom: 2px dashed #e0a93b; }
 .lrow.trail-f { box-shadow: inset 3px 0 0 #5aa0e0; background: rgba(90, 160, 224, .14); } .lrow.trail-b { box-shadow: inset 3px 0 0 #e0a93b; background: rgba(224, 169, 59, .14); } .lrow.trail-f.trail-b { box-shadow: inset 3px 0 0 #5aa0e0, inset 6px 0 0 #e0a93b; }
+.status .agent { background: transparent; color: #fff; border: 0; padding: 0 4px; cursor: pointer; font: inherit; } .status .agent:hover { text-decoration: underline; }
+.status .agent.pulse { animation: agent-pulse 1s ease-in-out infinite; } @keyframes agent-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .status .agent.pulse { animation: none; text-decoration: underline dotted; } }
