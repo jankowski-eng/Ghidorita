@@ -26,9 +26,9 @@ test("components and the store never reach into each other's wrong direction: st
   }
 });
 
-test("src/agent/ is environment-agnostic: only backend.ts, parseGoto.ts, address.ts, protocol.ts and its own files (never rpc, wire, React, the store or Electron)", async () => {
+test("src/agent/ is environment-agnostic: only backend.ts, parseGoto.ts, address.ts, debug.ts (pure), protocol.ts and its own files (never rpc, wire, React, the store or Electron)", async () => {
   const dir = new URL("../src/agent/", import.meta.url);
-  const allowed = /^(?:(?:\.\.\/)+(?:renderer\/(?:backend|parseGoto|address)|protocol)|\.\/[\w/]+|\.\.\/[\w]+|node:(?:os|path))$/;
+  const allowed = /^(?:(?:\.\.\/)+(?:renderer\/(?:backend|parseGoto|address|debug)|protocol)|\.\/[\w/]+|\.\.\/[\w]+|node:(?:os|path))$/;
   const names = (await readdir(dir, { recursive: true })).filter((p) => /\.tsx?$/.test(p));
   assert.ok(names.length >= 8);
   assert.ok(names.includes("host.ts"), "the shared executor lives in src/agent/host.ts and follows these rules");
