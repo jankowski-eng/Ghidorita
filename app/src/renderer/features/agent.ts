@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { ActiveSession, Address, Token } from "../../../../protocol";
+import type { ActiveSession, Address, FunctionInfo, Token } from "../../../../protocol";
 import { TOOLS } from "../../agent/tools";
 import { agentName, tagParams } from "../../agent/attribution";
 import { toToolError } from "../../agent/errors";
-import type { AccessMode, AgentCall, AgentReply, AgentState, AgentUi, AgentView, ChangeView, ToolDef } from "../../agent/types";
+import { ToolError, type AccessMode, type AgentCall, type AgentReply, type AgentState, type AgentUi, type AgentView, type ChangeView, type ToolDef } from "../../agent/types";
 import type { ApplicationBackend, ProgramOperations } from "../backend";
 import type { Change } from "../changeLog";
 import { changeLog } from "../changeLog";
@@ -38,6 +38,8 @@ export interface ExecutorDeps {
   /** the active program (the session's `program()`): operations and session */
   program(): { api: ProgramOperations; session: ActiveSession } | null;
   ui: Pick<AgentUi, "view" | "goto">;
+  /** the app's current function list, or null when it is not trustworthy right now (still loading, or behind a change): the executor then asks the provider */
+  functions?(): FunctionInfo[] | null;
   confirm: ConfirmFn;
   changes: ChangeView;
   host: Pick<AgentHost, "agentReply">;
@@ -65,6 +67,7 @@ export function createAgentExecutor(d: ExecutorDeps) {
         const p = d.program();
         return tool.handler({
         ops: p?.api ?? null, session: p?.session ?? null, backend: d.backend,
+        functions: async () => { if (!p) throw new ToolError("No program is open. Ask the user to open one in Ghidorita (call status to see what is open)."); return d.functions?.() ?? p.api.functions.list(); },
         ui: { view: d.ui.view, goto: d.ui.goto, confirm: (m) => d.confirm(m, { client, signal: ac.signal }) },
         changes: d.changes, signal: ac.signal, client, mode, tag: (x) => tagParams(x, client),
         }, call.args);
@@ -139,6 +142,16 @@ export function agentBadge(state: AgentState, busy: number): { label: string; pu
   return state.clients.length ? { label: `Agent: ${state.clients.map((id) => agentName(id, state.clients)).join(", ")}`, pulsing: busy > 0 } : null;
 }
 
+/**
+ * The app's function list for `ctx.functions()`: the store's, while it is trustworthy. A change that renames, creates or deletes functions (or is broad) makes it stale until
+ * its refetch lands (a new array), and while the program is still being read it is not there yet: `list()` is null then and the executor asks the provider.
+ */
+export function trackFunctions(s: { store: { getState(): { program: unknown; map: unknown; reading: boolean; funcs: FunctionInfo[] } }; onChanged(f: (p: { ranges: unknown; kinds: readonly string[] }) => void): () => void }) {
+  let behind: FunctionInfo[] | null = null;
+  const dispose = s.onChanged((p) => { if (!p.ranges || !p.kinds.length || p.kinds.some((k) => k === "symbol" || k === "function" || k === "other")) behind = s.store.getState().funcs; });
+  return { dispose, list: (): FunctionInfo[] | null => { const st = s.store.getState(); return st.program && st.map && !st.reading && st.funcs !== behind ? st.funcs : null; } };
+}
+
 /** Wires the executor to the app: the active program, the views, navigation through `go` (source "agent"), the Confirm dialog. Handlers are registered once and read the latest closures. */
 export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<void>) {
   const s = useSession();
@@ -146,8 +159,9 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
   useEffect(() => {
     const host = (window as any).host as Partial<AgentHost> | undefined;
     if (!host?.onAgentCall || !host.onAgentCancel || !host.onAgentState || !host.agentReady || !host.agentReply) return;
+    const fns = trackFunctions(s);
     const ex = createAgentExecutor({
-      backend: s.backend, program: () => s.program(), changes: changeView(() => changeLog.items), host: host as AgentHost,
+      backend: s.backend, program: () => s.program(), functions: fns.list, changes: changeView(() => changeLog.items), host: host as AgentHost,
       ui: {
         view: async () => agentView({ views: s.views, refs: s.refs, decompiler: () => {
           const { tabs: t } = latest.current, tab = t.state.tabs.find((x) => x.id === t.state.active), d = tab && t.data[tab.id];
@@ -158,6 +172,6 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
       confirm: createConfirmer(s.views, s.onReset), onBusy: (busy) => agentStatus.dispatch({ busy }),
     });
     const off = ex.listen(host as AgentHost, (state) => agentStatus.dispatch({ state }));
-    return () => { off(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
+    return () => { off(); fns.dispose(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
   }, []); // eslint-disable-line
 }

@@ -1,4 +1,4 @@
-import type { ActiveSession, Address, Capability } from "../../../protocol";
+import type { ActiveSession, Address, Capability, FunctionInfo } from "../../../protocol";
 import type { ApplicationBackend, ProgramOperations } from "../renderer/backend";
 
 // The contracts of the agent layer (docs/AGENTS_MCP.md). Main, the renderer executor and the tool files all build against this file.
@@ -49,6 +49,8 @@ export interface ToolCtx {
   ops: ProgramOperations | null;
   session: ActiveSession | null;
   backend: ApplicationBackend;
+  /** The active program's functions. The app serves its own list (kept current on program_changed) and fetches fresh only while that list is known to be behind; a headless host uses `ops.functions.list()`. Throws when no program is open. */
+  functions(): Promise<FunctionInfo[]>;
   ui?: AgentUi;
   changes: ChangeView;
   /** aborted when the MCP client cancels or the call times out: cancel `Job`s */

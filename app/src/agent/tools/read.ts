@@ -52,7 +52,7 @@ export const list_functions = tool({
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     const q = typeof a.query === "string" ? a.query.toLowerCase() : "";
-    let fns = await ops.functions.list();
+    let fns = await ctx.functions();
     const all = fns.length;
     if (q) fns = fns.filter((f) => f.name.toLowerCase().includes(q));
     if (a.sort === "name") fns = [...fns].sort((x, y) => x.name.localeCompare(y.name));

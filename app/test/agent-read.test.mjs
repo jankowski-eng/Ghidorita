@@ -71,7 +71,7 @@ function fake(over = {}) {
   const session = { sessionId: "s1", programId: "p1", name: "prog" };
   const backend = { capabilities: new Set(over.caps ?? ["decompile", "references", "variableReferences", "calls", "callGraph", "symbolSearch", "strings", "memorySearch", "bytes", "stackFrame", "dataTypes", "analysis"]), events: { onAnalysis: (l) => { analysisListeners.add(l); return () => analysisListeners.delete(l); } } };
   const ctl = new AbortController();
-  const ctx = { ops, session, backend, changes: { newest: () => null }, signal: ctl.signal, client: "test", mode: "read", tag: (p) => p };
+  const ctx = { ops, session, backend, changes: { newest: () => null }, signal: ctl.signal, client: "test", mode: "read", tag: (p) => p, functions: () => ops.functions.list() };
   return { ctx, ops, calls, jobs, ctl, state, listeners: analysisListeners, emit: (s) => analysisListeners.forEach((l) => l("s1", s)), backend };
 }
 const tool = (name) => readTools.find((t) => t.name === name);

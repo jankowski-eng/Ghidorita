@@ -202,3 +202,35 @@ test("edit tools run one at a time (a guard that reads the change log must not i
   assert.equal(ran, false);
   assert.deepEqual(replies.find((x) => x.callId === "3"), { callId: "3", ok: false, error: "Cancelled." });
 });
+
+test("ctx.functions: served from the app's list (two calls, no backend fetch); the provider is asked when the list is not trustworthy; no program is an instruction", async () => {
+  const fetched = []; const mkApi = () => ({ functions: { list: async () => { fetched.push(1); return [{ name: "fresh", entry: "0x1", size: 1 }]; } } });
+  const mine = [{ name: "cached", entry: "0x1", size: 1 }];
+  let trusted = mine; const got = [];
+  const read = tool("t", async (c) => { got.push((await c.functions())[0].name); return "ok"; });
+  const program0 = { api: mkApi(), session: { sessionId: "s1" } };
+  const s = setup([read], { functions: () => trusted }); s.set(program0);
+  await s.ex.handle(call("t")); await s.ex.handle(call("t"));
+  assert.deepEqual(got, ["cached", "cached"]); assert.equal(fetched.length, 0);
+  trusted = null; // loading, or behind a change
+  await s.ex.handle(call("t"));
+  assert.deepEqual(got, ["cached", "cached", "fresh"]); assert.equal(fetched.length, 1);
+  s.set(null);
+  await s.ex.handle(call("t"));
+  assert.match(s.replies.at(-1).error, /No program is open/);
+});
+
+test("trackFunctions: trusted once loaded; a symbol/function/broad change makes it stale until the refetch lands a new array; other kinds do not", () => {
+  let st = { program: {}, map: {}, reading: false, funcs: [{ name: "a" }] }; let fire;
+  const t = m.trackFunctions({ store: { getState: () => st }, onChanged: (f) => { fire = f; return () => { fire = null; }; } });
+  assert.equal(t.list(), st.funcs);
+  fire({ ranges: [], kinds: ["comment"] }); assert.equal(t.list(), st.funcs); // a comment changes no function
+  fire({ ranges: [{}], kinds: ["symbol"] }); assert.equal(t.list(), null); // behind
+  st = { ...st, funcs: [{ name: "b" }] }; assert.equal(t.list(), st.funcs); // the refetch landed
+  fire({ ranges: null, kinds: ["comment"] }); assert.equal(t.list(), null); // a broad change
+  st = { ...st, funcs: [{ name: "c" }] }; assert.equal(t.list(), st.funcs);
+  fire({ ranges: [], kinds: [] }); assert.equal(t.list(), null);
+  st = { ...st, funcs: [{ name: "d" }], reading: true }; assert.equal(t.list(), null); // still reading the program
+  st = { ...st, reading: false, map: null }; assert.equal(t.list(), null);
+  t.dispose(); assert.equal(fire, null);
+});
