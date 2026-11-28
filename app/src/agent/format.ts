@@ -6,9 +6,9 @@ import { addrAdd, parseAddr } from "../renderer/address";
 export const MAX_CHARS = 30_000;
 
 // C0, DEL, C1 (incl. NEL), line/paragraph separators and bidi controls
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu; // Cf: zero-width and tag characters, invisible to a reader but not to a model
 const NAMED: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" };
-const escapeControl = (s: string) => s.replace(CONTROL, (c) => NAMED[c] ?? (c.charCodeAt(0) < 256 ? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0") : "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")));
+const escapeControl = (s: string) => s.replace(CONTROL, (c) => { const n = c.codePointAt(0)!; return NAMED[c] ?? (n < 256 ? "\\x" + n.toString(16).padStart(2, "0") : n < 0x10000 ? "\\u" + n.toString(16).padStart(4, "0") : "\\u{" + n.toString(16) + "}"); });
 
 /** Untrusted text on one line: control characters escaped, cut at `max` UTF-16 units with a note; `quote` wraps it in double quotes (backslash and quote escaped). */
 export function esc(value: unknown, max = 200, quote = false): string {

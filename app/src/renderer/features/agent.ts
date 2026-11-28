@@ -49,6 +49,7 @@ export interface ExecutorDeps {
 export function createAgentExecutor(d: ExecutorDeps) {
   const tools = d.tools ?? TOOLS;
   const running = new Map<string, AbortController>();
+  let writes: Promise<unknown> = Promise.resolve(); // edits run one at a time: guards that read the change log (undo_agent_edit) must not interleave with another edit
   const reply = (r: AgentReply) => { try { d.host.agentReply(r).catch(() => {}); } catch { /* the window is going away */ } };
 
   async function handle(call: AgentCall): Promise<void> {
@@ -59,12 +60,16 @@ export function createAgentExecutor(d: ExecutorDeps) {
     try {
       const tool = tools.find((t) => t.name === call.tool);
       if (!tool) throw new Error(`Unknown tool ${call.tool}.`);
-      const p = d.program();
-      const content = await tool.handler({
+      const exec = () => {
+        if (ac.signal.aborted) throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
+        const p = d.program();
+        return tool.handler({
         ops: p?.api ?? null, session: p?.session ?? null, backend: d.backend,
         ui: { view: d.ui.view, goto: d.ui.goto, confirm: (m) => d.confirm(m, { client, signal: ac.signal }) },
         changes: d.changes, signal: ac.signal, client, mode, tag: (x) => tagParams(x, client),
-      }, call.args);
+        }, call.args);
+      };
+      const content = await (tool.access === "edit" || tool.access === "full" ? (writes = writes.then(exec, exec) as Promise<string>) : exec());
       reply({ callId, ok: true, content });
     } catch (e) {
       reply({ callId, ok: false, error: toToolError(e).message });

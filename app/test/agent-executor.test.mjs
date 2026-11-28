@@ -188,3 +188,17 @@ test("status badge", () => {
   assert.deepEqual(agentBadge({ mode: "read", clients: ["Claude Code"] }, 0), { label: "Agent: Claude Code", pulsing: false });
   assert.deepEqual(agentBadge({ mode: "edit", clients: ["A", "B"] }, 2), { label: "Agent: A, B", pulsing: true });
 });
+
+test("edit tools run one at a time (a guard that reads the change log must not interleave with another edit); reads stay parallel; a queued call aborted before its turn never runs", async () => {
+  const order = [], gate = deferred(); let ran = false;
+  const w = (name, wait) => ({ name, access: "edit", handler: async () => { order.push("start " + name); await wait; order.push("end " + name); return name; } });
+  const { ex, replies } = setup([w("e1", gate.promise), w("e2", Promise.resolve()), { name: "r", access: "read", handler: async () => { order.push("read"); return "r"; } }, { name: "e3", access: "edit", handler: async () => { ran = true; return "no"; } }]);
+  const a = ex.handle(call("e1", { callId: "1" })), b = ex.handle(call("e2", { callId: "2" })), c3 = ex.handle(call("e3", { callId: "3" })), r = ex.handle(call("r", { callId: "4" }));
+  await tick(); await r;
+  assert.deepEqual([...order].sort(), ["read", "start e1"]); // e2 waits for e1; the read does not
+  ex.cancel("3");
+  gate.resolve(); await Promise.all([a, b, c3]);
+  assert.deepEqual(order.filter((x) => x !== "read"), ["start e1", "end e1", "start e2", "end e2"]);
+  assert.equal(ran, false);
+  assert.deepEqual(replies.find((x) => x.callId === "3"), { callId: "3", ok: false, error: "Cancelled." });
+});

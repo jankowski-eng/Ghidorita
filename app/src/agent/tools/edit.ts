@@ -1,5 +1,6 @@
 import type { CommentKind, EnumOp, StructOp } from "../../../../protocol";
 import { isKind, toToolError } from "../errors";
+import { esc as clip } from "../format";
 import { resolveAddress, resolveFunction } from "../resolve";
 import { needProgram, ToolError, type JsonSchema, type ToolAnnotations, type ToolCtx, type ToolDef } from "../types";
 
@@ -223,12 +224,14 @@ const undoAgentEdit: ToolDef<Record<string, never>> = {
     // Remaining gap: an edit that lands between this check and the undo, or a user edit of the same kind and target the log never saw.
     const n = ctx.changes.newest();
     if (!n) throw new ToolError("Nothing to undo: none of your changes is still undoable (saved changes can no longer be undone).");
-    if (!n.by) throw new ToolError(`The newest change is the user's (${n.label}); I will not undo it. Ask the user to undo it, or leave it.`);
-    if (n.by !== ctx.client) throw new ToolError(`The newest change (${n.label}) was made by ${n.by}, not by you; I will not undo it.`);
+    if (!n.by) throw new ToolError(`The newest change is the user's (${clip(n.label, 80, true)}); I will not undo it. Ask the user to undo it, or leave it.`);
+    if (n.by !== ctx.client) throw new ToolError(`The newest change (${clip(n.label, 80, true)}) was made by ${clip(n.by, 60)}, not by you; I will not undo it.`);
     let u;
     try { u = await ops.history.state(); } catch (e) { throw toToolError(e); }
+    const now = ctx.changes.newest(); // re-read: another edit may have landed while the history state was fetched
+    if (!now || now.label !== n.label || now.by !== n.by) throw new ToolError("Your last change is no longer the newest one: someone else edited just now. Nothing was undone; call again.");
     if (!u.canUndo) throw new ToolError("Nothing to undo: the program has no undo history left (it was saved, or analysis ran).");
-    if (!undoNameMatches(n.label, u.undoName)) throw new ToolError(`The program's newest undo step is "${u.undoName ?? "?"}", which does not match your last change (${n.label}): someone else edited since. Nothing was undone.`);
+    if (!undoNameMatches(n.label, u.undoName)) throw new ToolError(`The program's newest undo step is ${clip(u.undoName ?? "?", 80, true)}, which does not match your last change (${clip(n.label, 80, true)}): someone else edited since. Nothing was undone.`);
     try { await ops.history.undo(); } catch (e) { throw toToolError(e); }
     return `Undid: ${n.label}.`;
   },

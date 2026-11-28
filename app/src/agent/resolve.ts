@@ -1,6 +1,7 @@
 import type { Address, SymbolHit } from "../../../protocol";
 import type { ProgramOperations } from "../renderer/backend";
 import { addressOf } from "../renderer/parseGoto";
+import { esc } from "./format";
 import { ToolError } from "./types";
 
 type Ops = Pick<ProgramOperations, "searches" | "functions">;
@@ -8,7 +9,7 @@ export interface ResolvedFunction { name: string; entry: Address; size: number; 
 
 const BARE_HEX = /^[0-9a-f]{1,16}$/i;
 const MAX_LISTED = 8;
-const show = (h: SymbolHit) => `${h.name} @${h.address} (${h.kind})`;
+const show = (h: SymbolHit) => `${esc(h.name, 80)} @${h.address} (${h.kind})`;
 const distinct = (hits: SymbolHit[]) => [...new Map(hits.map((h) => [h.address, h])).values()];
 const ambiguous = (input: string, hits: SymbolHit[]) =>
   new ToolError(`"${input}" is ambiguous: ${hits.slice(0, MAX_LISTED).map(show).join("; ")}${hits.length > MAX_LISTED ? `; … ${hits.length - MAX_LISTED} more` : ""}. Pass one of the addresses.`);
@@ -38,11 +39,13 @@ export async function resolveAddress(input: string, ops: Pick<ProgramOperations,
     if (found.length === 1) return found[0].address;
     if (found.length > 1) throw ambiguous(s, found);
   }
-  if (BARE_HEX.test(s)) return "0x" + BigInt("0x" + s).toString(16);
+  // a short bare-hex word ("bad", "cafe") is far more likely a mistyped name than an address: never guess it
+  if (BARE_HEX.test(s) && s.length >= 5) return "0x" + BigInt("0x" + s).toString(16);
   const q = addressOf(s);
   if (q) return q;
   const near = level((n) => n.toLowerCase().startsWith(lower));
-  throw new ToolError(near.length ? `No symbol named "${s}". Did you mean: ${near.slice(0, MAX_LISTED).map(show).join("; ")}?` : `No symbol named "${s}". Use search to find it.`);
+  const hint = BARE_HEX.test(s) ? ` If you meant the address, write 0x${s}.` : "";
+  throw new ToolError(hint ? `No symbol named "${esc(s, 80)}".${hint}` : near.length ? `No symbol named "${esc(s, 80)}". Did you mean: ${near.slice(0, MAX_LISTED).map(show).join("; ")}?` : `No symbol named "${esc(s, 80)}". Use search to find it.`);
 }
 
 /** The function a name or address stands for: a name resolves to that function, an address to the function containing it. */

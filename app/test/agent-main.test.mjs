@@ -337,3 +337,49 @@ test("native menu: Agent radios follow the mode, clients are listed, Help copies
   f("agent-setup").click();
   assert.equal(globalThis.__clipboard, "SETUP");
 });
+
+test("the kill switch: lowering the mode cancels running calls the new mode no longer offers, and leaves the others", async () => {
+  const r = await rig({ mode: "edit" });
+  const c = await r.connect();
+  const ed = c.callTool({ name: "ed", arguments: { x: "a" } }), rd = c.callTool({ name: "rd", arguments: { x: "a" } });
+  await until(() => r.calls().length === 2);
+  r.agent.setMode("read");
+  const res = await ed;
+  assert.equal(res.isError, true); assert.match(res.content[0].text, /changed to read/);
+  const editCall = r.calls().find((x) => x.tool === "ed");
+  assert.deepEqual(r.cancels(), [editCall.callId]);
+  r.agent.reply({ callId: r.calls().find((x) => x.tool === "rd").callId, ok: true, content: "fine" });
+  assert.equal((await rd).content[0].text, "fine");
+  assert.equal(r.agent.pendingCount(), 0);
+  await r.close();
+});
+
+test("a caller-raised timeoutSecs is not cut off by the tool's default limit; without one the tool's limit holds", async () => {
+  const T = tool("tmo", "read", { inputSchema: { type: "object", properties: { timeoutSecs: { type: "integer" } }, additionalProperties: false }, timeoutSecs: 5 });
+  const r = await rig({ mode: "read", opts: { table: [T] } });
+  const c = await r.connect();
+  void c.callTool({ name: "tmo", arguments: { timeoutSecs: 300 } }).catch(() => {});
+  void c.callTool({ name: "tmo", arguments: {} }).catch(() => {});
+  await until(() => r.calls().length === 2);
+  assert.deepEqual(r.calls().map((x) => x.timeoutSecs), [330, 5]);
+  await r.close();
+});
+
+test("a packaged app ignores GHIDORITA_AGENT_MODE; otherwise it wins", async () => {
+  const mk = (ignoreEnvMode) => createAgent({ send() {}, settingsFile: path.join(tmp(), "a.json"), socket: { path: "/tmp/ghx-unused", ownDir: null }, table: TABLE, env: { GHIDORITA_AGENT_MODE: "edit" }, ignoreEnvMode });
+  assert.equal(mk(true).mode(), "off");
+  assert.equal(mk(false).mode(), "edit");
+});
+
+test("tools/call before notifications/initialized is refused", async () => {
+  const r = await rig({ mode: "read" });
+  const s = net.connect(r.sock); await new Promise((res) => s.once("connect", res));
+  const lines = []; s.on("data", (d) => lines.push(...String(d).split("\n").filter(Boolean).map((l) => JSON.parse(l))));
+  s.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "x", version: "1" } } }) + "\n");
+  await until(() => lines.some((l) => l.id === 1));
+  s.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "rd", arguments: { x: "a" } } }) + "\n");
+  const reply = await until(() => lines.find((l) => l.id === 2));
+  assert.equal(reply.result.isError, true); assert.match(reply.result.content[0].text, /initialized/);
+  assert.equal(r.calls().length, 0);
+  s.destroy(); await r.close();
+});

@@ -147,3 +147,19 @@ test("toToolError: each failure kind becomes an instruction; ToolError and abort
   assert.equal(toToolError("str").message, "str");
   assert.ok(isKind(new BackendError("cancelled", ""), "cancelled")); assert.ok(!isKind(new Error(), "cancelled"));
 });
+
+test("a short bare-hex word is a mistyped name, not an address; five or more digits are an address", async () => {
+  const o = ops(SYMS);
+  for (const w of ["bad", "cafe", "dead"]) assert.match(await msg(resolveAddress(w, o)), /write 0x/);
+  assert.equal(await resolveAddress("00401", o), "0x401");
+  assert.equal(await resolveAddress("0x1", o), "0x1");
+});
+
+test("untrusted text is escaped, including zero-width and tag characters a reader can't see", async () => {
+  const { esc } = await bundle("../src/agent/format.ts");
+  assert.equal(esc("a​b"), "a\\u200bb");
+  assert.equal(esc("x\u{E0041}y"), "x\\u{e0041}y");
+  assert.equal(esc("l1\nl2 "), "l1\\nl2\\u2028");
+  const m = await msg(resolveAddress("ev​il", ops([sym("ev​il1", "0x10"), sym("ev​il2", "0x20")])));
+  assert.ok(!/[​]/.test(m), m);
+});

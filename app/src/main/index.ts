@@ -162,7 +162,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("get-config", (e) => !fromWin(e) ? null : ({ expect: process.env.AUTOTEST_PHASE === "2" ? JSON.parse(readFileSync(path.join(outDir, "autotest-persist.json"), "utf8")) : null, port, token, autotest: autotest ?? null, bench: process.env.BENCH === "1", cancelFile: process.env.AUTOTEST_CANCEL_FILE ?? null, only: process.env.AUTOTEST_ONLY ?? null, flow: process.env.AUTOTEST_FLOW ?? null, decompileTimeout: Number(process.env.AUTOTEST_DECOMPILE_TIMEOUT) || null }));
   win = new BrowserWindow({ width: 1400, height: 900, title: "Ghidorita", icon: path.join(appDir, "build/icon.png"), webPreferences: { preload: path.join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   const send = (ch: string, payload: unknown) => { if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(ch, payload); };
-  const ag = agent = createAgent({ send, settingsFile: path.join(app.getPath("userData"), "agent.json"), version: app.getVersion() });
+  const ag = agent = createAgent({ send, settingsFile: path.join(app.getPath("userData"), "agent.json"), version: app.getVersion(), ignoreEnvMode: app.isPackaged });
   ipcMain.handle("agent-reply", (e, r: unknown) => { if (fromWin(e)) ag.reply(r); });
   ipcMain.handle("agent-ready", (e, r: unknown) => { if (fromWin(e) && typeof r === "boolean") ag.setReady(r); });
   ipcMain.handle("agent-menu", (e) => { if (fromWin(e)) menu.popupAgent(); });

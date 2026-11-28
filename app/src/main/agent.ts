@@ -31,10 +31,12 @@ export interface AgentOpts {
   capabilities?: () => ReadonlySet<Capability> | undefined;
   marginMs?: number;
   env?: NodeJS.ProcessEnv;
+  /** a packaged app ignores GHIDORITA_AGENT_MODE: whoever can start the binary must not be able to grant access without the user's menu click */
+  ignoreEnvMode?: boolean;
   log?: (msg: string) => void;
 }
 interface Conn { server: Server; sock: net.Socket; name: string | null; calls: Set<string> }
-interface Pending { conn: Conn; settle(r: ToolResult): void; timer: NodeJS.Timeout }
+interface Pending { conn: Conn; tool: ToolDef; settle(r: ToolResult): void; timer: NodeJS.Timeout }
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: true };
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true as const } : {}) });
 export const cleanName = (s: unknown): string => (typeof s === "string" ? s.replace(/[\p{C}\p{Z}]+/gu, " ").trim().slice(0, 60).trim() : "") || "agent";
@@ -56,7 +58,7 @@ export function setupText(p: { packaged: boolean; resourcesPath: string; appDir:
 export function createAgent(o: AgentOpts) {
   const log = o.log ?? ((m) => console.error("agent:", m));
   const table = o.table ?? TOOLS, place = o.socket ?? agentSocketPlace(), win32 = process.platform === "win32", margin = o.marginMs ?? MARGIN_MS;
-  const envMode = asMode((o.env ?? process.env).GHIDORITA_AGENT_MODE);
+  const envMode = o.ignoreEnvMode ? null : asMode((o.env ?? process.env).GHIDORITA_AGENT_MODE);
   let mode: AccessMode = envMode ?? loadMode(o.settingsFile);
   let caps: ReadonlySet<Capability> | undefined; // the provider's, from the renderer's menu-state; unknown = no gating yet
   let ready = false, seq = 0, listener: net.Server | null = null, owned = false;
@@ -72,8 +74,8 @@ export function createAgent(o: AgentOpts) {
     const p = pending.get(callId);
     if (!p) return;
     pending.delete(callId); p.conn.calls.delete(callId); clearTimeout(p.timer);
-    if (cancel) o.send("agent-cancel", { callId });
     p.settle(r);
+    if (cancel) try { o.send("agent-cancel", { callId }); } catch { /* the window is gone: nothing to cancel */ }
   }
   const failAll = (why: string) => { for (const id of [...pending.keys()]) end(id, text(why, true), true); };
 
@@ -98,14 +100,18 @@ export function createAgent(o: AgentOpts) {
     const check = v(args);
     if (!check.valid || typeof args !== "object" || Array.isArray(args)) return Promise.resolve(text(`Invalid arguments for ${name}: ${check.errorMessage ?? "expected an object"}`, true));
     if (!ready) return Promise.resolve(text(NOT_READY, true));
+    if (!conn.name) return Promise.resolve(text("Send notifications/initialized after initialize before calling tools.", true));
+    // a caller-raised timeoutSecs (decompile, xrefs) must not be cut off by the tool's default limit
+    const asked = (args as { timeoutSecs?: unknown }).timeoutSecs;
+    const secs = Math.max(t.timeoutSecs, typeof asked === "number" ? asked + 30 : 0);
     const callId = `${++seq}-${Math.random().toString(36).slice(2, 10)}`;
     return new Promise<ToolResult>((settle) => {
-      const timer = setTimeout(() => end(callId, text(`${name} timed out after ${t.timeoutSecs} s. It was cancelled; retry with a smaller request or a longer timeoutSecs if the tool has one.`, true), true), t.timeoutSecs * 1000 + margin);
-      pending.set(callId, { conn, settle, timer }); conn.calls.add(callId);
+      const timer = setTimeout(() => end(callId, text(`${name} timed out after ${secs} s. It was cancelled; retry with a smaller request or a longer timeoutSecs if the tool has one.`, true), true), secs * 1000 + margin);
+      pending.set(callId, { conn, tool: t, settle, timer }); conn.calls.add(callId);
       const onAbort = () => end(callId, text("cancelled", true), true);
       if (signal.aborted) return onAbort();
       signal.addEventListener("abort", onAbort, { once: true });
-      o.send("agent-call", { callId, tool: name, args: args as Record<string, unknown>, client: conn.name ?? "agent", mode, timeoutSecs: t.timeoutSecs });
+      o.send("agent-call", { callId, tool: name, args: args as Record<string, unknown>, client: conn.name ?? "agent", mode, timeoutSecs: secs });
     });
   }
 
@@ -189,6 +195,9 @@ export function createAgent(o: AgentOpts) {
       mode = m;
       if (!envMode) try { const tmp = o.settingsFile + ".tmp"; mkdirSync(path.dirname(o.settingsFile), { recursive: true }); writeFileSync(tmp, JSON.stringify({ mode })); renameSync(tmp, o.settingsFile); } catch (e) { log(`saving the mode failed: ${e}`); }
       for (const c of conns) c.server.sendToolListChanged().catch(() => {});
+      // the kill switch: running calls whose tool the new mode no longer offers are cancelled (the sidecar may still finish a request already sent)
+      const offered = new Set(visible());
+      for (const [id, p] of [...pending]) if (!offered.has(p.tool)) end(id, text(`Agent access was changed to ${mode}; this call was cancelled.`, true), true);
       publish();
     },
     /** the renderer's "agent-ready"; false (window loading, crashed, closed) fails every pending call */
