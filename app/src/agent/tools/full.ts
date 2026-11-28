@@ -117,9 +117,7 @@ const export_: ToolDef<{ kind: typeof KINDS[number]; path: string }> = {
 };
 
 // ---- program lifecycle ----
-/** In the app the session store is the only caller of the backend's lifecycle (store/session.ts): a tool that bypassed it would leave the window on a closed program. `AgentUi` has no such hooks yet, so the app refuses; a headless host (no `ui`) calls the backend. */
-interface LifecycleUi { openProgram?(t: { programId: string } | { path: string }): Promise<void>; closeProgram?(): Promise<void> }
-const NEEDS_APP_HOOK = "Opening and closing programs is not wired into the app's window yet. Ask the user to do it in Ghidorita.";
+// In the app the session store is the only caller of the backend's lifecycle (store/session.ts), so the app goes through `ctx.ui`; a headless host (no `ui`) calls the backend.
 
 /** Below Full in the app: the user decides. Nothing to protect when no program is open. */
 async function confirmReplace(ctx: ToolCtx, message: string) {
@@ -150,9 +148,7 @@ const open_program: ToolDef<{ program?: string; path?: string }> = {
     await confirmReplace(ctx, `The agent wants to open ${esc(name, 200, true)}${ctx.session ? `, which saves and closes ${label(ctx.session)}` : ""}. Allow?`);
     let opened: ActiveSession | null;
     if (ctx.ui) {
-      const l = ctx.ui as LifecycleUi;
-      if (!l.openProgram) throw new ToolError(NEEDS_APP_HOOK);
-      await l.openProgram(target);
+      await ctx.ui.openProgram(target);
       opened = await ctx.backend.lifecycle.active();
     } else opened = await run(ctx, entry ? ctx.backend.projects.reopen(entry, () => {}, "background") : ctx.backend.lifecycle.open((target as { path: string }).path, {}, () => {}, "background"));
     if (!opened) throw new ToolError("The program did not open. Call status to see what is open; the user may need to look at the window.");
@@ -169,7 +165,7 @@ const close_program: ToolDef<Record<string, never>> = {
     const cur = ctx.session;
     if (!cur) return "No program is open.";
     await confirmReplace(ctx, `The agent wants to close ${label(cur)} (it is saved first). Allow?`);
-    if (ctx.ui) { const l = ctx.ui as LifecycleUi; if (!l.closeProgram) throw new ToolError(NEEDS_APP_HOOK); await l.closeProgram(); } else await ctx.backend.lifecycle.close(cur);
+    if (ctx.ui) await ctx.ui.closeProgram(); else await ctx.backend.lifecycle.close(cur);
     return `Closed ${label(cur)}.`;
   }),
 };

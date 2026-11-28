@@ -73,7 +73,7 @@ export function createAgentExecutor(d: ExecutorDeps) {
         changes: d.changes, signal: ac.signal, client, mode, tag: (x) => tagParams(x, client),
         }, call.args);
       };
-      const content = await (tool.access === "edit" || tool.access === "full" ? (writes = writes.then(exec, exec) as Promise<string>) : exec());
+      const content = await ((tool.access === "edit" || tool.access === "full") && !tool.unqueued ? (writes = writes.then(exec, exec) as Promise<string>) : exec());
       reply({ callId, ok: true, content });
     } catch (e) {
       reply({ callId, ok: false, error: toToolError(e).message });

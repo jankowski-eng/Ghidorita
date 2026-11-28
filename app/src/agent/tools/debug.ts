@@ -20,7 +20,7 @@ const ann = (title: string, a: { destructive?: boolean; idempotent?: boolean }) 
 
 type Def = Omit<ToolDef, "access" | "annotations" | "capability" | "handler"> & { title: string; hints: Parameters<typeof ann>[1]; handler(ctx: ToolCtx, args: Record<string, any>): Promise<string> };
 const tool = ({ title, hints, handler, ...t }: Def): ToolDef => ({
-  ...t, access: "full", capability: "debugger", annotations: ann(title, hints),
+  ...t, access: "full", unqueued: true, capability: "debugger", annotations: ann(title, hints),
   async handler(ctx, args) {
     if (ctx.signal.aborted) throw new ToolError(ABORTED);
     try { return await handler(ctx, args ?? {}); } catch (e) { throw toToolError(e); }

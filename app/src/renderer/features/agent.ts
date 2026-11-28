@@ -91,6 +91,12 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
           return tab && d ? { entry: tab.entry, text: d.text, tokens: d.tokens } : null;
         } }),
         goto: (a) => latest.current.go(a, "agent"),
+        openProgram: async (t) => {
+          if ("path" in t) { await s.open(t.path, {}, undefined, "background"); return; }
+          const entry = (await s.backend.projects.list()).find((e) => e.programId === t.programId);
+          if (entry) await s.open(entry.name, {}, entry, "background");
+        },
+        closeProgram: () => s.closeProgram(),
         highlight: async (h) => s.views.dispatch({ type: "set", patch: { agentHl: h } }),
         clearHighlight: async () => s.views.dispatch({ type: "set", patch: { agentHl: null } }),
       },

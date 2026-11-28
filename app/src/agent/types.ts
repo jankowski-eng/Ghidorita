@@ -39,6 +39,10 @@ export interface AgentUi {
   /** tint listing rows and decompiler tokens/lines in the value-trail colours; replaces the previous highlight */
   highlight(h: AgentHighlight): Promise<void>;
   clearHighlight(): Promise<void>;
+  /** open a stored program (by id) or import a binary (absolute path), replacing the open one, through the session store so the window follows; analysis runs in the background */
+  openProgram(target: { programId: string } | { path: string }): Promise<void>;
+  /** save and close the open program through the session store */
+  closeProgram(): Promise<void>;
   /** ask the user in the app and resolve with the answer; false when declined or the window is closed */
   confirm(message: string): Promise<boolean>;
 }
@@ -84,6 +88,8 @@ export interface ToolDef<A = any> {
   appOnly?: boolean;
   /** provider capabilities that must all be present, else the tool isn't listed (capabilities.ts) */
   capability?: Capability | Capability[];
+  /** edit and full tools run one at a time; a tool that waits for the target (the debugger) opts out so that another call (debug_pause) can interrupt it */
+  unqueued?: boolean;
   /** the tool's own limit; main times a call out after this plus a margin, and `signal` aborts it */
   timeoutSecs: number;
   /** returns the text the agent reads (capped, see format.ts); throws `ToolError` for what the agent should be told */

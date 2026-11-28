@@ -262,3 +262,17 @@ test("headless: without ui and confirm the tools get no ctx.ui", async () => {
   await ex.handle(call("t"));
   assert.equal(ctx.ui, undefined); assert.equal(replies[0].ok, true);
 });
+
+test("an unqueued full tool runs while another edit tool is still running (debug_pause during a waiting debug_continue)", async () => {
+  const gate = deferred(), seen = [];
+  const { ex } = setup([
+    { name: "w", access: "full", handler: async () => { await gate.promise; return "w"; } },
+    { name: "u", access: "full", unqueued: true, handler: async () => { seen.push("u"); return "u"; } },
+    { name: "q", access: "edit", handler: async () => { seen.push("q"); return "q"; } },
+  ]);
+  const w = ex.handle(call("w")); const u = ex.handle(call("u")); const q = ex.handle(call("q"));
+  await tick(); await u;
+  assert.deepEqual(seen, ["u"]); // q waits behind w, u does not
+  gate.resolve(); await w; await q;
+  assert.deepEqual(seen, ["u", "q"]);
+});

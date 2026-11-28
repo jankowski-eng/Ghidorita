@@ -36,7 +36,7 @@ function world({ mode = "full", ui = "app", confirm = true, session = true, rowL
   const appUi = { confirm: async (m) => (prompts.push(m), confirm), openProgram: async (t) => { calls.push(["uiOpen", t]); active = { sessionId: "s4", programId: "abc", name: "a.out" }; }, closeProgram: async () => { calls.push(["uiClose"]); active = null; } };
   const ctx = {
     ops: session ? ops : null, session: active, backend, mode, client: "claude-code", signal: new AbortController().signal, changes: { newest: () => null },
-    ui: ui === "app" ? appUi : ui === "nohook" ? { confirm: appUi.confirm } : undefined,
+    ui: ui === "app" ? appUi : undefined,
     functions: async () => [{ name: "f", entry: "0x401000", size: 16 }, { name: "g", entry: "0x402000", size: 8 }, { name: "h", entry: "0x403000", size: 4 }],
     tag: (p) => tagParams(p, "claude-code"),
   };
@@ -98,8 +98,6 @@ test("open/close: confirmed below Full, declined, no prompt in Full or headless"
   w = world({ mode: "edit", ui: "none" }); // headless
   await tool("open_program").handler(w.ctx, { program: "abc" }); await tool("open_program").handler(w.ctx, { path: "/bin/ls" }); await tool("close_program").handler(w.ctx, {});
   assert.deepEqual(w.calls.map((c) => c[0]), ["reopen", "open", "close"]); assert.equal(w.prompts.length, 0);
-  w = world({ ui: "nohook" });
-  assert.match(await msg(tool("close_program").handler(w.ctx, {})), /not wired/);
 });
 
 test("open_program lists, resolves by name, rejects unknown, relative path", async () => {
