@@ -176,9 +176,9 @@ test("view: cursor, function, tab, listing row or token, selection; nulls when e
   refs.listingRow.current = () => ({ address: "0x401000", label: "main", mnemonic: "push", operands: "rbp" });
   assert.deepEqual(agentView(deps), { address: "0x401000", function: { name: "main", entry: "0x401000" }, tab: null, under: "0x401000 main push rbp", selection: null });
 
-  decompiler.v = { entry: "0x401000", text: "int main(void)\n{ return foo; }", tokens: [{ line: 1, colStart: 9, colEnd: 15, kind: "keyword" }, { line: 1, colStart: 16, colEnd: 19, kind: "variable" }] };
+  decompiler.v = { entry: "0x401000", text: "int main(void)\n{ return foo; }", tokens: [{ line: 1, colStart: 2, colEnd: 8, kind: "keyword" }, { line: 1, colStart: 9, colEnd: 12, kind: "variable" }] };
   refs.lastPane.current = "decompiler";
-  refs.editor.current = { getPosition: () => ({ lineNumber: 2, column: 18 }), getSelection: () => ({ isEmpty: () => false }), getModel: () => ({ getValueInRange: () => "return foo" }) };
+  refs.editor.current = { getPosition: () => ({ lineNumber: 2, column: 11 }), getSelection: () => ({ isEmpty: () => false }), getModel: () => ({ getValueInRange: () => "return foo" }) };
   assert.deepEqual(agentView(deps), { address: "0x401000", function: { name: "main", entry: "0x401000" }, tab: "0x401000", under: "foo", selection: "return foo" });
 });
 
