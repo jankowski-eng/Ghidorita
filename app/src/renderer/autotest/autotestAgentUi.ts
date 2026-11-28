@@ -7,13 +7,18 @@ import { waitFor, type AutotestCtx } from "./autotest";
  */
 export async function runAgentUiChecks(c: AutotestCtx, entry: string, result: Record<string, any>): Promise<boolean> {
   const R: Record<string, any> = (result.agentUi = {});
+  const say = (comment: string) => c.program().bookmarks.set({ address: entry, category: "autotest", comment });
   const rows = () => document.querySelectorAll(".lrow.trail-f").length, lines = () => document.querySelectorAll(".view-lines .trail-forward").length;
+  let seenRows = false, seenLines = false; // latched: the marks are on screen only until the client clears them
+  const sampler = setInterval(() => { seenRows ||= rows() > 0; seenLines ||= lines() > 0; }, 40);
   await c.select(entry);
-  R.listingMarked = await waitFor(() => rows() > 0, 8000, "listing rows tinted by highlight").then(() => true, () => false);
-  R.decompilerMarked = await waitFor(() => lines() > 0, 8000, "decompiler marks from highlight").then(() => true, () => false);
-  if (!R.decompilerMarked) R.dom = { spans: document.querySelectorAll('[class*="trail"]').length, viewLines: document.querySelectorAll(".view-lines").length, text: c.editorText().slice(0, 120) };
+  await waitFor(() => seenRows && seenLines, 60000, "highlight marks in the listing and the decompiler").catch(() => {});
+  clearInterval(sampler);
+  R.listingMarked = seenRows; R.decompilerMarked = seenLines;
+  await say("ui seen");
   R.cleared = await waitFor(() => rows() === 0 && lines() === 0, 30000, "highlight cleared").then(() => true, () => false);
-  setFollowAgent(true); // what the Agent > Follow Agent menu command does
+  if (!R.cleared) R.left = { rows: rows(), lines: lines(), row: document.querySelector(".lrow.trail-f")?.textContent?.slice(0, 80), tok: document.querySelector(".view-lines .trail-forward")?.textContent?.slice(0, 80) };
+  setFollowAgent(true); await say("ui armed"); // what the Agent > Follow Agent menu command does
   R.followed = await waitFor(() => { const at = c.selected(); return !!at && at !== entry; }, 30000, "the view to follow the agent's decompile of another function").then(() => true, () => false);
   setFollowAgent(false);
   return R.listingMarked && R.decompilerMarked && R.cleared && R.followed && c.errors.length === 0;
