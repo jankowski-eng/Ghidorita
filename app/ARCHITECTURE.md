@@ -48,7 +48,7 @@ agent/tools/          the one TOOLS table: status.ts, read.ts, edit.ts, ui.ts (e
 agent/access.ts       visibleTools(mode, {headless, capabilities}): the one gate for tools/list and for authorising a call
 agent/resolve.ts      names or addresses -> addresses; ambiguity is an error listing the candidates
 agent/format.ts       text out, escaped (untrusted binary data), capped, with continuation lines
-agent/errors.ts       Failure -> instruction text; attribution.ts: params-object identity -> change-log `by`
+agent/errors.ts       Failure -> instruction text; attribution.ts: params-object identity -> change-log `by` (the connection id `<name>#<n>`; `agentName` for display)
 main/agent.ts         Unix socket server, one SDK `Server` per connection, access mode (userData/agent.json), IPC forwarding, timeouts, cancel
 mcp/bridge.ts         the stdio <-> socket byte pipe (built to out/mcp/bridge.cjs)
 renderer/features/agent.ts   the executor: runs a call against the active session, edits one at a time, per-call AbortController; AgentUi (view, goto through useNavigation().go, confirm)

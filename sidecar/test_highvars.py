@@ -11,7 +11,7 @@ from ghidorita.app import App
 from ghidorita.core.errors import RpcError
 from ghidorita.core.rpc import Dispatcher
 from ghidorita.domains import highvars
-from testlib import BASE, CANCELLED, Client, INVALID, NOT_FOUND, TIMEOUT, X86, inproc, run
+from testlib import BASE, CANCELLED, Client, INVALID, NOT_FOUND, TIMEOUT, X86, bare, inproc, run
 
 
 def test_variable_edit_timeout_arg_and_cancel(env):
@@ -88,7 +88,7 @@ def test_structure_inference_callees_and_cancellation(sc, tmp_path, monkeypatch)
                     assert await call("undo_state") == before
 
             result = await call("auto_create_structure", **args)
-            assert result == {"path": "/auto_structs/Inferred"}
+            assert bare(result) == {"path": "/auto_structs/Inferred"}
             struct = await call("get_data_type", path=result["path"])
             assert [(c["offset"], c["length"]) for c in struct["components"] if not c["undefined"]] == [(16, 4)]
             await call("undo")
@@ -99,7 +99,7 @@ def test_structure_inference_callees_and_cancellation(sc, tmp_path, monkeypatch)
             existing = (await call("create_data_type", kind="struct", name="Existing"))["path"]
             await call("edit_struct", path=existing, op={"op": "add", "type": "int", "name": "first", "comment": "keep"})
             await call("retype_variable", entry=BASE, name="p", dataType="Existing *")
-            assert await call("auto_create_structure", entry=BASE, name="p") == {"path": existing}
+            assert bare(await call("auto_create_structure", entry=BASE, name="p")) == {"path": existing}
             fields = [c for c in (await call("get_data_type", path=existing))["components"] if not c["undefined"]]
             assert [c["offset"] for c in fields] == [0, 16]
             assert (fields[0]["name"], fields[0]["comment"]) == ("first", "keep")

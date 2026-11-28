@@ -199,8 +199,16 @@ class Lanes:
 
     def on_r(self, fn):
         """Blocking call from another thread (O, shutdown): run fn on thread R, after everything queued before it."""
+        ses = self.ctx.session
+        cell = ses.current_cell()  # the caller's call: an edit committed on R is still this call's edit (its result names the undo step)
+        def run():
+            ses.adopt_cell(cell)
+            try:
+                return fn()
+            finally:
+                ses.adopt_cell(None)
         f = concurrent.futures.Future()
-        self.jobs.put((fn, f))
+        self.jobs.put((run, f))
         return f.result()
 
     def cancel(self, job):

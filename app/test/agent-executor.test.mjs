@@ -131,8 +131,8 @@ test("listen: ready after the listeners; dispose says not ready and aborts in-fl
 });
 
 test("changes.newest skips undone, saved and locked entries and reports by", () => {
-  const items = [{ label: "a", undone: false, saved: false, by: "Codex" }, { label: "b", undone: true, saved: false }, { label: "c", undone: false, saved: true }, { label: "d", undone: false, saved: false, locked: true }];
-  assert.deepEqual(changeView(() => items).newest(), { label: "a", by: "Codex" });
+  const items = [{ label: "a", undone: false, saved: false, by: "Codex", undoName: "Rename x to a" }, { label: "b", undone: true, saved: false }, { label: "c", undone: false, saved: true }, { label: "d", undone: false, saved: false, locked: true }];
+  assert.deepEqual(changeView(() => items).newest(), { label: "a", by: "Codex", undoName: "Rename x to a" });
   assert.equal(changeView(() => items.slice(1)).newest(), null);
   const log = new ChangeLog(); log.record("renameSymbol", { newName: "x", address: "0x1" }, {});
   assert.equal(changeView(() => log.items).newest().label, "Rename to x");

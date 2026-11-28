@@ -228,9 +228,9 @@ test("the app was already running when the bridge started, then restarts: the ne
   const c = await sdkClient(sock);
   assert.deepEqual(await names(c), ["alpha", "slow"]); // piped from the start: the bridge never answered initialize itself
   await app.kill();
-  await until(async () => (await names(c)).join() === "status", "fallback after the app quit");
+  await until(async () => (await names(c).catch(() => [])).join() === "status", "fallback after the app quit"); // a list in flight when the app dies gets the documented error
   app = await fakeApp(sock);
-  await until(async () => (await names(c)).includes("alpha"), "the app is back");
+  await until(async () => (await names(c).catch(() => [])).includes("alpha"), "the app is back");
   const r = await c.callTool({ name: "alpha", arguments: {} }); // main refuses tools/call before notifications/initialized: it must have been replayed
   assert.equal(r.content[0].text, "ran alpha");
   assert.deepEqual(c.errors, []);

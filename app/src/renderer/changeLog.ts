@@ -2,7 +2,7 @@ import type { Address } from "../../../protocol";
 import { agentOf } from "../agent/attribution";
 
 /** locked: unsaved, but the provider's undo history no longer holds it. by: the MCP client that made it (absent = the user) */
-export interface Change { id: number; label: string; address?: Address; undone: boolean; saved: boolean; locked?: boolean; at: number; by?: string }
+export interface Change { id: number; label: string; address?: Address; undone: boolean; saved: boolean; locked?: boolean; at: number; by?: string; undoName?: string } // undoName: the provider's name for the undo step this edit committed (the edit result's `undoName`)
 
 /** One line per edit command; null = not an edit. Params are the request's own. */
 export function describe(method: string, p: any): { label: string; address?: Address } | null {
@@ -72,8 +72,8 @@ export class ChangeLog {
     const d = describe(method, p);
     if (!d) return;
     this.redo = [];
-    const by = agentOf(p);
-    this.set([...this.items.filter((c) => !c.undone), { id: ++this.n, ...d, undone: false, saved: false, at: Date.now(), ...(by ? { by } : {}) }]);
+    const by = agentOf(p), undoName = typeof result?.undoName === "string" ? result.undoName : undefined;
+    this.set([...this.items.filter((c) => !c.undone), { id: ++this.n, ...d, undone: false, saved: false, at: Date.now(), ...(by ? { by } : {}), ...(undoName ? { undoName } : {}) }]);
   }
 }
 

@@ -8,7 +8,7 @@ const out = await build({
   stdin: { contents: `export * from "./renderer/changeLog"; export * from "./agent/attribution"; export * from "./agent/tools/edit"; export * from "./agent/types"; export { BackendError } from "./renderer/backend"; export { TOOLS } from "./agent/tools/index";`, resolveDir: src, loader: "ts" },
   bundle: true, format: "esm", write: false, platform: "node",
 });
-const { ChangeLog, tagParams, agentOf, editTools, undoNameMatches, ToolError, BackendError, TOOLS } = await import("data:text/javascript," + encodeURIComponent(out.outputFiles[0].text));
+const { ChangeLog, tagParams, agentOf, editTools, ToolError, BackendError, TOOLS } = await import("data:text/javascript," + encodeURIComponent(out.outputFiles[0].text));
 const tool = (name) => editTools.find((t) => t.name === name);
 
 const sym = (name, address, kind = "function") => ({ name, address, kind });
@@ -31,11 +31,12 @@ function world({ client = "claude-code", fails = {} } = {}) {
     seen.push({ cmd, p });
     const n = (attempts[cmd] = (attempts[cmd] ?? 0) + 1), f = fails[cmd]?.[n - 1];
     if (f) throw f;
-    stack.push(sidecarName[cmd](p));
-    log.record(cmd, p, typeof result === "function" ? result(p) : result);
-    return typeof result === "function" ? result(p) : result;
+    const name = sidecarName[cmd](p), r = { ...(typeof result === "function" ? result(p) : result), undoName: name }; // like the sidecar: the result names the step it committed
+    stack.push(name);
+    log.record(cmd, p, r);
+    return r;
   };
-  const user = (cmd, p) => { stack.push(sidecarName[cmd](p)); log.record(cmd, p, {}); }; // the UI: untagged params
+  const user = (cmd, p) => { const name = sidecarName[cmd](p); stack.push(name); log.record(cmd, p, { undoName: name }); }; // the UI: untagged params
   const ops = {
     searches: { searchSymbols: ({ query }) => ({ result: Promise.resolve(SYMS.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()))), cancel() {} }) },
     functions: { containing: async ({ address }) => (address === "0x401000" || address === "0x401010" ? FN : null) },
@@ -48,13 +49,17 @@ function world({ client = "claude-code", fails = {} } = {}) {
     bookmarks: { set: mk("setBookmark") },
     history: {
       state: async () => ({ canUndo: stack.length > 0, canRedo: false, undoName: stack.at(-1), dirty: stack.length > 0 }),
-      undo: async () => { undoCalls.push(stack.at(-1)); stack.pop(); log.record("undo", {}, {}); return { canUndo: stack.length > 0, canRedo: true, dirty: true }; },
+      undo: async (expect) => { // the sidecar's `undo {expect}`: checked where the stack lives, nothing undone on a mismatch
+        if (!stack.length) throw new BackendError("invalid", "nothing to undo");
+        if (expect !== undefined && stack.at(-1) !== expect) throw new BackendError("cancelled", `the top undo step is '${stack.at(-1)}', not '${expect}'; nothing was undone`);
+        undoCalls.push(stack.at(-1)); stack.pop(); log.record("undo", {}, {}); return { canUndo: stack.length > 0, canRedo: true, dirty: true };
+      },
     },
   };
   const ac = new AbortController();
   const ctx = {
     ops, session: { sessionId: "s", programId: "p", name: "a.out" }, backend: { capabilities: new Set() }, signal: ac.signal, client, mode: "edit",
-    changes: { newest: () => { const c = [...log.items].reverse().find((x) => !x.undone && !x.saved && !x.locked); return c ? { label: c.label, by: c.by } : null; } },
+    changes: { newest: () => { const c = [...log.items].reverse().find((x) => !x.undone && !x.saved && !x.locked); return c ? { label: c.label, by: c.by, undoName: c.undoName } : null; } },
     tag: (p) => tagParams(p, client),
   };
   return { ctx, log, stack, seen, undoCalls, ac, user, attempts };
@@ -199,14 +204,21 @@ test("undo_agent_edit: another agent's edit, nothing to undo, saved or locked en
   gone.stack.length = 0;
   assert.match(await msg(tool("undo_agent_edit").handler(gone.ctx, {})), /no undo history/);
 
-  const skew = world(); // the provider's top step is not the one the log names: someone edited outside the log
+  const skew = world(); // an edit the log never saw lands on top of ours (the race the provider's `expect` closes): it refuses, nothing is undone
   await tool("rename_symbol").handler(skew.ctx, { target: "main", newName: "a" });
   skew.stack.push("Set eol comment");
-  assert.match(await msg(tool("undo_agent_edit").handler(skew.ctx, {})), /does not match/);
+  assert.match(await msg(tool("undo_agent_edit").handler(skew.ctx, {})), /no longer the newest undo step/);
   assert.equal(skew.undoCalls.length, 0);
+  assert.equal(skew.stack.length, 2);
+
+  const old = world(); // a provider that does not report undo names: the tool refuses rather than guess
+  await tool("rename_symbol").handler(old.ctx, { target: "main", newName: "a" });
+  delete old.log.items[0].undoName;
+  assert.match(await msg(tool("undo_agent_edit").handler(old.ctx, {})), /did not report an undo step/);
+  assert.equal(old.undoCalls.length, 0);
 });
 
-test("undo names correspond to every label an agent edit logs", async () => {
+test("every agent edit kind logs the undo step its result named, and each can be undone in turn through `expect`", async () => {
   const w = world();
   const run = [
     ["rename_symbol", { target: "main", newName: "a" }], ["create_label", { address: "0x402000", name: "lbl" }], ["rename_variable", { function: "main", variable: "a", newName: "b" }],
@@ -218,23 +230,17 @@ test("undo names correspond to every label an agent edit logs", async () => {
   ];
   for (const [name, args] of run) {
     await tool(name).handler(w.ctx, args);
-    const c = w.log.items.at(-1), u = w.stack.at(-1);
-    assert.ok(undoNameMatches(c.label, u), `${name}: label "${c.label}" vs undo name "${u}"`);
+    assert.equal(w.log.items.at(-1).undoName, w.stack.at(-1), `${name}: the change-log entry carries the step the provider named`);
   }
-  while (w.log.items.some((c) => !c.undone)) await tool("undo_agent_edit").handler(w.ctx, {}); // all of them can be undone in turn
+  while (w.log.items.some((c) => !c.undone)) await tool("undo_agent_edit").handler(w.ctx, {});
   assert.equal(w.undoCalls.length, run.length);
 });
 
-test("undoNameMatches is strict: a different kind of step never matches", () => {
-  assert.ok(!undoNameMatches("Rename to a", "Rename variable in main")); // the user renamed a variable
-  assert.ok(!undoNameMatches("Rename to a", "Rename old to b"));
-  assert.ok(!undoNameMatches("Rename a to b", "Rename old to b")); // a variable rename's step is "in <function>"
-  assert.ok(!undoNameMatches("Comment (eol)", "Set plate comment"));
-  assert.ok(!undoNameMatches("Comment (eol)", undefined));
-  assert.ok(!undoNameMatches("Patch 90", "Patch instruction at 0x10")); // not an agent edit kind
-  assert.ok(!undoNameMatches("Edit structure /A/S", "Edit T: add"));
-  assert.ok(undoNameMatches("Rename to a.b", "Rename x to a.b"));
-  assert.ok(!undoNameMatches("Rename to a.b", "Rename x to aXb")); // regex characters are literal
+test("undo_agent_edit: a provider answer of Invalid means there is nothing left to undo; other failures are reported", async () => {
+  const w = world();
+  await tool("rename_symbol").handler(w.ctx, { target: "main", newName: "a" });
+  w.ctx.ops.history.undo = async () => { throw new BackendError("busy", "analysis running"); };
+  assert.match(await msg(tool("undo_agent_edit").handler(w.ctx, {})), /wait_for_analysis/);
 });
 
 test("schemas: unique names, edit access, annotations, closed objects, capabilities", () => {

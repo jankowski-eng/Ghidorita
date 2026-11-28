@@ -117,3 +117,14 @@ test("undo and redo keep by", () => {
   l.record("redo", {}, {});
   assert.deepEqual([l.items[0].undone, l.items[0].by], [false, "claude-code"]);
 });
+
+test("an edit result's undoName is kept on the entry (what undo_agent_edit asks the provider to undo); an absent or odd one is not", () => {
+  const l = new ChangeLog();
+  l.record("renameSymbol", { address: "0x1", newName: "a" }, { undoName: "Rename x to a" });
+  l.record("setComment", { address: "0x1", kind: "eol", text: "t" }, {});
+  l.record("setBookmark", { address: "0x1", category: "c", comment: "x" }, { undoName: 5 });
+  l.record("defineData", { address: "0x2", dataType: "int" }, undefined);
+  assert.deepEqual(l.items.map((c) => c.undoName), ["Rename x to a", undefined, undefined, undefined]);
+  l.record("undo", {}, {}); // undo and redo flip entries and keep what they carry
+  assert.equal(l.items[0].undoName, "Rename x to a");
+});

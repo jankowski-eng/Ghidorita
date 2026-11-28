@@ -40,8 +40,8 @@ export interface AgentUi {
 
 /** The newest change-log entries, for the `undo_agent_edit` guard. */
 export interface ChangeView {
-  /** the newest entry that is neither undone, saved nor locked, with the client that made it (`by`; absent = the user) */
-  newest(): { label: string; by?: string } | null;
+  /** the newest entry that is neither undone, saved nor locked, with the client that made it (`by`; absent = the user) and the provider's name for the undo step it committed (`undoName`; absent when the provider did not report one) */
+  newest(): { label: string; by?: string; undoName?: string } | null;
 }
 
 export interface ToolCtx {

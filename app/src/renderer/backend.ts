@@ -132,7 +132,8 @@ export interface Patching {
 
 export interface ProgramHistory {
   state(): Promise<UndoState>;
-  undo(): Promise<UndoState>;
+  /** `expect`: undo only if the top undo step is the one an edit named in its result (`undoName`); else `cancelled` and nothing is undone. */
+  undo(expect?: string): Promise<UndoState>;
   redo(): Promise<UndoState>;
   save(): Promise<{ saved: boolean; undoHistoryCleared: boolean }>;
 }

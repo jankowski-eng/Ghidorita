@@ -28,7 +28,7 @@ export type ConfirmFn = (message: string, o: { client: string; signal: AbortSign
 export const changeView = (items: () => readonly Change[]): ChangeView => ({
   newest() {
     const c = [...items()].reverse().find((x) => !x.undone && !x.saved && !x.locked) as (Change & { by?: string }) | undefined;
-    return c ? { label: c.label, by: c.by } : null;
+    return c ? { label: c.label, by: c.by, undoName: c.undoName } : null;
   },
 });
 

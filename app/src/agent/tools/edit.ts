@@ -186,32 +186,6 @@ const editEnum: ToolDef<{ path: string; op: EnumOp }> = {
   },
 };
 
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-/**
- * What the sidecar names the undo step of each change-log label (changeLog.describe -> sidecar `ses.edit(name, ...)`). The names are not one to one
- * with the labels (the label drops the old name, the undo name drops the new one), so each agent edit kind has a pair: a label pattern, and the
- * undo name it must correspond to. A label with no pair (a patch, an equate, ...) never matches: the agent did not make it, so undo refuses.
- */
-const UNDO_NAMES: [RegExp, (m: RegExpMatchArray) => RegExp][] = [
-  [/^Rename to (.+)$/s, (m) => new RegExp(`^Rename (?!variable\b).+ to ${esc(m[1])}$`, "s")],
-  [/^Label (.+)$/s, (m) => new RegExp(`^Create label ${esc(m[1])}$`, "s")],
-  [/^Comment \((\w+)\)$/, (m) => new RegExp(`^Set ${m[1]} comment$`)],
-  [/^Clear comment \((\w+)\)$/, (m) => new RegExp(`^Clear ${m[1]} comment$`)],
-  [/^Create function\b/, () => /^Create function at /],
-  [/^Signature /, () => /^Edit signature of /],
-  [/^Retype /, () => /^Retype variable\b/],
-  [/^Rename .+ to .+$/s, () => /^Rename variable\b/],
-  [/^Define /, () => /^Define data$/],
-  [/^Bookmark/, () => /^Set bookmark$/],
-  [/^Create (struct|union|enum|typedef|pointer|category)(?: (.+))?$/s, (m) => new RegExp(`^Create ${m[1]} ${esc(m[2] ?? "pointer")}$`, "s")],
-  [/^Edit (?:structure|enum) (.+)$/s, (m) => new RegExp(`^Edit ${esc(m[1].split("/").pop() ?? "")}: `)],
-];
-export function undoNameMatches(label: string, undoName: string | undefined): boolean {
-  if (!undoName) return false;
-  for (const [l, expect] of UNDO_NAMES) { const m = label.match(l); if (m) return expect(m).test(undoName); }
-  return false;
-}
-
 const undoAgentEdit: ToolDef<Record<string, never>> = {
   name: "undo_agent_edit",
   description: "Undo your own most recent edit. Refuses when the newest change is the user's, or was made by another client, so it can never revert the user's work. Call again to step back further.",
@@ -219,20 +193,19 @@ const undoAgentEdit: ToolDef<Record<string, never>> = {
   annotations: ann("Undo agent edit", true, false), access: "edit", capability: "undo", timeoutSecs: 30,
   async handler(ctx) {
     const ops = needProgram(ctx);
-    // Ghidra's undo stack is shared with the user. Undo only when (1) the newest live change-log entry was made by THIS client (not another agent:
-    // that would revert someone else's work too), (2) the provider can undo, and (3) the provider's top undo step is the one that entry names.
-    // Remaining gap: an edit that lands between this check and the undo, or a user edit of the same kind and target the log never saw.
+    // Ghidra's undo stack is shared with the user. Undo only when the newest live change-log entry was made by THIS connection (not the user, not another
+    // agent) and then ask the provider to undo exactly the step that edit committed (`expect`): it checks on its own thread, so nothing can land in between.
+    // Remaining gap: a user edit that happens to carry the very same undo name (two "Set eol comment" steps) between our edit and this call.
     const n = ctx.changes.newest();
     if (!n) throw new ToolError("Nothing to undo: none of your changes is still undoable (saved changes can no longer be undone).");
     if (!n.by) throw new ToolError(`The newest change is the user's (${clip(n.label, 80, true)}); I will not undo it. Ask the user to undo it, or leave it.`);
     if (n.by !== ctx.client) throw new ToolError(`The newest change (${clip(n.label, 80, true)}) was made by ${clip(n.by, 60)}, not by you; I will not undo it.`);
-    let u;
-    try { u = await ops.history.state(); } catch (e) { throw toToolError(e); }
-    const now = ctx.changes.newest(); // re-read: another edit may have landed while the history state was fetched
-    if (!now || now.label !== n.label || now.by !== n.by) throw new ToolError("Your last change is no longer the newest one: someone else edited just now. Nothing was undone; call again.");
-    if (!u.canUndo) throw new ToolError("Nothing to undo: the program has no undo history left (it was saved, or analysis ran).");
-    if (!undoNameMatches(n.label, u.undoName)) throw new ToolError(`The program's newest undo step is ${clip(u.undoName ?? "?", 80, true)}, which does not match your last change (${clip(n.label, 80, true)}): someone else edited since. Nothing was undone.`);
-    try { await ops.history.undo(); } catch (e) { throw toToolError(e); }
+    if (!n.undoName) throw new ToolError(`The provider did not report an undo step for your last change (${clip(n.label, 80, true)}), so it cannot be undone safely from here. Ask the user to undo it.`);
+    try { await ops.history.undo(n.undoName); } catch (e) {
+      if (isKind(e, "cancelled")) throw new ToolError(`Your last change (${clip(n.label, 80, true)}) is no longer the newest undo step: someone else edited since. Nothing was undone.`);
+      if (isKind(e, "invalid")) throw new ToolError("Nothing to undo: the program has no undo history left (it was saved, or analysis ran).");
+      throw toToolError(e);
+    }
     return `Undid: ${n.label}.`;
   },
 };

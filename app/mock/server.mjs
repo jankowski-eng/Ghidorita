@@ -59,7 +59,7 @@ function edit(name, notify, ranges, kinds, fn) { // fn validates first, then mut
   try { result = fn() ?? {}; } catch (e) { S = before; throw e; } // like a rolled-back Ghidra transaction
   undoStack.push({ name, before, after: structuredClone(S) }); redoStack.length = 0; dirty = true;
   changed(notify, ranges, kinds);
-  return result;
+  return { ...result, undoName: name }; // like the sidecar: every edit result names the undo step it committed
 }
 function assembleAt({ address, text }) {
     if (typeof text !== "string" || !text.trim()) bad("text");
@@ -950,7 +950,14 @@ const handlers = {
     notify("program_changed", { ranges: [], kinds: [], undo: undoState() });
     return { saved: true, undoHistoryCleared: true };
   },
-  undo(_, notify) { return step(undoStack, redoStack, "before", notify); },
+  undo({ expect } = {}, notify) {
+    if (expect !== undefined) { // like the sidecar: undo only the step the caller named, else Cancelled and nothing happens
+      if (typeof expect !== "string") bad("expect");
+      const top = undoStack.at(-1)?.name;
+      if (undoStack.length && top !== expect) throw { code: -32002, message: `the top undo step is '${top}', not '${expect}'; nothing was undone` };
+    }
+    return step(undoStack, redoStack, "before", notify);
+  },
   redo(_, notify) { return step(redoStack, undoStack, "after", notify); },
 };
 function step(from, to, side, notify) {
