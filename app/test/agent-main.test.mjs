@@ -125,7 +125,7 @@ test("a call is forwarded as an AgentCall and the reply comes back; ok:false is 
   const p = c.callTool({ name: "rd", arguments: { x: "hi" } });
   const call = (await until(() => r.calls()[0]));
   assert.equal(call.tool, "rd"); assert.deepEqual(call.args, { x: "hi" }); assert.equal(call.mode, "read"); assert.equal(call.timeoutSecs, 5);
-  assert.equal(call.client.length, 60); assert.ok(call.client.startsWith("My Agent x"));
+  assert.match(call.client, /^My Agent x{0,}.*#1$/s); assert.equal(call.client.replace(/#\d+$/, "").length, 60); // the sanitised name, then the connection number
   assert.equal(typeof call.callId, "string");
   r.agent.reply({ callId: call.callId, ok: true, content: "hello" });
   const res = await p;
@@ -213,7 +213,7 @@ test("window not ready: before agent-ready, and every pending call fails when th
   assert.equal(x.isError, true); assert.match(x.content[0].text, /window is not ready/);
   assert.deepEqual(r.calls(), []);
   r.agent.setReady(true);
-  assert.deepEqual(r.sent.at(-1), { ch: "agent-state", p: { mode: "read", clients: ["claude-code"] } });
+  assert.deepEqual(r.sent.at(-1), { ch: "agent-state", p: { mode: "read", clients: ["claude-code#1"] } });
   const p = c.callTool({ name: "rd", arguments: { x: "1" } });
   const { callId } = await until(() => r.calls()[0]);
   r.agent.setReady(false); // did-start-loading
@@ -228,19 +228,19 @@ test("two simultaneous clients: both listed, calls independent, closing one canc
   const r = await rig({ mode: "read" });
   const a = await r.connect("alpha"), b = await r.connect("beta");
   await until(() => r.agent.clients().length === 2);
-  assert.deepEqual(r.agent.clients().sort(), ["alpha", "beta"]);
+  assert.deepEqual(r.agent.clients().sort(), ["alpha#1", "beta#2"]);
   const pa = a.callTool({ name: "rd", arguments: { x: "a" } }), pb = b.callTool({ name: "rd", arguments: { x: "b" } });
   pa.catch(() => {});
   const [ca, cb] = await until(() => r.calls().length === 2 && r.calls());
-  assert.equal(ca.client, "alpha"); assert.equal(cb.client, "beta");
+  assert.equal(ca.client, "alpha#1"); assert.equal(cb.client, "beta#2");
   r.agent.reply({ callId: cb.callId, ok: true, content: "B" });
   assert.equal((await pb).content[0].text, "B");
   a.sock.destroy();
   await until(() => r.cancels().includes(ca.callId));
   await until(() => r.agent.clients().length === 1);
-  assert.deepEqual(r.agent.clients(), ["beta"]);
+  assert.deepEqual(r.agent.clients(), ["beta#2"]);
   assert.equal(r.agent.pendingCount(), 0);
-  assert.deepEqual(r.sent.at(-1).p.clients, ["beta"]);
+  assert.deepEqual(r.sent.at(-1).p.clients, ["beta#2"]);
   await r.close();
 });
 
@@ -382,4 +382,29 @@ test("tools/call before notifications/initialized is refused", async () => {
   assert.equal(reply.result.isError, true); assert.match(reply.result.content[0].text, /initialized/);
   assert.equal(r.calls().length, 0);
   s.destroy(); await r.close();
+});
+
+test("two connections with the same client name get different identities, even after one reconnects; the menu and badge show the plain name until two collide", async () => {
+  const r = await rig({ mode: "edit" });
+  const a = await r.connect("Claude Code"), b = await r.connect("Claude Code");
+  void a.callTool({ name: "ed", arguments: { x: "1" } }).catch(() => {}); void b.callTool({ name: "ed", arguments: { x: "2" } }).catch(() => {});
+  await until(() => r.calls().length === 2);
+  const ids = r.calls().map((c) => c.client).sort();
+  assert.deepEqual(ids, ["Claude Code#1", "Claude Code#2"]);
+  assert.deepEqual(r.agent.clients().sort(), ids);
+  a.sock.destroy(); await until(() => r.agent.clients().length === 1);
+  const c = await r.connect("Claude Code"); // a new session is a new identity: it can never be mistaken for the one that left
+  void c.callTool({ name: "ed", arguments: { x: "3" } }).catch(() => {});
+  await until(() => r.calls().length === 3);
+  assert.equal(r.calls()[2].client, "Claude Code#3");
+  await r.close();
+});
+
+test("agentName: the plain name, with #n only when two live connections share it", async () => {
+  const { agentName } = await bundle("../src/agent/attribution.ts");
+  assert.equal(agentName("Codex#1", ["Codex#1"]), "Codex");
+  assert.equal(agentName("Codex#1", ["Codex#1", "Claude Code#2"]), "Codex");
+  assert.equal(agentName("Codex#1", ["Codex#1", "Codex#3"]), "Codex#1");
+  assert.equal(agentName("Codex#7", []), "Codex"); // not connected any more
+  assert.equal(agentName("odd#name#4", ["odd#name#4"]), "odd#name");
 });

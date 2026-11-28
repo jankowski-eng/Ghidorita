@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActiveSession, Address, Token } from "../../../../protocol";
 import { TOOLS } from "../../agent/tools";
-import { tagParams } from "../../agent/attribution";
+import { agentName, tagParams } from "../../agent/attribution";
 import { toToolError } from "../../agent/errors";
 import type { AccessMode, AgentCall, AgentReply, AgentState, AgentUi, AgentView, ChangeView, ToolDef } from "../../agent/types";
 import type { ApplicationBackend, ProgramOperations } from "../backend";
@@ -136,7 +136,7 @@ export function createConfirmer(views: { getState(): Views; dispatch(a: { type: 
 export const agentStatus = createStore<{ state: AgentState; busy: number }, { state?: AgentState; busy?: number }>((s, a) => ({ ...s, ...a }), { state: { mode: "off", clients: [] }, busy: 0 });
 /** The status bar's badge: null when no client is connected (the mode alone shows nothing). */
 export function agentBadge(state: AgentState, busy: number): { label: string; pulsing: boolean } | null {
-  return state.clients.length ? { label: `Agent: ${state.clients.join(", ")}`, pulsing: busy > 0 } : null;
+  return state.clients.length ? { label: `Agent: ${state.clients.map((id) => agentName(id, state.clients)).join(", ")}`, pulsing: busy > 0 } : null;
 }
 
 /** Wires the executor to the app: the active program, the views, navigation through `go` (source "agent"), the Confirm dialog. Handlers are registered once and read the latest closures. */

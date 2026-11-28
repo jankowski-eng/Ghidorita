@@ -266,3 +266,14 @@ test("schemas: unique names, edit access, annotations, closed objects, capabilit
   assert.equal(tool("rename_variable").capability, "variableEditing");
   assert.equal(tool("undo_agent_edit").capability, "undo");
 });
+
+test("undo_agent_edit: two sessions of the same client (same name, different connection ids) cannot undo each other's edits", async () => {
+  const w = world({ client: "Claude Code#1" });
+  await tool("set_bookmark").handler(w.ctx, { address: "0x401000", comment: "x" });
+  assert.equal(w.log.items.at(-1).by, "Claude Code#1");
+  w.ctx.client = "Claude Code#2"; // the other session of the same client
+  assert.match(await msg(tool("undo_agent_edit").handler(w.ctx, {})), /made by Claude Code#1/);
+  assert.equal(w.undoCalls.length, 0);
+  w.ctx.client = "Claude Code#1"; // the author can
+  assert.match(await tool("undo_agent_edit").handler(w.ctx, {}), /Undid/);
+});

@@ -1,6 +1,8 @@
 import { changeLog, type Change } from "../changeLog";
 import { sleep, waitFor, type AutotestCtx } from "./autotest";
 
+// the connection id is `<name>#<n>`; the panel and badge show the plain name
+const own = (by?: string) => by?.replace(/#\d+$/, "") === AGENT_CLIENT;
 export const AGENT_CLIENT = "agent-autotest", AGENT_NEWNAME = "agent_counter"; // the scripted client (scripts/agent-autotest-client.mjs) sends exactly these
 
 /**
@@ -40,6 +42,6 @@ export async function runAgentFlow(file: string, c: AutotestCtx, result: Record<
     R.statusBarGone = await waitFor(() => !document.querySelector('button[aria-label*="Agent"]'), 5000, "the badge to go").then(() => true, () => false);
     await sleep(100);
   } finally { off(); stop(); offState(); }
-  R.byTags = seen.filter((e) => /Rename/.test(e.label)).every((e) => e.by === AGENT_CLIENT) && seen.filter((e) => /Comment/.test(e.label)).every((e) => !e.by);
-  return R.entry.by === AGENT_CLIENT && /variable|Rename/i.test(R.entry.label) && R.panel && R.statusBar && R.refreshed && R.userUntagged && R.agentKept && R.undone && R.statusBarGone && R.byTags && c.errors.length === 0;
+  R.byTags = seen.filter((e) => /Rename/.test(e.label)).every((e) => own(e.by)) && seen.filter((e) => /Comment/.test(e.label)).every((e) => !e.by);
+  return own(R.entry.by) && /variable|Rename/i.test(R.entry.label) && R.panel && R.statusBar && R.refreshed && R.userUntagged && R.agentKept && R.undone && R.statusBarGone && R.byTags && c.errors.length === 0;
 }

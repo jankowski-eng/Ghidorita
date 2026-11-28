@@ -4,6 +4,7 @@ import type { MenuCommand, MenuState } from "../preload/index";
 import { allowsCommand, allowsEdit, dockCapability } from "../capabilities";
 import { KEYS, isHint, showKey } from "../keys";
 import { addRecent, clearRecent, getRecent } from "./recent";
+import { agentName } from "../agent/attribution";
 
 /** What the Agent menu needs of the agent server (main/agent.ts). Full is accepted by the server but not offered here: phase 2 has no Full tools. */
 export interface AgentMenu { mode(): AccessMode; setMode(m: AccessMode): void; clients(): string[]; setupText(): string }
@@ -28,7 +29,7 @@ export function createMenu({ getWin, pick, agent }: Deps) {
 
   const agentItems = (): MenuItemConstructorOptions[] => {
     if (!agent) return [];
-    const names = agent.clients();
+    const ids = agent.clients(), names = ids.map((id) => agentName(id, ids));
     return [
       { label: "Access", submenu: (["off", "read", "edit"] as const).map((m): MenuItemConstructorOptions =>
         ({ id: "agent-" + m, label: { off: "Off", read: "Read", edit: "Edit" }[m], type: "radio", checked: agent.mode() === m, click: () => agent.setMode(m) })) },

@@ -84,11 +84,11 @@ export interface ToolDef<A = any> {
 }
 
 // ---- IPC main <-> renderer. Main validates every payload it receives (reply shapes, sizes); the renderer validates `args` against the tool's schema only through main. ----
-/** main -> renderer, "agent-call". Main has already checked mode, appOnly and arguments; `timeoutSecs` is the tool's. */
+/** main -> renderer, "agent-call". Main has already checked mode, appOnly and arguments; `timeoutSecs` is the tool's. `client` is the connection's identity `<name>#<n>` (attribution.ts `agentName` for display). */
 export interface AgentCall { callId: string; tool: string; args: Record<string, unknown>; client: string; mode: AccessMode; timeoutSecs: number }
 /** renderer -> main, `agentReply`. `content` is capped by the tool; main truncates at 200 000 characters regardless. `error` becomes an `isError` result. */
 export type AgentReply = { callId: string; ok: true; content: string } | { callId: string; ok: false; error: string };
 /** main -> renderer, "agent-cancel": the client cancelled or main timed the call out. */
 export interface AgentCancel { callId: string }
-/** main -> renderer, "agent-state": who is connected and the mode, for the status bar. Sent on every change and once when the renderer announces itself ready. */
+/** main -> renderer, "agent-state": who is connected (connection ids, `<name>#<n>`) and the mode, for the status bar. Sent on every change and once when the renderer announces itself ready. */
 export interface AgentState { mode: AccessMode; clients: string[] }

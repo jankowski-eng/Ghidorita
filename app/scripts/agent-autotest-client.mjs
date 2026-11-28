@@ -26,7 +26,7 @@ async function connect() {
 const { client, s: status } = await connect();
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }, undefined, { timeout: 60_000 }); return { text: text(r), error: !!r.isError }; };
 
-check(/Access: edit \(client agent-autotest\)/.test(status), "status: " + status);
+check(/Access: edit \(client agent-autotest#\d+\)/.test(status), "status: " + status);
 check(/server|Strings, comments/.test(client.getInstructions() ?? ""), "instructions");
 const names = (await client.listTools()).tools.map((t) => t.name);
 for (const n of ["status", "decompile", "rename_variable", "undo_agent_edit", "get_view", "goto"]) check(names.includes(n), `tools/list lacks ${n}: ${names}`);

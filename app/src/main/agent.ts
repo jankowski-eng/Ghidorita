@@ -35,7 +35,7 @@ export interface AgentOpts {
   ignoreEnvMode?: boolean;
   log?: (msg: string) => void;
 }
-interface Conn { server: Server; sock: net.Socket; name: string | null; calls: Set<string> }
+interface Conn { server: Server; sock: net.Socket; id: string | null; calls: Set<string> } // id: `<client name>#<n>`, set once the client has initialized
 interface Pending { conn: Conn; tool: ToolDef; settle(r: ToolResult): void; timer: NodeJS.Timeout }
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: true };
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true as const } : {}) });
@@ -61,11 +61,11 @@ export function createAgent(o: AgentOpts) {
   const envMode = o.ignoreEnvMode ? null : asMode((o.env ?? process.env).GHIDORITA_AGENT_MODE);
   let mode: AccessMode = envMode ?? loadMode(o.settingsFile);
   let caps: ReadonlySet<Capability> | undefined; // the provider's, from the renderer's menu-state; unknown = no gating yet
-  let ready = false, seq = 0, listener: net.Server | null = null, owned = false;
+  let ready = false, seq = 0, connSeq = 0, listener: net.Server | null = null, owned = false;
   const conns = new Set<Conn>(), pending = new Map<string, Pending>(), changed = new Set<() => void>();
   const validators = new WeakMap<ToolDef, (a: unknown) => { valid: boolean; errorMessage?: string }>();
   const ajv = new AjvJsonSchemaValidator();
-  const clients = () => [...conns].flatMap((c) => (c.name ? [c.name] : []));
+  const clients = () => [...conns].flatMap((c) => (c.id ? [c.id] : []));
   const state = (): AgentState => ({ mode, clients: clients() });
   const publish = () => { o.send("agent-state", state()); for (const f of changed) f(); };
   const visible = () => visibleTools(mode, { headless: o.headless, capabilities: caps ?? o.capabilities?.() }, table);
@@ -100,7 +100,8 @@ export function createAgent(o: AgentOpts) {
     const check = v(args);
     if (!check.valid || typeof args !== "object" || Array.isArray(args)) return Promise.resolve(text(`Invalid arguments for ${name}: ${check.errorMessage ?? "expected an object"}`, true));
     if (!ready) return Promise.resolve(text(NOT_READY, true));
-    if (!conn.name) return Promise.resolve(text("Send notifications/initialized after initialize before calling tools.", true));
+    const id = conn.id;
+    if (!id) return Promise.resolve(text("Send notifications/initialized after initialize before calling tools.", true));
     // a caller-raised timeoutSecs (decompile, xrefs) must not be cut off by the tool's default limit
     const asked = (args as { timeoutSecs?: unknown }).timeoutSecs;
     const secs = Math.max(t.timeoutSecs, typeof asked === "number" ? asked + 30 : 0);
@@ -111,17 +112,17 @@ export function createAgent(o: AgentOpts) {
       const onAbort = () => end(callId, text("cancelled", true), true);
       if (signal.aborted) return onAbort();
       signal.addEventListener("abort", onAbort, { once: true });
-      o.send("agent-call", { callId, tool: name, args: args as Record<string, unknown>, client: conn.name ?? "agent", mode, timeoutSecs: secs });
+      o.send("agent-call", { callId, tool: name, args: args as Record<string, unknown>, client: id, mode, timeoutSecs: secs });
     });
   }
 
   function accept(sock: net.Socket) {
     const server = new Server({ name: "ghidorita", version: o.version ?? "0.0.0" }, { capabilities: { tools: { listChanged: true } }, instructions: INSTRUCTIONS });
-    const conn: Conn = { server, sock, name: null, calls: new Set() };
+    const conn: Conn = { server, sock, id: null, calls: new Set() };
     conns.add(conn);
     server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: visible().map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations })) }));
     server.setRequestHandler(CallToolRequestSchema, (req, extra) => call(conn, req.params.name, req.params.arguments, extra.signal));
-    server.oninitialized = () => { conn.name = cleanName(server.getClientVersion()?.name); publish(); };
+    server.oninitialized = () => { conn.id = `${cleanName(server.getClientVersion()?.name)}#${++connSeq}`; publish(); };
     server.onclose = () => {
       if (!conns.delete(conn)) return;
       for (const id of [...conn.calls]) end(id, text("the agent disconnected", true), true);
