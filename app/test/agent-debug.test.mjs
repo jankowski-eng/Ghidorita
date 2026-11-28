@@ -53,7 +53,6 @@ test("all tools are Full-only, gated on the debugger capability, strict schemas,
     for (const q of x.inputSchema.required ?? []) assert.ok(q in x.inputSchema.properties);
   }
   for (const m of ["off", "read", "edit"]) assert.deepEqual(visibleTools(m, {}, debugTools), []);
-  assert.equal(visibleTools("full", {}, debugTools).length, 9);
   assert.deepEqual(visibleTools("full", { capabilities: new Set(["decompile"]) }, debugTools), []);
   assert.equal(visibleTools("full", { capabilities: new Set(["debugger"]) }, debugTools).length, 9);
 });

@@ -248,6 +248,8 @@ test("a queued edit does not run against a program opened while it waited", asyn
   set(null); // closed meanwhile: also refused
   const c = ex.handle(call("first", { callId: "3" })); set(ONE); await c;
   assert.match(replies.find((x) => x.callId === "3").error, /nothing was done/);
+});
+
 test("onCall sees the tool, args and client before the handler runs; a throwing observer does not fail the call", async () => {
   const seen = [];
   const { ex, replies } = setup([tool("t", async () => { seen.push("handler"); return "ok"; })], { onCall: (t, a, c) => { seen.push([t, a, c]); throw new Error("observer"); } });

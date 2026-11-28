@@ -119,7 +119,7 @@ test("load_coverage summarises per function; relative path refused", async () =>
 test("no program is a tool error; visibility follows the mode", async () => {
   const w = world({ session: false });
   assert.match(await msg(tool("save").handler(w.ctx, {})), /No program is open/);
-  const names = (mode) => visibleTools(mode).map((t) => t.name);
+  const names = (mode) => visibleTools(mode, { capabilities: new Set(TOOLS.flatMap((t) => [].concat(t.capability ?? []))) }).map((t) => t.name);
   for (const n of ["patch", "list_patches", "save", "export", "load_coverage"]) { assert.ok(!names("edit").includes(n), n); assert.ok(names("full").includes(n), n); }
   for (const n of ["open_program", "close_program"]) { assert.ok(!names("read").includes(n)); assert.ok(names("edit").includes(n)); }
   assert.equal(new Set(TOOLS.map((t) => t.name)).size, TOOLS.length);

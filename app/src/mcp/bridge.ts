@@ -6,7 +6,6 @@ import path from "node:path";
 import { lstatSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { INSTRUCTIONS } from "../agent/instructions";
-import { agentSocketPath } from "../agent/socketPath";
 import { agentSocketPath, socketProblem } from "../agent/socketPath";
 
 const sockPath = agentSocketPath();

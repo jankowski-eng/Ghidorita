@@ -31,7 +31,7 @@ const need = (v: unknown, name: string): string => {
 const sym = (s: unknown) => esc(s, 160);
 const OFFSET = { type: "integer", minimum: 0, default: 0, description: "Lines to skip (use the offset a continuation line names)." };
 const FUNCTION = { type: "string", description: "Function name or an address inside it (0x401000, main, FUN_00401000)." };
-const TIMEOUT = { type: "integer", minimum: 1, maximum: 600, description: "Decompiler timeout in seconds; raise it on a Timeout error for a big function." };
+const TIMEOUT = { type: "integer", minimum: 1, maximum: 240, description: "Decompiler timeout in seconds; raise it on a Timeout error for a big function." };
 const off = (a: { offset?: unknown }) => int(a.offset, 0, 0, 1e9);
 
 export const pcode = tool({
@@ -50,7 +50,7 @@ export const pcode = tool({
     const lo = typeof a.from === "string" && a.from.trim() ? parseAddr(await resolveAddress(a.from, ops, ctx.signal)) : null;
     const hi = typeof a.to === "string" && a.to.trim() ? parseAddr(await resolveAddress(a.to, ops, ctx.signal)) : null;
     const inRange = (addr: Address) => { const p = parseAddr(addr); return !p || ((!lo || (p.space === lo.space && p.off >= lo.off)) && (!hi || (p.space === hi.space && p.off <= hi.off))); };
-    const r = await run(ctx, ops.decompiler.pcode({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, 120, 1, 600) }));
+    const r = await run(ctx, ops.decompiler.pcode({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, 90, 1, 240) }));
     const lines = kind === "raw"
       ? r.raw.filter((i) => inRange(i.address)).flatMap((i) => [`${i.address}  ${esc(i.asm, 200)}`, ...i.ops.map((o) => `    ${esc(o, 300)}`)])
       : r.high.filter((o) => inRange(o.address)).map((o) => `B${o.block}  ${o.address}  ${esc(o.text, 300)}`);
@@ -71,7 +71,7 @@ export const value_trail = tool({
     const named = typeof a.variable === "string" && a.variable.trim() !== "";
     if (!named && !(typeof a.line === "number" && typeof a.column === "number")) throw new ToolError("Give `variable` (a name from the decompiled C) or both `line` and `column`.");
     const f = await resolveFunction(need(a.function, "function"), ops, ctx.signal);
-    const timeoutSecs = int(a.timeoutSecs, 120, 1, 600);
+    const timeoutSecs = int(a.timeoutSecs, 90, 1, 240);
     // the C text also gives the output its source lines; a cached decompile is cheap, and failing on a named variable only loses those lines
     const dec = await run(ctx, ops.decompiler.decompile({ entry: f.entry, timeoutSecs })).catch((e) => { if (!named || ctx.signal.aborted) throw e; return null; });
     let seed: { name: string } | { line: number; colStart: number };
@@ -100,7 +100,7 @@ export const function_graph = tool({
   async handler(ctx, a) {
     const ops = needProgram(ctx);
     const f = await resolveFunction(need(a.function, "function"), ops, ctx.signal);
-    const g = await run(ctx, ops.decompiler.graph({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, 120, 1, 600) }));
+    const g = await run(ctx, ops.decompiler.graph({ entry: f.entry, timeoutSecs: int(a.timeoutSecs, 90, 1, 240) }));
     const idx = new Map(g.blocks.map((b, i) => [b.start, i]));
     const bn = (addr: Address) => (idx.has(addr) ? `B${idx.get(addr)}` : addr);
     const lines = g.blocks.flatMap((b, i) => {

@@ -132,7 +132,7 @@ const open_program: ToolDef<{ program?: string; path?: string }> = {
   name: "open_program",
   description: "Open a program, replacing the one that is open (it is saved and closed first). `program` = a stored program's id or name (pass neither to list them); `path` = an absolute path of a binary to import with Ghidra's default options. Below Full access the user is asked first. Analysis keeps running in the background: call wait_for_analysis. Everything you knew about the old program (addresses, variable names) is stale afterwards: call status.",
   inputSchema: obj({ program: str("Program id or name from the project."), path: str("Absolute path of a binary to import.") }),
-  annotations: ann("Open program", false, true, false), access: "edit", capability: "projects", timeoutSecs: 600,
+  annotations: ann("Open program", false, true, false), access: "edit", capability: "projects", timeoutSecs: 240,
   handler: guard(async (ctx, a) => {
     if (a.program !== undefined && a.path !== undefined) throw new ToolError("Pass program or path, not both.");
     const entries = await ctx.backend.projects.list();
