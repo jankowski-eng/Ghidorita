@@ -37,7 +37,7 @@ async function rig(o = {}) {
   const dir = tmp(), sent = [], logs = [];
   const sock = o.sock ?? path.join(dir, "s");
   const settingsFile = path.join(dir, "agent.json");
-  const agent = createAgent({ send: (ch, p) => sent.push({ ch, p }), settingsFile, socket: { path: sock, ownDir: null }, table: TABLE, marginMs: 20, env: {}, log: (m) => logs.push(m), ...o.opts });
+  const agent = createAgent({ send: (ch, p) => sent.push({ ch, p }), settingsFile, socket: { path: sock, ownDir: null }, table: TABLE, marginMs: 20, env: {}, log: (m) => logs.push(m), capabilities: () => new Set(["bookmarks"]), ...o.opts });
   if (o.mode) agent.setMode(o.mode);
   await agent.start();
   if (o.ready !== false) agent.setReady(true);
@@ -78,8 +78,10 @@ test("initialize returns the instructions; tools/list follows the mode and list_
 test("visibleTools: mode, headless app-only flag and the optional capability set", () => {
   const n = (m, o) => visibleTools(m, o, TABLE).map((t) => t.name);
   assert.deepEqual(n("off"), ["status"]);
-  assert.deepEqual(n("read", { headless: true }), ["status", "rd", "slow", "cap"]);
-  assert.deepEqual(n("full"), TABLE.map((t) => t.name));
+  const KNOWN = new Set(["bookmarks"]);
+  assert.deepEqual(n("read", { headless: true, capabilities: KNOWN }), ["status", "rd", "slow", "cap"]);
+  assert.deepEqual(n("full", { capabilities: KNOWN }), TABLE.map((t) => t.name));
+  assert.deepEqual(n("read"), ["status", "rd", "ui", "slow"]); // capabilities not known yet: only what needs none
   assert.deepEqual(n("read", { capabilities: new Set() }), ["status", "rd", "ui", "slow"]);
   assert.deepEqual(n("read", { capabilities: new Set(["bookmarks"]) }), ["status", "rd", "ui", "slow", "cap"]);
 });
@@ -447,4 +449,24 @@ test("the suggested client timeout covers the slowest tool: its own timeout answ
   assert.ok(suggested >= slowest + 30, `tool_timeout_sec ${suggested} must exceed ${slowest} s`);
   const def = TOOLS.find((t) => t.name === "decompile").inputSchema.properties.timeoutSecs;
   assert.equal(def.default, 90); assert.equal(def.maximum, 240);
+});
+
+test("until the provider's capabilities are known only tools that need none are listed and called; list_changed follows when they arrive", async () => {
+  const r = await rig({ mode: "read", opts: { capabilities: () => undefined } });
+  const c = await r.connect();
+  assert.deepEqual(names(await c.listTools()), ["rd", "slow", "status", "ui"]); // no "cap" (needs bookmarks): it might not exist in this backend
+  const early = await c.callTool({ name: "cap", arguments: { x: "a" } });
+  assert.equal(early.isError, true); assert.match(early.content[0].text, /has not reported what its analysis backend supports/);
+  assert.equal(r.calls().length, 0);
+  r.agent.setCapabilities(new Set(["bookmarks"])); // the renderer's first menu-state
+  await until(() => c.changes === 1);
+  assert.deepEqual(names(await c.listTools()), ["cap", "rd", "slow", "status", "ui"]);
+  r.agent.setCapabilities(new Set(["bookmarks"])); // an unchanged set announces nothing
+  r.agent.setCapabilities(new Set());
+  await until(() => c.changes === 2);
+  assert.deepEqual(names(await c.listTools()), ["rd", "slow", "status", "ui"]);
+  const p = c.callTool({ name: "rd", arguments: { x: "a" } });
+  r.agent.reply({ callId: (await until(() => r.calls()[0])).callId, ok: true, content: "fine" });
+  assert.equal((await p).content[0].text, "fine");
+  await r.close();
 });

@@ -88,6 +88,7 @@ export function createAgent(o: AgentOpts) {
     if (mode === "off") return HOW_TO_ENABLE;
     if (t.appOnly && o.headless) return `"${name}" needs Ghidorita's window and is not available in headless mode.`;
     if (!modeAllows(mode, t.access)) return `Agent access is ${mode}; "${name}" needs ${t.access} mode. The user can change it in the Agent menu (Agent > Access).`;
+    if (t.capability && !(caps ?? o.capabilities?.())) return `"${name}" is not available yet: Ghidorita has not reported what its analysis backend supports (it is still starting). Try again in a moment; the tool list changes once it is known.`;
     return `"${name}" is not available: the current backend does not support it.`;
   }
 

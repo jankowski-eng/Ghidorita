@@ -95,14 +95,16 @@ test("agent tools: a tool whose capability is missing isn't listed, in any mode"
     for (const c of need) assert.ok(!toolNames("full", new Set(need.filter((x) => x !== c))).includes(t.name), `${t.name} hidden without ${c}`);
   }
 });
-test("agent tools: modes nest, status is always there, no gating until the capabilities are known", () => {
+test("agent tools: modes nest, status is always there, only capability-free tools until the capabilities are known", () => {
   assert.deepEqual(toolNames("off", undefined), ["status"]);
   const all = new Set(TOOLS.flatMap((t) => [t.capability ?? []].flat()));
   const read = toolNames("read", all), edit = toolNames("edit", all);
   assert.ok(read.length > 5 && edit.length > read.length && read.every((n) => edit.includes(n)));
   assert.ok(TOOLS.filter((t) => t.access === "read" && !t.appOnly).every((t) => t.annotations.readOnlyHint), "read tools are read-only");
   assert.ok(TOOLS.filter((t) => t.access !== "read" && t.access !== "off").every((t) => !t.annotations.readOnlyHint), "edit tools are not");
-  assert.equal(toolNames("edit", undefined).length, TOOLS.filter((t) => t.access !== "full").length);
+  // capabilities not known yet (the renderer has not reported them): only tools that need none
+  assert.deepEqual(toolNames("edit", undefined), TOOLS.filter((t) => t.access !== "full" && !t.capability).map((t) => t.name));
+  assert.ok(toolNames("edit", undefined).includes("status") && !toolNames("edit", undefined).includes("decompile"));
 });
 test("agent tools: a read-only provider (no editing capabilities) offers no edit tools", () => {
   const names = toolNames("edit", caps("decompile", "references", "bytes"));
