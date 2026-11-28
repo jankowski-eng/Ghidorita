@@ -397,12 +397,14 @@ class DataTypes:
                     if old is None:
                         declared[str(dt.getPathName())] = dt
                     elif isinstance(dt, Composite) and dt.getNumComponents() == 0 and not old.isEquivalent(dt):
-                        uses.append(old)  # `struct Base b;` makes the parser declare an empty `Base` (it does not look the tag up in the program)
+                        uses.append((dt, old))  # `struct Base b;` makes the parser declare an empty `Base` (it does not look the tag up in the program)
                     elif not old.isEquivalent(dt):
                         declared[str(dt.getPathName())] = dt
             tx = scratch.startTransaction("prepare")
-            for old in uses:  # put the program's real type in the placeholder's place, so nothing declared points at the empty one and it never replaces the real one
-                scratch.resolve(old, DataTypeConflictHandler.REPLACE_HANDLER)
+            for ph, old in uses:  # put the program's real type in the placeholder's place, so nothing declared points at the empty one and it never replaces the real one
+                real = scratch.resolve(old, DataTypeConflictHandler.REPLACE_HANDLER)
+                if str(real.getDataTypePath()) != str(ph.getDataTypePath()):  # the real one lives in the target category: resolving it did not touch the placeholder at the root
+                    scratch.replaceDataType(ph, real, False)
             if not cp.isRoot():
                 for dt in declared.values():
                     dt.setCategoryPath(cp)

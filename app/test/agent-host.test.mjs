@@ -232,18 +232,18 @@ test("claimSocket: a host that never quits is an error and the app gets no lock 
 const SESSION = { sessionId: "s1", programId: "p1", name: "a.out" };
 const FN = { name: "main", entry: "0x401000", size: 64, signature: "int main(void)" };
 function fakeBackend(getHooks) {
-  const stack = []; let saves = 0;
+  const stack = []; let saves = 0, hang = false;
   const ops = {
     functions: { containing: async () => FN, list: async () => [FN] },
     edits: { renameVariable: async (p) => { const r = { undoName: "Rename variable in main" }; stack.push(r.undoName); getHooks().onEdit("renameVariable", p, r); return r; } },
     history: {
       state: async () => ({ canUndo: stack.length > 0, canRedo: false, undoName: stack.at(-1), dirty: stack.length > 0 }),
       undo: async () => { stack.pop(); getHooks().onEdit("undo", {}, {}); return { canUndo: false, canRedo: true, dirty: true }; },
-      save: async () => { saves++; stack.length = 0; return { saved: true, undoHistoryCleared: true }; },
+      save: async () => { if (hang) return new Promise(() => {}); saves++; stack.length = 0; return { saved: true, undoHistoryCleared: true }; },
     },
     analysis: { status: async () => ({ state: "done", analysis: "done", profile: "full", pct: 100 }) },
   };
-  return { stack, saves: () => saves, backend: {
+  return { stack, saves: () => saves, hangSave: () => { hang = true; }, backend: {
     capabilities: new Set(["variableEditing", "editing", "undo", "analysis"]), program: () => ops, events: { onError() {} },
     lifecycle: { active: async () => null, open: (p) => ({ result: Promise.resolve().then(() => { getHooks().onSessionChanged(SESSION); return SESSION; }) }) },
     connect: async () => {},
@@ -327,6 +327,18 @@ test("host: calls during startup are told to wait; with nobody ever connecting i
   const r2 = await hostRig({ opts: { graceMs: 100 } }); await r2.host.started;
   await until(() => r2.exits.length, 2000); // nobody came
   fs.rmSync(r.dir, { recursive: true, force: true }); fs.rmSync(r2.dir, { recursive: true, force: true });
+});
+
+test("host: a backend that stops answering the save is given up on after saveMs: the sidecar is still stopped, the lock goes, the save is reported unconfirmed", async () => {
+  const r = await hostRig({ opts: { open: "/x/a.out", graceMs: 60_000, saveMs: 150 } });
+  await r.host.started;
+  const a = await r.connect();
+  await r.text(a, "rename_variable", { function: "0x401000", variable: "local_10", newName: "len" });
+  r.w.hangSave();
+  const got = await requestHandover(r.sock, { timeoutMs: 5000 });
+  assert.equal(got.kind, "done"); assert.equal(got.saved, false); assert.match(got.saveError, /not confirmed within/);
+  assert.equal(r.stops(), 1, "provider.stop still ran"); assert.equal(lockAge(r.sock), null);
+  await until(() => r.exits.length); fs.rmSync(r.dir, { recursive: true, force: true });
 });
 
 test("host: the handover. The app asks over the control socket: clients lose the connection, edits are saved, the sidecar ended, the lock is free when it says done; then the host exits", async () => {

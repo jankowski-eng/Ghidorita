@@ -402,6 +402,10 @@ def test_parse_c_types_use_of_a_type_in_the_target_category_leaves_it_alone(sc):
     r = sc.parse_c_types("struct Msg { struct InNet n; };", category="/net")
     assert r == {"created": ["/net/Msg"], "replaced": []}
     assert len(sc.get_data_type("/net/InNet")["components"]) == 2  # never replaced by the parser's empty placeholder
+    m = sc.get_data_type("/net/Msg")
+    assert m["size"] == 8 and m["components"][0]["typePath"] == "/net/InNet"  # points at the real one, not at a placeholder
+    with pytest.raises(RpcError):
+        sc.get_data_type("/InNet")  # and no empty copy was left at the root
 
 
 def test_parse_c_types_a_root_type_does_not_hide_a_declaration_for_another_category(sc):

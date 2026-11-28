@@ -35,6 +35,7 @@ export function createHeadless(o: { reply(r: AgentReply): void; tools?: readonly
 }
 
 export const GRACE_MS = 30_000;
+export const SAVE_MS = 60_000; // the host's own save (the sidecar's save timeout is the same)
 export interface HostOpts {
   place: SocketPlace;
   settingsFile: string;
@@ -43,6 +44,7 @@ export interface HostOpts {
   ignoreEnvMode?: boolean;
   /** how long the host stays after its last connection closed (GHIDORITA_HOST_GRACE_MS in index.ts) */
   graceMs?: number;
+  saveMs?: number;
   provider: { start(l: ProviderLaunch, onExit: (why: unknown) => void): Promise<number>; stop(): Promise<number>; kill(): void };
   launch: ProviderLaunch;
   token: string;
@@ -59,7 +61,7 @@ export interface Host { agent: Agent; stop(): Promise<StopResult>; /** stop, rel
 
 /** Starts the host; null when another Ghidorita (an app, another host) holds the agent socket: nothing was started and `exit` was called. */
 export async function startHost(o: HostOpts): Promise<Host | null> {
-  const log = o.log ?? ((m) => console.error("agent-host:", m)), graceMs = o.graceMs ?? GRACE_MS;
+  const log = o.log ?? ((m) => console.error("agent-host:", m)), graceMs = o.graceMs ?? GRACE_MS, saveMs = o.saveMs ?? SAVE_MS;
   const got = await acquireLock(o.place.path, { answers: probeSocket });
   if (!got) { log("another Ghidorita owns the agent socket; exiting"); o.exit(0); return null; }
   const lock = got;
@@ -80,7 +82,12 @@ export async function startHost(o: HostOpts): Promise<Host | null> {
       let saved = false, saveError: string | undefined;
       const p = headless.program();
       if (!p) saved = true;
-      else if (!dead) try { if ((await p.api.history.state()).dirty) await p.api.history.save(); saved = true; } catch (e) { saveError = String((e as Error)?.message ?? e); }
+      else if (!dead) { // bounded: a backend that stays connected but stops answering must not keep the sidecar from being stopped (and the lock from going)
+        let timer: NodeJS.Timeout | undefined;
+        const limit = new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error(`the save was not confirmed within ${saveMs / 1000} s`)), saveMs); });
+        try { await Promise.race([(async () => { if ((await p.api.history.state()).dirty) await p.api.history.save(); })(), limit]); saved = true; } catch (e) { saveError = String((e as Error)?.message ?? e); }
+        finally { clearTimeout(timer); }
+      }
       return { code: await o.provider.stop(), saved, saveError };
     })();
   }

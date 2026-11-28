@@ -101,6 +101,7 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
             else {
               const entry = (await s.backend.projects.list()).find((e) => e.programId === t.programId);
               if (!entry) throw new ToolError("That stored program no longer exists.");
+              if (signal?.aborted) throw new ToolError("cancelled before it started"); // the lookup was pending: there was no open job to cancel
               await s.open(entry.name, {}, entry, "background");
             }
           } finally { signal?.removeEventListener("abort", onAbort); }
