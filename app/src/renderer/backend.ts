@@ -91,6 +91,8 @@ export interface TypeEdits {
   renameDataType(params: { path: string; newName: string }): Promise<{ path: string }>;
   editStruct(params: { path: string; op: StructOp }): Promise<{}>;
   editEnum(params: { path: string; op: EnumOp }): Promise<{}>;
+  /** `parseCTypes` capability: C declarations become types in one undo step (all or nothing); `created`/`replaced` are the sorted type paths, an identical type is in neither. A parse error is `invalid` with Ghidra's message. */
+  parseCTypes(params: { c: string; category?: string }): Promise<{ created: string[]; replaced: string[] }>;
 }
 
 export interface Bookmarks {

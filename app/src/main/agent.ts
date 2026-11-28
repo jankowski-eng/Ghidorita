@@ -1,6 +1,6 @@
 import net from "node:net";
 import path from "node:path";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -10,7 +10,8 @@ import { ACCESS_MODES, modeAllows, type AccessMode, type AgentCall, type AgentCa
 import { TOOLS } from "../agent/tools/index";
 import { visibleTools } from "../agent/access";
 import { INSTRUCTIONS } from "../agent/instructions";
-import { agentSocketPlace, type SocketPlace } from "../agent/socketPath";
+import { agentSocketPlace, socketProblem, type SocketPlace } from "../agent/socketPath";
+import { acquireLock, type Lock } from "./socketLock";
 
 // The MCP server of the app (docs/AGENTS_MCP.md): it owns the access mode and every trust decision, the renderer only executes.
 // No electron import: index.ts wires ipcMain, the window and userData in through AgentOpts, so the tests run this in plain Node.
@@ -18,7 +19,11 @@ import { agentSocketPlace, type SocketPlace } from "../agent/socketPath";
 export const REPLY_MAX = 200_000, ERROR_MAX = 4_000, MARGIN_MS = 10_000, NOT_READY = "Ghidorita's window is not ready (starting, reloading or showing an error). Try again in a moment.";
 /** Agent calls share the renderer's one sidecar connection (64 outstanding requests): a flood of parallel calls must not stall the UI. Over the limit is an immediate error, never a queue. */
 export const MAX_CALLS_PER_CONNECTION = 8, MAX_CALLS_TOTAL = 16;
+/** A request line is a tool call: a few hundred bytes. The SDK reader would buffer a line without end until memory runs out. */
+export const MAX_REQUEST_LINE = 1 << 20;
 const HOW_TO_ENABLE = "Agent access is off. Ask the user to choose Agent > Access > Read or Edit in Ghidorita's menu, then call status again.";
+const HOW_TO_ENABLE_HEADLESS = "Agent access is off, and the headless host has no menu. Ask the user to open Ghidorita (it takes over from the host and keeps this connection) and choose Agent > Access > Read or Edit, then call status again.";
+const STARTING = "The headless Ghidorita host is still starting its analysis backend. Try again in a moment.";
 
 export { visibleTools };
 
@@ -30,6 +35,8 @@ export interface AgentOpts {
   version?: string;
   table?: readonly ToolDef[];
   headless?: boolean;
+  /** the socket lock, held by the caller for the life of the process (it also protects the sidecar's projects dir); without it `start` takes and `stop` releases its own */
+  lock?: Lock;
   capabilities?: () => ReadonlySet<Capability> | undefined;
   marginMs?: number;
   env?: NodeJS.ProcessEnv;
@@ -63,7 +70,7 @@ export function createAgent(o: AgentOpts) {
   const envMode = o.ignoreEnvMode ? null : asMode((o.env ?? process.env).GHIDORITA_AGENT_MODE);
   let mode: AccessMode = envMode ?? loadMode(o.settingsFile);
   let caps: ReadonlySet<Capability> | undefined; // the provider's, from the renderer's menu-state; unknown = no gating yet
-  let ready = false, seq = 0, connSeq = 0, listener: net.Server | null = null, owned = false;
+  let ready = false, seq = 0, connSeq = 0, listener: net.Server | null = null, owned = false, ownLock: Lock | null = null;
   const conns = new Set<Conn>(), pending = new Map<string, Pending>(), changed = new Set<() => void>();
   const validators = new WeakMap<ToolDef, (a: unknown) => { valid: boolean; errorMessage?: string }>();
   const ajv = new AjvJsonSchemaValidator();
@@ -85,7 +92,7 @@ export function createAgent(o: AgentOpts) {
     const t = table.find((x) => x.name === name);
     if (!t) return `Unknown tool "${name}". Call tools/list for the tools available now.`;
     if (visible().includes(t)) return null;
-    if (mode === "off") return HOW_TO_ENABLE;
+    if (mode === "off") return o.headless ? HOW_TO_ENABLE_HEADLESS : HOW_TO_ENABLE;
     if (t.appOnly && o.headless) return `"${name}" needs Ghidorita's window and is not available in headless mode.`;
     if (!modeAllows(mode, t.access)) return `Agent access is ${mode}; "${name}" needs ${t.access} mode. The user can change it in the Agent menu (Agent > Access).`;
     if (t.capability && !(caps ?? o.capabilities?.())) return `"${name}" is not available yet: Ghidorita has not reported what its analysis backend supports (it is still starting). Try again in a moment; the tool list changes once it is known.`;
@@ -96,13 +103,13 @@ export function createAgent(o: AgentOpts) {
     const bad = denied(name);
     if (bad) return Promise.resolve(text(bad, true));
     const t = table.find((x) => x.name === name)!;
-    if (mode === "off") return Promise.resolve(text(HOW_TO_ENABLE)); // only `status` is visible in off mode; main answers it itself
+    if (mode === "off") return Promise.resolve(text(o.headless ? HOW_TO_ENABLE_HEADLESS : HOW_TO_ENABLE)); // only `status` is visible in off mode; main answers it itself
     const args = rawArgs ?? {};
     let v = validators.get(t);
     if (!v) validators.set(t, v = ajv.getValidator(t.inputSchema as never));
     const check = v(args);
     if (!check.valid || typeof args !== "object" || Array.isArray(args)) return Promise.resolve(text(`Invalid arguments for ${name}: ${check.errorMessage ?? "expected an object"}`, true));
-    if (!ready) return Promise.resolve(text(NOT_READY, true));
+    if (!ready) return Promise.resolve(text(o.headless ? STARTING : NOT_READY, true));
     const id = conn.id;
     if (!id) return Promise.resolve(text("Send notifications/initialized after initialize before calling tools.", true));
     if (conn.calls.size >= MAX_CALLS_PER_CONNECTION || pending.size >= MAX_CALLS_TOTAL) return Promise.resolve(text(`Too many calls in flight (at most ${MAX_CALLS_PER_CONNECTION} per connection, ${MAX_CALLS_TOTAL} in all); wait for some to finish, then retry.`, true));
@@ -133,6 +140,12 @@ export function createAgent(o: AgentOpts) {
       sock.destroy(); publish();
     };
     sock.on("error", () => {});
+    let run = 0; // bytes since the last newline
+    sock.on("data", (d: Buffer) => {
+      let from = 0, over = false;
+      for (let i; (i = d.indexOf(10, from)) >= 0; from = i + 1) { if (run + i - from > MAX_REQUEST_LINE) over = true; run = 0; } // each completed line counts, not only the tail
+      run += d.length - from;
+      if (over || run > MAX_REQUEST_LINE) { log("closing a connection: request line too long"); sock.destroy(); } });
     sock.on("close", () => { server.close().catch(() => {}); });
     server.connect(new StdioServerTransport(sock, sock)).catch((e) => { log(`connection failed: ${e}`); sock.destroy(); });
   }
@@ -154,23 +167,29 @@ export function createAgent(o: AgentOpts) {
     return true;
   }
 
+  const stat = (p: string, follow: boolean) => { try { return follow ? statSync(p) : lstatSync(p); } catch { return null; } };
+  function release() { ownLock?.release(); ownLock = null; }
   async function start(): Promise<void> {
     if (listener) return;
     try {
       if (place.ownDir && !checkDir(place.ownDir)) return;
+      const bad = socketProblem(place.path, stat);
+      if (bad) { log(`not listening: ${bad}`); return; }
+      if (!o.lock) { ownLock = await acquireLock(place.path, { answers: async (p) => await probe(p) !== "stale" }); if (!ownLock) { log("not listening: another Ghidorita owns the agent socket"); return; } }
+      // we hold the lock, so a file at the path is stale, unless an older Ghidorita (no lock) listens there
       if (!win32 && existsSync(place.path)) {
-        if (!lstatSync(place.path).isSocket()) { log(`not listening: ${place.path} exists and is not a socket`); return; }
-        if (await probe(place.path) !== "stale") { log("not listening: another Ghidorita owns the agent socket"); return; }
+        if (!lstatSync(place.path).isSocket()) { log(`not listening: ${place.path} exists and is not a socket`); return release(); }
+        if (await probe(place.path) !== "stale") { log("not listening: another Ghidorita owns the agent socket"); return release(); }
         unlinkSync(place.path);
       }
-    } catch (e) { log(`not listening: ${e}`); return; }
+    } catch (e) { log(`not listening: ${e}`); return release(); }
     const srv = net.createServer(accept);
     const oldMask = win32 ? 0 : process.umask(0o077);
     try {
       await new Promise<void>((resolve, reject) => { srv.once("error", reject); srv.listen(place.path, () => { srv.off("error", reject); resolve(); }); });
     } catch (e) {
       log((e as NodeJS.ErrnoException).code === "EADDRINUSE" ? "not listening: another Ghidorita owns the agent socket" : `not listening: ${e}`);
-      return;
+      return release();
     } finally { if (!win32) process.umask(oldMask); }
     srv.on("error", (e) => log(`socket error: ${e}`));
     if (!win32) try { chmodSync(place.path, 0o600); } catch (e) { log(`chmod failed: ${e}`); }
@@ -183,11 +202,11 @@ export function createAgent(o: AgentOpts) {
     for (const c of [...conns]) { c.sock.destroy(); c.server.onclose?.(); }
     if (srv) await new Promise<void>((r) => srv.close(() => r()));
     if (owned && !win32) try { unlinkSync(place.path); } catch { /* net already removed it */ }
-    owned = false;
+    owned = false; release();
   }
 
   return {
-    start, stop, visibleTools: visible, clients, state, onChange: (f: () => void) => { changed.add(f); },
+    start, stop, visibleTools: visible, clients, connections: () => conns.size, listening: () => !!listener, state, onChange: (f: () => void) => { changed.add(f); },
     mode: () => mode,
     /** the provider's capabilities: a tool that needs one it lacks isn't offered; clients re-list when the set changes */
     setCapabilities(c: ReadonlySet<Capability>) {

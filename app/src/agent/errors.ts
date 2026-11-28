@@ -11,7 +11,7 @@ export function toToolError(e: unknown): ToolError {
   if (e instanceof BackendError) {
     const m = esc(e.message, 300); // may carry names from the binary (a data type path, a symbol): escaped and bounded like every other untrusted text
     switch (e.kind) {
-      case "busy": return new ToolError(`Busy: ${m}. If analysis is running, reads work but edits wait: call wait_for_analysis, then retry.`);
+      case "busy": return new ToolError(`Busy: ${m.replace(/^busy:\s*/i, "")}. Reads still work but edits wait: call wait_for_analysis, then retry.`); // the provider's message often starts with "Busy:" itself
       case "stale":
       case "noProgram": return new ToolError("The user opened, replaced or closed the program while this ran. Call status to see what is open now.");
       case "timeout": return new ToolError(`Timed out: ${m}. Retry with a larger timeoutSecs, or on a smaller target.`);

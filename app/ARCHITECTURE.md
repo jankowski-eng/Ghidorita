@@ -11,7 +11,7 @@ src/renderer/
   main.tsx             entry: Monaco setup, WebSocketBackend, render <App backend=…/>; dynamic-imports autotest/ only in AUTOTEST/BENCH mode
   App.tsx              composition and layout only: creates the session, builds the feature hooks, passes them to the panes
   backend.ts           the boundary: ApplicationBackend and the operations by domain (listing, functions, decompiler, references, searches, types, edits, history, coverage, exports)
-  rpc.ts wire.ts       the one adapter: WebSocketBackend (JSON-RPC, session ids, errors -> Failure) and the payload checks; nothing else may import them
+  rpc.ts wire.ts       the one adapter: WebSocketBackend (JSON-RPC, session ids, errors -> Failure) and the payload checks; nothing else may import them (the headless host, main/agentHost.ts, is the one other importer of rpc.ts)
   store/               state that outlives a component
     createStore.ts     state + pure reducer + subscribe + useStore (useSyncExternalStore); no dependency
     program.ts         ProgramState and programReducer: the active program (session, operations, function lookup), open lifecycle, progress, closing, functions, address map, first listing page, undo/dirty, the background analysis state (`analysis` capability), saving, stats, messages
@@ -40,15 +40,17 @@ src/renderer/
 
 ## Agent access (MCP)
 
-`src/agent/` is the environment-agnostic tool layer (design: `../docs/AGENTS_MCP.md`). It imports only `renderer/backend.ts`, `parseGoto.ts`, `address.ts`, `protocol.ts` and its own files (`test/layering.test.mjs` checks it): never `rpc.ts`, `wire.ts`, React, the store or Electron.
+`src/agent/` is the environment-agnostic tool layer (design: `../docs/AGENTS_MCP.md`). It imports only `renderer/backend.ts`, `parseGoto.ts`, `address.ts`, `debug.ts` (pure: the decompiler's statement boundaries), `protocol.ts` and its own files (`test/layering.test.mjs` checks it): never `rpc.ts`, `wire.ts`, React, the store or Electron.
 
 ```
 agent/types.ts        ToolDef, ToolCtx, AgentUi, AccessMode, the main <-> renderer IPC shapes
-agent/tools/          the one TOOLS table: status.ts, read.ts, edit.ts, ui.ts (each ToolDef names its access mode and capabilities)
+agent/tools/          the one TOOLS table: status.ts, read.ts, read2.ts, edit.ts, types.ts, full.ts, debug.ts, ui.ts (each ToolDef names its access mode and capabilities)
+agent/host.ts         the executor (`createAgentExecutor`, `changeView`): runs tool calls against a program; the renderer builds it with a UI, the headless host without (no `ui`: appOnly tools are not listed)
 agent/access.ts       visibleTools(mode, {headless, capabilities}): the one gate for tools/list and for authorising a call
 agent/resolve.ts      names or addresses -> addresses; ambiguity is an error listing the candidates
 agent/format.ts       text out, escaped (untrusted binary data), capped, with continuation lines
 agent/errors.ts       Failure -> instruction text; attribution.ts: params-object identity -> change-log `by` (the connection id `<name>#<n>`; `agentName` for display)
+main/agentHost.ts     the headless host (`--agent-host`): provider + WebSocketBackend + the executor in process; hostControl.ts (handover control socket), socketLock.ts (lock directory)
 main/agent.ts         Unix socket server, one SDK `Server` per connection, access mode (userData/agent.json), IPC forwarding, timeouts, cancel
 mcp/bridge.ts         the stdio <-> socket byte pipe (built to out/mcp/bridge.cjs)
 renderer/features/agent.ts   the executor: runs a call against the active session, edits one at a time, per-call AbortController; AgentUi (view, goto through useNavigation().go, confirm)
@@ -58,7 +60,7 @@ Rules: main decides (mode, tool list, argument validation, refusals) before anyt
 
 ## The rules
 
-- **Only `main.tsx` (and the adapter itself) touches `rpc.ts` / `wire.ts`.** Everything else works on `ApplicationBackend` operations bound to the active session (`backend.program(session)`). `test/backend-boundary.test.mjs` fails otherwise (it scans every file, `store/` and `features/` included).
+- **Only `main.tsx` (and the adapter itself) touches `rpc.ts` / `wire.ts`; the one exception is `main/agentHost.ts`, the headless host, which builds its own `WebSocketBackend` in the main process.** Everything else works on `ApplicationBackend` operations bound to the active session (`backend.program(session)`). `test/backend-boundary.test.mjs` fails otherwise (it scans every file, `store/` and `features/` included).
 - **One session per backend.** `createSession(backend)` owns the program store and the views store; components read them with `useProgram(selector)` / `useViews(selector)`, code outside React with `store.getState()` (async code always sees the current state, no ref mirrors).
 - **Events down, not callbacks across.** The session announces `onReset` (the program is opened, replaced or closed) and `onChanged` (program_changed: edits, undo, redo; a save only updates undo). The views store resets itself on a reset (the pane layout, the control-flow and call graph toggles and counters stay); `features/reactions.ts` is the one subscriber that reacts to a change with fetches. Same shape as `Events.subscribe` in the sidecar.
 - **A failed open keeps the active program.** `selectSession` only resets when the session id changes; a held `program_changed` during an open is replayed for the session that is still active.

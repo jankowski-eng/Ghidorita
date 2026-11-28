@@ -1,5 +1,8 @@
 import { changeLog, type Change } from "../changeLog";
-import { sleep, waitFor, type AutotestCtx } from "./autotest";
+import { agentStatus } from "../features/agent";
+import { isMock, sleep, waitFor, type AutotestCtx } from "./autotest";
+import { runAgentDebugFlow } from "./autotestAgentDebug";
+import { runAgentUiChecks } from "./autotestAgentUi";
 
 // the connection id is `<name>#<n>`; the panel and badge show the plain name
 const own = (by?: string) => by?.replace(/#\d+$/, "") === AGENT_CLIENT;
@@ -19,6 +22,7 @@ export async function runAgentFlow(file: string, c: AutotestCtx, result: Record<
   const seen: Change[] = []; // every state of every entry, in order
   const stop = changeLog.subscribe(() => { for (const e of changeLog.items) if (!seen.some((s) => s.id === e.id && s.undone === e.undone && s.by === e.by)) seen.push(e); });
   let clients = 0; const offState = (window as any).host.onAgentState((s: { clients: string[] }) => { clients = s.clients.length; });
+  const mode = () => agentStatus.getState().state.mode; // the state event may have come before this flow started: read the store
   try {
     const live = await waitFor(() => changeLog.items.find((e) => !e.undone && e.by), 60000, "an agent edit in the change log");
     R.entry = { label: live.label, by: live.by };
@@ -38,10 +42,15 @@ export async function runAgentFlow(file: string, c: AutotestCtx, result: Record<
     await waitFor(() => changeLog.items.find((e) => e.id === live.id)?.undone, 30000, "the agent's undo");
     await waitFor(() => !c.editorText().includes(AGENT_NEWNAME), 30000, "the decompiler to show the original name again");
     R.undone = true;
+    if (mode() === "full") { // the client's Full-mode steps (scripts/agent-autotest-client.mjs): highlight and Follow agent, then the mock's debugger
+      await c.program().bookmarks.set({ address: live.address!, category: "autotest", comment: "ui ready" }); // the client waits for this bookmark before it highlights
+      R.ui = await runAgentUiChecks(c, live.address!, result);
+      R.debug = isMock(fl ?? []) ? await runAgentDebugFlow(c, result) : "skipped: the provider has no debugger";
+    }
     await waitFor(() => clients === 0, 30000, "the client to disconnect"); // it checks its own results after the undo
     R.statusBarGone = await waitFor(() => !document.querySelector('button[aria-label*="Agent"]'), 5000, "the badge to go").then(() => true, () => false);
     await sleep(100);
   } finally { off(); stop(); offState(); }
   R.byTags = seen.filter((e) => /Rename/.test(e.label)).every((e) => own(e.by)) && seen.filter((e) => /Comment/.test(e.label)).every((e) => !e.by);
-  return own(R.entry.by) && /variable|Rename/i.test(R.entry.label) && R.panel && R.statusBar && R.refreshed && R.userUntagged && R.agentKept && R.undone && R.statusBarGone && R.byTags && c.errors.length === 0;
+  return own(R.entry.by) && /variable|Rename/i.test(R.entry.label) && R.panel && R.statusBar && R.refreshed && R.userUntagged && R.agentKept && R.undone && R.statusBarGone && R.byTags && (mode() !== "full" || (R.ui && (R.debug === true || typeof R.debug === "string"))) && c.errors.length === 0;
 }

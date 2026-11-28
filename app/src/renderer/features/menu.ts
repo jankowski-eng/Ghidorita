@@ -6,6 +6,7 @@ import { windowTitle } from "../session";
 import { useProgram, useSession, useViews, type Session } from "../store/session";
 import { clearTrail, type Views } from "../store/views";
 import type { EditAction } from "../editActions";
+import { setFollowAgent } from "./agentFollow";
 import { requestOpen } from "./dialogs";
 import { applyLayout, movePane, removeLayout, saveCurrentLayout } from "./layouts";
 import { exportAs } from "./exports";
@@ -22,6 +23,7 @@ export interface MenuTargets {
 export function routeMenu(s: Session, c: MenuCommand, t: MenuTargets) {
   const { views } = s, opened = () => !!s.program();
   const set = (patch: Partial<Views>) => views.dispatch({ type: "set", patch });
+  if (c.type === "agent-follow") return void setFollowAgent(c.on); // a setting: valid while something modal runs
   if (!allowsCommand(s.caps, c) || s.blocked() || views.getState().importFor) return;
   if (c.type === "open-path") requestOpen(s, c.path);
   else if (c.type === "coverage-path") void t.coverage.load(c.path);

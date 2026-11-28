@@ -101,7 +101,8 @@ test("agent tools: modes nest, status is always there, only capability-free tool
   const read = toolNames("read", all), edit = toolNames("edit", all);
   assert.ok(read.length > 5 && edit.length > read.length && read.every((n) => edit.includes(n)));
   assert.ok(TOOLS.filter((t) => t.access === "read" && !t.appOnly).every((t) => t.annotations.readOnlyHint), "read tools are read-only");
-  assert.ok(TOOLS.filter((t) => t.access !== "read" && t.access !== "off").every((t) => !t.annotations.readOnlyHint), "edit tools are not");
+  assert.ok(TOOLS.filter((t) => t.access === "edit").every((t) => !t.annotations.readOnlyHint), "edit tools are not");
+  assert.ok(TOOLS.filter((t) => t.access === "full" && t.annotations.readOnlyHint).every((t) => ["list_patches", "load_coverage"].includes(t.name)), "only these Full tools read only");
   // capabilities not known yet (the renderer has not reported them): only tools that need none
   assert.deepEqual(toolNames("edit", undefined), TOOLS.filter((t) => t.access !== "full" && !t.capability).map((t) => t.name));
   assert.ok(toolNames("edit", undefined).includes("status") && !toolNames("edit", undefined).includes("decompile"));

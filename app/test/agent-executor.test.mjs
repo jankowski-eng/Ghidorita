@@ -5,7 +5,7 @@ import { build } from "esbuild";
 // One bundle, so ToolError / BackendError are the same classes in the executor and in the test.
 const dir = new URL("../src/", import.meta.url).pathname;
 const r = await build({
-  stdin: { resolveDir: dir, contents: `export * from "./renderer/features/agent"; export * from "./agent/types"; export * from "./agent/attribution"; export { BackendError } from "./renderer/backend"; export { createViews } from "./renderer/store/views"; export { ChangeLog } from "./renderer/changeLog";` },
+  stdin: { resolveDir: dir, contents: `export * from "./renderer/features/agent"; export * from "./agent/host"; export * from "./agent/types"; export * from "./agent/attribution"; export { BackendError } from "./renderer/backend"; export { createViews } from "./renderer/store/views"; export { ChangeLog } from "./renderer/changeLog";` },
   bundle: true, format: "esm", write: false, platform: "node",
 });
 globalThis.window = {};
@@ -248,4 +248,33 @@ test("a queued edit does not run against a program opened while it waited", asyn
   set(null); // closed meanwhile: also refused
   const c = ex.handle(call("first", { callId: "3" })); set(ONE); await c;
   assert.match(replies.find((x) => x.callId === "3").error, /nothing was done/);
+});
+
+test("onCall sees the tool, args and client before the handler runs; a throwing observer does not fail the call", async () => {
+  const seen = [];
+  const { ex, replies } = setup([tool("t", async () => { seen.push("handler"); return "ok"; })], { onCall: (t, a, c) => { seen.push([t, a, c]); throw new Error("observer"); } });
+  await ex.handle(call("t", { args: { n: 2 }, client: "Codex#3" }));
+  assert.deepEqual(seen, [["t", { n: 2 }, "Codex#3"], "handler"]);
+  assert.equal(replies[0].ok, true);
+});
+
+test("headless: without ui and confirm the tools get no ctx.ui", async () => {
+  let ctx;
+  const { ex, replies } = setup([tool("t", async (c) => { ctx = c; return "ok"; })], { ui: undefined, confirm: undefined });
+  await ex.handle(call("t"));
+  assert.equal(ctx.ui, undefined); assert.equal(replies[0].ok, true);
+});
+
+test("an unqueued full tool runs while another edit tool is still running (debug_pause during a waiting debug_continue)", async () => {
+  const gate = deferred(), seen = [];
+  const { ex } = setup([
+    { name: "w", access: "full", handler: async () => { await gate.promise; return "w"; } },
+    { name: "u", access: "full", unqueued: true, handler: async () => { seen.push("u"); return "u"; } },
+    { name: "q", access: "edit", handler: async () => { seen.push("q"); return "q"; } },
+  ]);
+  const w = ex.handle(call("w")); const u = ex.handle(call("u")); const q = ex.handle(call("q"));
+  await tick(); await u;
+  assert.deepEqual(seen, ["u"]); // q waits behind w, u does not
+  gate.resolve(); await w; await q;
+  assert.deepEqual(seen, ["u", "q"]);
 });

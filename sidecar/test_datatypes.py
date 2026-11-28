@@ -1,7 +1,11 @@
 """Data type manager RPCs (tree, detail, struct/enum editors, apply) against real Ghidra on /bin/ls; one analysis copied per test."""
 import asyncio, time
 
-from testlib import BIN, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, bare, run
+import pytest
+
+from ghidorita.core.errors import RpcError
+from ghidorita.domains.datatypes import DataTypes
+from testlib import BIN, BUSY, INVALID, NOT_FOUND, NO_PROGRAM, Client, Proc, bare, run
 from test_persist import base, change, projects  # noqa: F401  (fixtures)
 
 
@@ -25,7 +29,7 @@ def test_no_program_and_tree(projects):
         try:
             async with Client(proc.port) as c:
                 for m, kw in (("dt_sources", {}), ("dt_children", {}), ("get_data_type", {"path": "/x"}), ("create_data_type", {"kind": "struct", "name": "S"}),
-                              ("edit_struct", {"path": "/S", "op": {"op": "add", "type": "int"}}), ("create_struct_from_data", {"address": "0x1", "length": 1, "name": "S"})):
+                              ("edit_struct", {"path": "/S", "op": {"op": "add", "type": "int"}}), ("create_struct_from_data", {"address": "0x1", "length": 1, "name": "S"}), ("parse_c_types", {"c": "struct S { int a; };"})):
                     await c.err(m, NO_PROGRAM, **kw)
                 await c.ok("open_binary", path=BIN)
                 src = await c.ok("dt_sources")
@@ -335,3 +339,127 @@ def test_auto_create_structure(projects):
         await c.ok("redo")
         assert "AutoS" in (await c.ok("decompile", entry=f["entry"]))["text"]
     run(with_prog(projects, go))
+
+
+# ---- parse_c_types (capability parseCTypes), in-process on a hand-built program ----
+
+def cprog(sc, name):
+    from inproc import CODE, build
+    return build(sc, name, [("ram", 0x401000, CODE, False)])
+
+
+def top(sc):
+    return sc.ses.undo_snap.get("undoName")
+
+
+def test_parse_c_types_creates_replaces_and_undoes(sc):
+    cprog(sc, "t_cparse")
+    r = sc.parse_c_types("struct Pt { int x; int y; };\ntypedef struct Pt Point;\nenum Color { RED, GREEN = 5 };")
+    assert r == {"created": ["/Color", "/Point", "/Pt"], "replaced": []}
+    assert top(sc) == "Define types from C"
+    d = sc.get_data_type("/Pt")
+    assert d["kind"] == "struct" and d["size"] == 8 and [(x["offset"], x["type"], x["name"]) for x in d["components"]] == [(0, "int", "x"), (4, "int", "y")]
+    assert sc.get_data_type("/Color")["values"] == [{"name": "RED", "value": "0"}, {"name": "GREEN", "value": "5"}]
+    assert sc.get_data_type("/Point")["kind"] == "typedef"
+    # identical again changes nothing; a different body replaces the type at the same path
+    sc.ses.begin_call()  # what the RPC wrapper does: the result carries `undoName` of the step the call committed, and none when it committed nothing
+    assert sc.parse_c_types("struct Pt { int x; int y; };") == {"created": [], "replaced": []}
+    assert sc.ses.take_committed() is None
+    sc.ses.begin_call()
+    assert sc.parse_c_types("struct Pt { int x; int y; int z; };") == {"created": [], "replaced": ["/Pt"]}
+    assert sc.ses.take_committed() == "Define types from C"
+    assert sc.get_data_type("/Pt")["size"] == 12
+    sc.undo()
+    assert sc.get_data_type("/Pt")["size"] == 8
+    sc.undo()  # the first parse was one step for all three types
+    for p in ("/Pt", "/Point", "/Color"):
+        with pytest.raises(RpcError) as e:
+            sc.get_data_type(p)
+        assert e.value.code == NOT_FOUND
+
+
+def test_parse_c_types_category_and_existing_references(sc):
+    cprog(sc, "t_cparse_cat")
+    sc.create_data_type("struct", "Base", size=4)
+    r = sc.parse_c_types("struct Node { struct Base b; struct Node *next; char name[8]; };\nint helper(struct Node *n, long l);", category="/proto/net")
+    assert r == {"created": ["/proto/net/Node", "/proto/net/helper"], "replaced": []}
+    d = sc.get_data_type("/proto/net/Node")
+    assert d["size"] == 4 + 8 + 8 + 4  # Base, pointer (8 on x86-64), name[8], alignment padding of the pointer
+    assert d["components"][0]["typePath"] == "/Base"  # the program's own type, not a copy
+    assert sc.get_data_type("/proto/net/helper")["kind"] == "function"
+    with pytest.raises(RpcError):
+        sc.get_data_type("/Node")  # nothing leaked into the root
+    assert sc.parse_c_types("struct Node { int only; };", category="/proto/net") == {"created": [], "replaced": ["/proto/net/Node"]}
+    assert [x["name"] for x in sc.get_data_type("/proto/net/Node")["components"]] == ["only"]
+    assert sc.parse_c_types("struct Use { struct Base b; };") == {"created": ["/Use"], "replaced": []}  # a use of Base never redefines it
+    assert sc.get_data_type("/Base")["size"] == 4 and sc.get_data_type("/Use")["components"][0]["typePath"] == "/Base"
+    sc.parse_c_types("struct Sz { long l; void *p; };")  # long and pointers take the program's sizes
+    assert sc.get_data_type("/Sz")["size"] == 16
+
+
+def test_parse_c_types_use_of_a_type_in_the_target_category_leaves_it_alone(sc):
+    sc.parse_c_types("struct InNet { int a; int b; };", category="/net")
+    r = sc.parse_c_types("struct Msg { struct InNet n; };", category="/net")
+    assert r == {"created": ["/net/Msg"], "replaced": []}
+    assert len(sc.get_data_type("/net/InNet")["components"]) == 2  # never replaced by the parser's empty placeholder
+    m = sc.get_data_type("/net/Msg")
+    assert m["size"] == 8 and m["components"][0]["typePath"] == "/net/InNet"  # points at the real one, not at a placeholder
+    with pytest.raises(RpcError):
+        sc.get_data_type("/InNet")  # and no empty copy was left at the root
+
+
+def test_parse_c_types_a_root_type_does_not_hide_a_declaration_for_another_category(sc):
+    sc.parse_c_types("struct Pt { int x; };")
+    assert sc.parse_c_types("struct Pt { int x; };", category="/net") == {"created": ["/net/Pt"], "replaced": []}
+    assert sc.parse_c_types("struct Pt { int x; int y; };", category="/net") == {"created": [], "replaced": ["/net/Pt"]}
+    assert len(sc.get_data_type("/Pt")["components"]) == 1  # the root one is untouched
+
+
+def test_parse_c_types_references_resolve_across_categories_and_equivalent_declarations_remap(sc):
+    cprog(sc, "t_cparse_xcat")
+    sc.parse_c_types("struct Base { int a; int b; };", category="/model")
+    assert sc.parse_c_types("struct Use { struct Base b; };") == {"created": ["/Use"], "replaced": []}  # default category: Base is found in /model
+    u = sc.get_data_type("/Use")
+    assert u["size"] == 8 and u["components"][0]["typePath"] == "/model/Base"
+    with pytest.raises(RpcError):
+        sc.get_data_type("/Base")  # no empty copy
+    sc.parse_c_types("struct InNet { int a; int b; };", category="/net")
+    r = sc.parse_c_types("struct InNet { int a; int b; }; struct Msg { struct InNet n; };", category="/net")
+    assert r == {"created": ["/net/Msg"], "replaced": []}  # the equivalent declaration is not a change
+    assert sc.get_data_type("/net/Msg")["components"][0]["typePath"] == "/net/InNet"
+    with pytest.raises(RpcError):
+        sc.get_data_type("/InNet")
+    sc.parse_c_types("struct Twin { int a; };", category="/p"); sc.parse_c_types("struct Twin { int a; int b; };", category="/q")
+    with pytest.raises(RpcError) as e:
+        sc.parse_c_types("struct Holder { struct Twin t; };")
+    assert e.value.code == INVALID and "/p/Twin" in str(e.value) and "/q/Twin" in str(e.value)
+
+
+def test_parse_c_types_errors_roll_back_whole(sc):
+    cprog(sc, "t_cparse_err")
+    before = top(sc)
+    for bad, frag in (("struct Good { int a; };\nstruct Bad { int b; ", "line 2"), ("struct Good { int a; };\nstruct U { nosuch_t z; };", "nosuch_t"), ("int @ ;", "line 1")):
+        with pytest.raises(RpcError) as e:
+            sc.parse_c_types(bad)
+        assert e.value.code == INVALID and frag in str(e.value), str(e.value)
+        with pytest.raises(RpcError):
+            sc.get_data_type("/Good")  # the valid struct before the error is not defined
+        assert top(sc) == before  # no undo step
+    for c, kw in (("", {}), ("   ", {}), (5, {}), ("struct A{int a;};", {"category": "nope"}), ("x" * (DataTypes.C_LIMIT + 1), {})):
+        with pytest.raises(RpcError) as e:
+            sc.parse_c_types(c, **kw)
+        assert e.value.code == INVALID
+    assert sc.parse_c_types("/*" + "x" * 1000 + "*/ struct Fits { int a; };")["created"] == ["/Fits"]  # the cap is on length, not content
+
+
+def test_parse_c_types_busy(sc):
+    cprog(sc, "t_cparse_busy")
+    sc.ses.analyzing = True
+    try:
+        with pytest.raises(RpcError) as e:
+            sc.parse_c_types("struct Busy { int a; };")
+        assert e.value.code == BUSY
+    finally:
+        sc.ses.analyzing = False
+    with pytest.raises(RpcError):
+        sc.get_data_type("/Busy")

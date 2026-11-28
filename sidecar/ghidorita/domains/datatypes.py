@@ -1,6 +1,6 @@
 """Data types: search, the tree, detail, and the struct/enum/typedef editors (reads on R; every edit is one transaction, so one undo step)."""
 from ..core.args import lim, name_arg, text_arg
-from ..core.errors import INVALID, NOT_FOUND, RpcError
+from ..core.errors import INVALID, NOT_FOUND, RpcError, java_error
 from ..core.rpc import rpc
 
 
@@ -355,3 +355,82 @@ class DataTypes:
         if apply:
             self.ctx.events.record({"data"}, [self.ses.rng(a, a.add(length - 1))])
         return {"path": str(dtm.getDataType(cp, name).getPathName())}
+
+    C_LIMIT = 200_000
+
+    @rpc(lane="R")
+    def parse_c_types(self, c, category="/"):
+        """Ghidra's CParser into a scratch manager, then resolved into the program's with REPLACE_HANDLER in one transaction (one undo step, all or
+        nothing). CParser cannot target a category (it derives it from a header file name), so a non-root category is applied in the scratch first."""
+        import jpype
+        from ghidra.app.util.cparser.C import CParser
+        from ghidra.program.database.data import TransientDataTypeManager
+        from ghidra.program.model.data import CategoryPath, Composite, DataTypeConflictHandler, DataTypeManager
+        dtm = self.ses.need().getDataTypeManager()
+        if not isinstance(c, str) or not c.strip():
+            raise RpcError(INVALID, "c must be non-empty C source")
+        if len(c) > self.C_LIMIT:
+            raise RpcError(INVALID, "c is %d characters; the limit is %d" % (len(c), self.C_LIMIT))
+        text_arg(category, "category")
+        if not category.startswith("/"):
+            raise RpcError(INVALID, "category must be a path like /MyTypes")
+        cp = CategoryPath(category)
+        out = {"created": [], "replaced": []}
+        scratch = TransientDataTypeManager("c", dtm.getDataOrganization())  # the program's sizes: long, pointers
+        try:
+            parser = CParser(scratch, True, jpype.JArray(DataTypeManager)([dtm]))  # types already in the program resolve by name
+            try:
+                parser.parse(c)
+            except jpype.JException as e:
+                if str(e.getClass().getSimpleName()) not in ("ParseException", "TokenMgrError"):
+                    raise java_error(e)
+                tok, msg = getattr(e, "currentToken", None), "\n".join(str(e.getMessage() or "").strip().split("\n")[:6])  # "Was expecting one of" can run to hundreds of lines
+                line = " near line %d" % tok.beginLine if tok is not None and tok.beginLine > 0 and "line " not in msg else ""
+                raise RpcError(INVALID, "C parse error%s: %s" % (line, msg[:600]))
+            declared, uses = {}, []
+            for m in (parser.getComposites(), parser.getEnums(), parser.getTypes(), parser.getFunctions()):
+                for dt in m.values():
+                    # a type is classified against where it will live (the target category); the lookup at its parsed (root) path is only for what the C merely refers to
+                    old = dtm.getDataType(cp, dt.getName()) if not cp.isRoot() else dtm.getDataType(dt.getDataTypePath())
+                    empty = isinstance(dt, Composite) and dt.getNumComponents() == 0
+                    if old is None and empty:
+                        old = dtm.getDataType(dt.getDataTypePath())
+                    if old is None and empty:  # `struct Base b;` makes the parser declare an empty `Base`: the program's `Base`, in whatever category
+                        same = [c for c in dtm.getAllComposites() if str(c.getName()) == str(dt.getName())]
+                        if len(same) > 1:
+                            raise RpcError(INVALID, "%s is ambiguous: the program has %s. Declare it in the C source, or give a category that holds it" % (dt.getName(), ", ".join(sorted(str(c.getPathName()) for c in same)[:6])))
+                        old = same[0] if same else None
+                    if old is None:
+                        declared[str(dt.getPathName())] = dt
+                    elif empty and not old.isEquivalent(dt):
+                        uses.append((dt, old))  # the parser does not look the tag up in the program
+                    elif not old.isEquivalent(dt):
+                        declared[str(dt.getPathName())] = dt
+                    elif str(old.getDataTypePath()) != str(dt.getDataTypePath()):
+                        uses.append((dt, old))  # equivalent: not redefined, but what points at the parsed copy must point at the real one
+            tx = scratch.startTransaction("prepare")
+            for ph, old in uses:  # put the program's real type in the placeholder's place, so nothing declared points at the empty one and it never replaces the real one
+                real = scratch.resolve(old, DataTypeConflictHandler.REPLACE_HANDLER)
+                if str(real.getDataTypePath()) != str(ph.getDataTypePath()):  # the real one lives in the target category: resolving it did not touch the placeholder at the root
+                    scratch.replaceDataType(ph, real, False)
+            if not cp.isRoot():
+                for dt in declared.values():
+                    dt.setCategoryPath(cp)
+            scratch.endTransaction(tx, True)
+            def go(p):
+                for dt in declared.values():  # classified before anything is resolved: resolving one type also resolves what it points at
+                    old = dtm.getDataType(dt.getCategoryPath(), dt.getName())
+                    if old is None:
+                        out["created"].append(str(dt.getPathName()))
+                    elif not old.isEquivalent(dt):
+                        out["replaced"].append(str(dt.getPathName()))
+                for dt in declared.values():
+                    dtm.resolve(dt, DataTypeConflictHandler.REPLACE_HANDLER)
+            self.ses.edit("Define types from C", go)
+        finally:
+            scratch.close()
+        cell = self.ses.current_cell()
+        if cell and not out["created"] and not out["replaced"]:  # nothing changed: the undo name the edit reported belongs to an older step
+            cell.pop("undoName", None)
+        out["created"].sort(), out["replaced"].sort()
+        return out

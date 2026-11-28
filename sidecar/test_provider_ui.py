@@ -65,25 +65,32 @@ def test_debugger_flow_in_built_electron_with_the_mock(electron):
     assert process.returncode == 0 and result["ok"], (result, process.stderr[-4000:])
 
 
+@pytest.mark.parametrize("mode", ["edit", "full"])
 @pytest.mark.parametrize("provider", ["mock", "pyghidra"])
-def test_agent_access_flow_in_built_electron(electron, provider, tmp_path):
+def test_agent_access_flow_in_built_electron(electron, provider, mode, tmp_path):
     """A scripted MCP client (SDK client -> bridge -> the app's socket) runs status, decompile, rename_variable and undo_agent_edit; the app shows the edit tagged with the client, refreshes, and undoes it (the mock and real Ghidra)."""
     import tempfile
     sock_dir = tempfile.mkdtemp(prefix="gh-", dir="/tmp")  # short: sockets have a 104 byte path limit
     env = {**os.environ, "GHIDORITA_PROVIDER": provider, "AUTOTEST_FLOW": "agent", "AUTOTEST": "/program-a",
-           "GHIDORITA_AGENT_SOCKET": os.path.join(sock_dir, "a.sock"), "GHIDORITA_AGENT_MODE": "edit"}
+           "GHIDORITA_AGENT_SOCKET": os.path.join(sock_dir, "a.sock"), "GHIDORITA_AGENT_MODE": mode}
     env.pop("SIDECAR_PROJECTS_DIR", None)
     if provider == "pyghidra":
         env.update(JAVA_HOME=JAVA, GHIDRA_INSTALL_DIR=ghidra_dir(), SIDECAR_PROJECTS_DIR=str(tmp_path / "projects"), AUTOTEST=BIN)
     app = subprocess.Popen([electron, "."], cwd=APP, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         client = subprocess.run(["node", "scripts/agent-autotest-client.mjs"], cwd=APP, env=env, capture_output=True, text=True, timeout=150)
-        out, err = app.communicate(timeout=60)
+        out, err = app.communicate(timeout=180)
     finally:
         app.kill()
-    assert client.returncode == 0, (client.stdout[-2000:], client.stderr[-2000:])
+    assert client.returncode == 0, (client.stdout[-2000:], client.stderr[:1500])
     results = [line for line in out.splitlines() if line.startswith("AUTOTEST_RESULT ")]
     assert results, (out[-2000:], err[-4000:])
     result = json.loads(results[-1].split(" ", 1)[1])
     print(result)
     assert app.returncode == 0 and result["ok"], (result, err[-4000:])
+
+
+def test_agent_headless_host_flow(electron):
+    """Headless host (mock): two bridges share one host, edits are attributed, the host exits after the last client, then the app takes over (real Electron app; a window opens)."""
+    out = subprocess.run(["node", "scripts/agent-autotest-headless.mjs"], cwd=APP, capture_output=True, text=True, timeout=300)
+    assert out.returncode == 0, (out.stdout[-2000:], out.stderr[-3000:])

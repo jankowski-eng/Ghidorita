@@ -12,7 +12,8 @@ export function useProgramReactions(tabs: TabsApi) {
   const latest = useRef(tabs); latest.current = tabs;
   useEffect(() => session.onReset(() => latest.current.reset()), []); // eslint-disable-line
   useEffect(() => session.onChanged((p, current) => {
-    if (p.kinds.length) views.dispatch({ type: "set", patch: clearTrail }); // the slice's token positions belong to the text it was computed for
+    // the trail's token positions and the agent's decompiler line numbers belong to the text they were computed for
+    if (p.kinds.length) views.dispatch({ type: "set", patch: (v) => ({ ...clearTrail(v), ...(v.agentHl?.lines.length ? { agentHl: { ...v.agentHl, lines: [] } } : {}) }) });
     const isCurrent = () => store.getState().program === current;
     onProgramChanged(p, {
       refetchFunctions: () => session.refreshFunctions(current),

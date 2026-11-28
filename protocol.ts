@@ -156,7 +156,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "exactSymbolSearch",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "exactSymbolSearch", "parseCTypes",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -289,6 +289,8 @@ export interface Methods {
   edit_enum: { params: { path: string; op: EnumOp }; result: Edited };
   // Struct from the data items in [address, address+length) (instructions refused), applied at address unless apply=false; one transaction.
   create_struct_from_data: { params: { address: Address; length: number; name: string; category?: string; apply?: boolean }; result: { path: string } };
+  // Ghidra's CParser (capability "parseCTypes", needs "typeEditing"): C declarations (struct, union, enum, typedef, function prototypes; no preprocessor) become types, one transaction "Define types from C", all or nothing. Same-named types are replaced; an identical one is left alone and listed in neither array. `category` (default "/", must start with "/") is where the declared types go (prototypes too). Paths are sorted. InvalidArgument for a parse error (Ghidra's message, with the line where it has one), empty or over-long (200 000 characters) `c`, a bad category. Busy while analysis runs.
+  parse_c_types: { params: { c: string; category?: string }; result: { created: string[]; replaced: string[] } };
   // Ghidra's Auto Create Structure on a decompiler variable: infers a struct from the field accesses through it, retypes the variable to a pointer to it; one transaction. structName default: Ghidra's unique name in /auto_structs.
   auto_create_structure: { params: { entry: Address; name: string; structName?: string; timeoutSecs?: number }; result: { path: string } };
   // ---- patching (capability "patch", protocol.md "Patching") ----

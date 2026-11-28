@@ -3,6 +3,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { fileURLToPath } from "node:url";
+import { debugSteps } from "./agent-autotest-debug.mjs";
+import { defineTypesSteps } from "./agent-autotest-types.mjs";
+import { uiSteps } from "./agent-autotest-ui.mjs";
 
 const bridge = fileURLToPath(new URL("../out/mcp/bridge.cjs", import.meta.url));
 const NEWNAME = "agent_counter", R = {};
@@ -26,7 +29,8 @@ async function connect() {
 const { client, s: status } = await connect();
 const call = async (name, args = {}) => { const r = await client.callTool({ name, arguments: args }, undefined, { timeout: 60_000 }); return { text: text(r), error: !!r.isError }; };
 
-check(/Access: edit \(client agent-autotest#\d+\)/.test(status), "status: " + status);
+const FULL = process.env.GHIDORITA_AGENT_MODE === "full"; // the Full-mode run adds the phase 2 tools below
+check(new RegExp(`Access: ${FULL ? "full" : "edit"} \\(client agent-autotest#\\d+\\)`).test(status), "status: " + status);
 check(/server|Strings, comments/.test(client.getInstructions() ?? ""), "instructions");
 const names = (await client.listTools()).tools.map((t) => t.name);
 for (const n of ["status", "decompile", "rename_variable", "undo_agent_edit", "get_view", "goto"]) check(names.includes(n), `tools/list lacks ${n}: ${names}`);
@@ -69,5 +73,20 @@ check(again.error && /Nothing to undo|user/.test(again.text), "a second undo mus
 const off = await call("rename_variable", { function: entry, variable: "no_such_variable", newName: "x_y" });
 check(off.error, "renaming a missing variable must be an error");
 
+if (FULL) {
+  // Full mode: the app watches along (autotestAgent.ts, runAgentFullChecks). Each step module throws on its first failed check.
+  const other = list.text.split("\n").map((l) => l.trim().split(/\s+/)[0]).find((a) => /^0x[0-9a-f]+$/i.test(a) && a !== entry);
+  check(other, "no second function for the follow step");
+  const fulls = (await client.listTools()).tools.map((t) => t.name);
+  for (const n of ["patch", "save", "export", "open_program", "pcode", "function_graph", "list_bookmarks", "define_types", "highlight"]) check(fulls.includes(n), `Full mode lacks ${n}`);
+  for (;;) { if (/ui ready/.test((await call("list_bookmarks", { category: "autotest" })).text)) break; if (Date.now() > deadline) fail("the app never signalled it is ready for the highlight"); await new Promise((r) => setTimeout(r, 300)); } // the app is ready to watch it
+  await uiSteps(client, { entry, other });
+  R.types = await defineTypesSteps(client, { fail });
+  const g = await call("function_graph", { function: entry }); check(!g.error && /B\d/.test(g.text), "function_graph: " + g.text);
+  const pc = await call("pcode", { function: entry }); check(!pc.error && pc.text.length > 20, "pcode: " + pc.text);
+  check(!(await call("list_bookmarks")).error, "list_bookmarks"); check(!(await call("list_undefined_refs")).error, "list_undefined_refs");
+  const rel = await call("export", { kind: "symbols", path: "relative.txt" }); check(rel.error && /absolute/i.test(rel.text), "export must refuse relative paths: " + rel.text);
+  if (process.env.GHIDORITA_PROVIDER === "mock") R.debug = await debugSteps(client);
+}
 await client.close();
 console.log(JSON.stringify({ ok: true, ...R }));

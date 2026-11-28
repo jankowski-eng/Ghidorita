@@ -16,7 +16,7 @@ type Result<M extends Method> = Methods[M]["result"];
 type Pending = { sessionId?: string; accept(value: unknown): void; reject(error: Error): void };
 type Hooks = {
   onEdit?(command: string, params: unknown, result: unknown): void;
-  onSessionChanged?(): void;
+  onSessionChanged?(session: ActiveSession | null): void; // the new session, for a caller with no store to ask (the headless host)
   onHistory?(undo: UndoState): void; // the undo state every program_changed of the current session carries
   onRequest?(method: string, params: unknown): void;
 };
@@ -123,7 +123,7 @@ export class WebSocketBackend implements ApplicationBackend {
       this.pending.delete(id);
       p.reject(this.stale());
     }
-    this.hooks.onSessionChanged?.();
+    this.hooks.onSessionChanged?.(session);
   }
 
   readonly lifecycle: ProgramLifecycle = {
@@ -206,6 +206,12 @@ export class WebSocketBackend implements ApplicationBackend {
         renameDataType: (p) => edit("typeEditing", "renameDataType", "rename_data_type", p),
         editStruct: (p) => edit("typeEditing", "editStruct", "edit_struct", p),
         editEnum: (p) => edit("typeEditing", "editEnum", "edit_enum", p),
+        parseCTypes: async (p) => { // not recorded when nothing changed: the provider committed no undo step then, and a change-log entry would claim one
+          const r = await read("parse_c_types", p, "parseCTypes");
+          if (sessionId !== this.sessionId) throw this.stale();
+          if (r.created.length + r.replaced.length) this.hooks.onEdit?.("parseCTypes", p, r);
+          return r;
+        },
       },
       bookmarks: {
         list: (p) => job("bookmarks", "list_bookmarks", p, "cancel_search"),

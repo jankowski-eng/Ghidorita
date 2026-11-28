@@ -21,6 +21,7 @@ import type { Copying } from "./features/copy";
 import { shownDebug } from "./store/program";
 import { useProgram, useSession, useViews } from "./store/session";
 import type { Views } from "./store/views";
+import { agentMarks } from "./features/agentHighlight";
 
 /** The three panes (functions + map + references, listing, decompiler tabs) of the open program. Renders the stores and calls the feature hooks. */
 export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsApi; nav: Navigation; editing: Editing; copy: Copying; testMode: boolean }) {
@@ -30,7 +31,7 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const initialRows = useProgram((p) => p.initialRows), reading = useProgram((p) => p.reading), browseError = useProgram((p) => p.browseError);
   const dbg = useProgram(shownDebug), liveDbg = useProgram((p) => p.debug), canDebug = caps.has("debugger");
   const busy = useProgram((p) => !!p.opening || p.closing || p.unavailable);
-  const { paneOrder, paneSizes, xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, pcodeOn, cursorAt, trail, dataVersion } = useViews((v) => v);
+  const { paneOrder, paneSizes, xrefTarget, useHl, xrefVersion, listingChange, scrollReq, visible, covVersion, graphOn, callGraphOn, pcodeOn, cursorAt, trail, dataVersion, agentHl } = useViews((v) => v);
   const ops = program.api;
   const set = (patch: Partial<Views>) => views.dispatch({ type: "set", patch });
   const names = useMemo(() => new Map(funcs.map((f) => [f.entry, f.name])), [funcs]);
@@ -38,8 +39,10 @@ export function Workbench({ tabs, nav, editing, copy, testMode }: { tabs: TabsAp
   const active = tabs.state.tabs.find((t) => t.id === tabs.state.active) ?? null;
   const ad = active ? tabs.data[active.id] : undefined;
   const hlTokens = useMemo(() => (useHl && ad ? ad.tokens.filter((t) => t.varName === useHl.name && t.address === useHl.address) : []), [useHl, ad?.tokens]); // eslint-disable-line
-  const trailTokens = trail && active && trail.entry === active.entry ? trail.trail.tokens : [];
-  const trailAddrs = useMemo(() => (trail && active && trail.entry === active.entry ? { forward: new Set(trail.trail.ops.filter((o) => o.dir === "forward").map((o) => o.address)), backward: new Set(trail.trail.ops.filter((o) => o.dir === "backward").map((o) => o.address)) } : undefined), [trail, active?.entry]); // eslint-disable-line
+  const marks = useMemo(() => agentMarks(agentHl, active?.entry ?? null, ad?.text ?? "", ad?.tokens ?? []), [agentHl, active?.entry, ad?.text, ad?.tokens]); // the agent's highlight reuses the trail's marks
+  const liveTrail = trail && active && trail.entry === active.entry ? trail.trail : null;
+  const trailTokens = useMemo(() => [...(liveTrail?.tokens ?? []), ...marks.tokens], [liveTrail, marks]);
+  const trailAddrs = useMemo(() => (liveTrail || marks.addrs.size ? { forward: new Set([...(liveTrail?.ops.filter((o) => o.dir === "forward").map((o) => o.address) ?? []), ...marks.addrs]), backward: new Set(liveTrail?.ops.filter((o) => o.dir === "backward").map((o) => o.address)) } : undefined), [liveTrail, marks]);
   const symbolSearch = caps.has("symbolSearch") ? ops.searches.searchSymbols : undefined;
   const { go, goTab, clickAt, fn } = nav;
   const centre = centreViews(caps, callGraphOn), graphEntry = active?.entry ?? fn?.entry; // without a decompiler there are no tabs: the call graph follows the current function

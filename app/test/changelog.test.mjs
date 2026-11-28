@@ -128,3 +128,11 @@ test("an edit result's undoName is kept on the entry (what undo_agent_edit asks 
   l.record("undo", {}, {}); // undo and redo flip entries and keep what they carry
   assert.equal(l.items[0].undoName, "Rename x to a");
 });
+
+test("define types from C: one line, the declaration count and the category", () => {
+  const l = new ChangeLog();
+  l.record("parseCTypes", { c: "struct A { int a; };\ntypedef struct A A_t;\nenum E { X };\nstruct B { struct A a; };" }, { created: [], replaced: [], undoName: "Define types from C" });
+  l.record("parseCTypes", { c: "union U { int a; };", category: "/net" }, {});
+  assert.deepEqual(live(l), ["Define types from C (4)", "Define types from C in /net (1)"]);
+  assert.equal(l.items[0].undoName, "Define types from C");
+});

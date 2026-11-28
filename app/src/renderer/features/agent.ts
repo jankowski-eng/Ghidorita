@@ -1,11 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { ActiveSession, Address, FunctionInfo, Token } from "../../../../protocol";
-import { TOOLS } from "../../agent/tools";
-import { agentName, tagParams } from "../../agent/attribution";
-import { toToolError } from "../../agent/errors";
-import { ToolError, type AccessMode, type AgentCall, type AgentReply, type AgentState, type AgentUi, type AgentView, type ChangeView, type ToolDef } from "../../agent/types";
-import type { ApplicationBackend, ProgramOperations } from "../backend";
-import type { Change } from "../changeLog";
+import type { Address, FunctionInfo, Token } from "../../../../protocol";
+import { agentName } from "../../agent/attribution";
+import { changeView, createAgentExecutor, type AgentHost, type ConfirmFn } from "../../agent/host";
+import { ToolError, type AccessMode, type AgentState, type AgentView } from "../../agent/types";
+import { followAgent, followingAgent } from "./agentFollow";
 import { changeLog } from "../changeLog";
 import { tokenAt } from "../editActions";
 import type { Source } from "../nav";
@@ -13,84 +11,6 @@ import { createStore } from "../store/createStore";
 import { useSession } from "../store/session";
 import type { Views } from "../store/views";
 import type { TabsApi } from "../useTabs";
-
-/** The part of `window.host` the executor uses (preload `Host`); absent in the autotest and mock paths. */
-export interface AgentHost {
-  onAgentCall(cb: (c: AgentCall) => void): () => void;
-  onAgentCancel(cb: (c: { callId: string }) => void): () => void;
-  onAgentState(cb: (s: AgentState) => void): () => void;
-  agentReply(r: AgentReply): Promise<void>;
-  agentReady(ready: boolean): Promise<void>;
-}
-export type ConfirmFn = (message: string, o: { client: string; signal: AbortSignal }) => Promise<boolean>;
-
-/** The newest change that can still be undone (the `undo_agent_edit` guard); `by` is set by the change log for the agent's edits. */
-export const changeView = (items: () => readonly Change[]): ChangeView => ({
-  newest() {
-    const c = [...items()].reverse().find((x) => !x.undone && !x.saved && !x.locked) as (Change & { by?: string }) | undefined;
-    return c ? { label: c.label, by: c.by, undoName: c.undoName } : null;
-  },
-});
-
-export interface ExecutorDeps {
-  tools?: readonly ToolDef[];
-  backend: ApplicationBackend;
-  /** the active program (the session's `program()`): operations and session */
-  program(): { api: ProgramOperations; session: ActiveSession } | null;
-  ui: Pick<AgentUi, "view" | "goto">;
-  /** the app's current function list, or null when it is not trustworthy right now (still loading, or behind a change): the executor then asks the provider */
-  functions?(): FunctionInfo[] | null;
-  confirm: ConfirmFn;
-  changes: ChangeView;
-  host: Pick<AgentHost, "agentReply">;
-  /** number of calls running, on every change (the status bar's pulse) */
-  onBusy?(n: number): void;
-}
-
-/** Runs main's tool calls against the active program. React-free; `useAgent` builds one. Holds no timer: main times calls out and cancels them. */
-export function createAgentExecutor(d: ExecutorDeps) {
-  const tools = d.tools ?? TOOLS;
-  const running = new Map<string, AbortController>();
-  let writes: Promise<unknown> = Promise.resolve(); // edits run one at a time: guards that read the change log (undo_agent_edit) must not interleave with another edit
-  const reply = (r: AgentReply) => { try { d.host.agentReply(r).catch(() => {}); } catch { /* the window is going away */ } };
-
-  async function handle(call: AgentCall): Promise<void> {
-    const { callId, client, mode } = call;
-    if (running.has(callId)) return; // a repeated id would otherwise get two replies
-    const ac = new AbortController();
-    running.set(callId, ac); d.onBusy?.(running.size);
-    const bound = d.program()?.session.sessionId ?? null; // the program this call was made against: an edit that waited its turn must not run against a different one
-    try {
-      const tool = tools.find((t) => t.name === call.tool);
-      if (!tool) throw new Error(`Unknown tool ${call.tool}.`);
-      const exec = () => {
-        if (ac.signal.aborted) throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
-        const p = d.program();
-        if ((p?.session.sessionId ?? null) !== bound) throw new ToolError("The user opened, replaced or closed the program while this call waited; nothing was done. Call status to see what is open, then retry.");
-        return tool.handler({
-        ops: p?.api ?? null, session: p?.session ?? null, backend: d.backend,
-        functions: async () => { if (!p) throw new ToolError("No program is open. Ask the user to open one in Ghidorita (call status to see what is open)."); return d.functions?.() ?? p.api.functions.list(); },
-        ui: { view: d.ui.view, goto: d.ui.goto, confirm: (m) => d.confirm(m, { client, signal: ac.signal }) },
-        changes: d.changes, signal: ac.signal, client, mode, tag: (x) => tagParams(x, client),
-        }, call.args);
-      };
-      const content = await (tool.access === "edit" || tool.access === "full" ? (writes = writes.then(exec, exec) as Promise<string>) : exec());
-      reply({ callId, ok: true, content });
-    } catch (e) {
-      reply({ callId, ok: false, error: toToolError(e).message });
-    } finally { running.delete(callId); d.onBusy?.(running.size); }
-  }
-  const cancel = (callId: string) => running.get(callId)?.abort();
-  const dispose = () => { for (const ac of running.values()) ac.abort(); };
-
-  /** Register the listeners, then announce readiness. Returns the cleanup: not ready, in-flight calls aborted. */
-  function listen(host: AgentHost, onState: (s: AgentState) => void): () => void {
-    const offs = [host.onAgentCall((c) => { void handle(c); }), host.onAgentCancel((c) => cancel(c.callId)), host.onAgentState(onState)];
-    void host.agentReady(true).catch(() => {});
-    return () => { for (const f of offs) f(); dispose(); void host.agentReady(false).catch(() => {}); };
-  }
-  return { handle, cancel, dispose, listen };
-}
 
 // ---- AgentUi ----
 export interface ViewDeps {
@@ -162,6 +82,7 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
     const host = (window as any).host as Partial<AgentHost> | undefined;
     if (!host?.onAgentCall || !host.onAgentCancel || !host.onAgentState || !host.agentReady || !host.agentReply) return;
     const fns = trackFunctions(s);
+    const follow = followAgent(s, (a) => latest.current.go(a, "agent"));
     const ex = createAgentExecutor({
       backend: s.backend, program: () => s.program(), functions: fns.list, changes: changeView(() => changeLog.items), host: host as AgentHost,
       ui: {
@@ -170,10 +91,29 @@ export function useAgent(tabs: TabsApi, go: (a: Address, s: Source) => Promise<v
           return tab && d ? { entry: tab.entry, text: d.text, tokens: d.tokens } : null;
         } }),
         goto: (a) => latest.current.go(a, "agent"),
+        // s.open and s.closeProgram swallow their failures (the window shows them): the tools read the outcome back from the backend
+        openProgram: async (t, signal) => {
+          const onAbort = () => s.cancelOpen();
+          signal?.addEventListener("abort", onAbort, { once: true });
+          try {
+            if (signal?.aborted) throw new ToolError("cancelled before it started");
+            if ("path" in t) await s.open(t.path, {}, undefined, "background");
+            else {
+              const entry = (await s.backend.projects.list()).find((e) => e.programId === t.programId);
+              if (!entry) throw new ToolError("That stored program no longer exists.");
+              if (signal?.aborted) throw new ToolError("cancelled before it started"); // the lookup was pending: there was no open job to cancel
+              await s.open(entry.name, {}, entry, "background");
+            }
+          } finally { signal?.removeEventListener("abort", onAbort); }
+        },
+        closeProgram: () => s.closeProgram(),
+        highlight: async (h) => s.views.dispatch({ type: "set", patch: { agentHl: h } }),
+        clearHighlight: async () => s.views.dispatch({ type: "set", patch: { agentHl: null } }),
       },
+      onCall: (tool, args) => { if (followingAgent()) follow(tool, args); },
       confirm: createConfirmer(s.views, s.onReset), onBusy: (busy) => agentStatus.dispatch({ busy }),
     });
     const off = ex.listen(host as AgentHost, (state) => agentStatus.dispatch({ state }));
-    return () => { off(); fns.dispose(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
+    return () => { off(); fns.dispose(); follow.cancel(); agentStatus.dispatch({ state: { mode: "off" as AccessMode, clients: [] }, busy: 0 }); };
   }, []); // eslint-disable-line
 }

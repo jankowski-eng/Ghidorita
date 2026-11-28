@@ -20,7 +20,7 @@ GOLDEN = {
         "undo_state", "get_comments", "rename_symbol", "create_label", "set_comment", "create_function",
         "set_function_signature", "set_equate", "set_function_no_return", "undo", "redo", "define_data", "clear_code", "save", "start_analysis", "dt_sources", "dt_children",
         "get_data_type", "create_data_type", "delete_data_type", "rename_data_type", "edit_struct", "edit_enum",
-        "create_struct_from_data", "patch_instruction", "list_patches")},
+        "create_struct_from_data", "parse_c_types", "patch_instruction", "list_patches")},
 }
 
 
