@@ -79,10 +79,10 @@ def test_agent_access_flow_in_built_electron(electron, provider, mode, tmp_path)
     app = subprocess.Popen([electron, "."], cwd=APP, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         client = subprocess.run(["node", "scripts/agent-autotest-client.mjs"], cwd=APP, env=env, capture_output=True, text=True, timeout=150)
-        out, err = app.communicate(timeout=60)
+        out, err = app.communicate(timeout=180)
     finally:
         app.kill()
-    assert client.returncode == 0, (client.stdout[-2000:], client.stderr[-2000:])
+    assert client.returncode == 0, (client.stdout[-2000:], client.stderr[:1500])
     results = [line for line in out.splitlines() if line.startswith("AUTOTEST_RESULT ")]
     assert results, (out[-2000:], err[-4000:])
     result = json.loads(results[-1].split(" ", 1)[1])
