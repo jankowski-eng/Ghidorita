@@ -31,6 +31,7 @@ test("src/agent/ is environment-agnostic: only backend.ts, parseGoto.ts, address
   const allowed = /^(?:(?:\.\.\/)+(?:renderer\/(?:backend|parseGoto|address)|protocol)|\.\/[\w/]+|\.\.\/[\w]+|node:(?:os|path))$/;
   const names = (await readdir(dir, { recursive: true })).filter((p) => /\.tsx?$/.test(p));
   assert.ok(names.length >= 8);
+  assert.ok(names.includes("host.ts"), "the shared executor lives in src/agent/host.ts and follows these rules");
   for (const path of names) {
     const source = await readFile(new URL(path, dir), "utf8");
     for (const [, a, b] of source.matchAll(/^(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\)/gm)) {
