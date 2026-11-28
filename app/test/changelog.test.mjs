@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { transformSync } from "esbuild";
+import { build } from "esbuild";
 import { readFileSync } from "node:fs";
 
-const js = transformSync(readFileSync(new URL("../src/renderer/changeLog.ts", import.meta.url), "utf8"), { loader: "ts", format: "esm" }).code;
-const { ChangeLog } = await import("data:text/javascript," + encodeURIComponent(js));
+// one bundle, so changeLog and the test share attribution.ts's WeakMap
+const src = new URL("../src/", import.meta.url).pathname;
+const out = await build({ stdin: { contents: `export * from "./renderer/changeLog"; export * from "./agent/attribution";`, resolveDir: src, loader: "ts" }, bundle: true, format: "esm", write: false, platform: "node" });
+const { ChangeLog, tagParams } = await import("data:text/javascript," + encodeURIComponent(out.outputFiles[0].text));
 const live = (l) => l.items.filter((c) => !c.undone).map((c) => c.label);
 
 test("edits are logged, reads are not", () => {
@@ -93,4 +95,25 @@ test("reconcile: history cleared but the save failed keeps the edit unsaved and 
   assert.deepEqual(live(l), ["Rename to a"]);
   l.reconcile({ canUndo: false, canRedo: false, dirty: false }); // a later analysis saves them
   assert.deepEqual([l.items[0].saved, l.items[0].locked], [true, false]);
+});
+
+test("agent edits are attributed by the identity of their params; the user's are not", () => {
+  const l = new ChangeLog();
+  const mine = tagParams({ address: "0x1", newName: "a" }, "claude-code");
+  l.record("renameSymbol", mine, {});
+  l.record("renameSymbol", { address: "0x2", newName: "b" }, {}); // the user's, between two agent edits
+  l.record("renameSymbol", tagParams({ address: "0x3", newName: "c" }, "codex"), {});
+  l.record("renameSymbol", { ...mine }, {}); // a copy is a different object: untagged (why tools must not spread)
+  l.record("renameSymbol", mine, {}); // the same object again still tags
+  assert.deepEqual(l.items.map((c) => c.by), ["claude-code", undefined, "codex", undefined, "claude-code"]);
+  assert.ok(!("by" in l.items[1]));
+});
+
+test("undo and redo keep by", () => {
+  const l = new ChangeLog();
+  l.record("setComment", tagParams({ address: "0x1", kind: "eol", text: "x" }, "claude-code"), {});
+  l.record("undo", {}, {});
+  assert.deepEqual([l.items[0].undone, l.items[0].by], [true, "claude-code"]);
+  l.record("redo", {}, {});
+  assert.deepEqual([l.items[0].undone, l.items[0].by], [false, "claude-code"]);
 });
