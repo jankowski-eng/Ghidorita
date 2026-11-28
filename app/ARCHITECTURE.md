@@ -38,6 +38,24 @@ src/renderer/
   *.tsx *.ts           components (Listing, Decompiler, panels, dialogs) and pure logic with unit tests (nav, changes, rowcache, address, addrmap, editActions (listing keys, Define Array plan), rank (the empty command bar's lead score), warnings (decompiler warning wording), openOptions, coverage, ...)
 ```
 
+## Agent access (MCP)
+
+`src/agent/` is the environment-agnostic tool layer (design: `../docs/AGENTS_MCP.md`). It imports only `renderer/backend.ts`, `parseGoto.ts`, `address.ts`, `protocol.ts` and its own files (`test/layering.test.mjs` checks it): never `rpc.ts`, `wire.ts`, React, the store or Electron.
+
+```
+agent/types.ts        ToolDef, ToolCtx, AgentUi, AccessMode, the main <-> renderer IPC shapes
+agent/tools/          the one TOOLS table: status.ts, read.ts, edit.ts, ui.ts (each ToolDef names its access mode and capabilities)
+agent/access.ts       visibleTools(mode, {headless, capabilities}): the one gate for tools/list and for authorising a call
+agent/resolve.ts      names or addresses -> addresses; ambiguity is an error listing the candidates
+agent/format.ts       text out, escaped (untrusted binary data), capped, with continuation lines
+agent/errors.ts       Failure -> instruction text; attribution.ts: params-object identity -> change-log `by`
+main/agent.ts         Unix socket server, one SDK `Server` per connection, access mode (userData/agent.json), IPC forwarding, timeouts, cancel
+mcp/bridge.ts         the stdio <-> socket byte pipe (built to out/mcp/bridge.cjs)
+renderer/features/agent.ts   the executor: runs a call against the active session, edits one at a time, per-call AbortController; AgentUi (view, goto through useNavigation().go, confirm)
+```
+
+Rules: main decides (mode, tool list, argument validation, refusals) before anything reaches the renderer; the renderer executes and replies exactly once per call; every edit tool tags the params object it hands to `ops.edits.*` (`ctx.tag`), so `changeLog.record` can attribute the entry (`Change.by`) without racing the user's own edits. `AUTOTEST_FLOW=agent` (driven by `sidecar/test_provider_ui.py`, client: `app/scripts/agent-autotest-client.mjs`) runs a real MCP client through the bridge and socket against the mock and PyGhidra.
+
 ## The rules
 
 - **Only `main.tsx` (and the adapter itself) touches `rpc.ts` / `wire.ts`.** Everything else works on `ApplicationBackend` operations bound to the active session (`backend.program(session)`). `test/backend-boundary.test.mjs` fails otherwise (it scans every file, `store/` and `features/` included).

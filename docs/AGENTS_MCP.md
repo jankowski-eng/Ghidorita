@@ -1,6 +1,6 @@
 # Agent access over MCP (design)
 
-Status: proposal. Nothing here is implemented yet.
+Status: phase 1 (app mode, Read and Edit) is implemented on branch `agent-mcp-phase1`; phases 2 and 3 are proposals. See "Phase 1 as built" at the end for where the code differs from this design.
 
 Goal: let Claude Code, Codex, or any other MCP client use Ghidorita without computer use. The agent should work on **the program the user has open**, so the user sees its edits live, can undo them, and can point it at what they are looking at. A headless mode (no window) comes second and uses the same tools.
 
@@ -195,3 +195,19 @@ The layering rules in `app/ARCHITECTURE.md` hold: the agent layer uses `Applicat
 - Should Edit be the default after the first enable, or should each launch start in Read?
 - In app mode, should the agent be allowed to open programs at all, even with a confirm, or only work on what the user opened?
 - Headless projects: share the app's projects dir (one program store, needs the handover above) or use a separate one (simpler, but programs analyzed headless don't show in the app)?
+
+## Phase 1 as built (deviations from the design above)
+
+Verified: unit tests for every layer, and `AUTOTEST_FLOW=agent` (a real MCP SDK client through the real bridge and socket: status, goto/get_view, decompile, rename_variable, a user edit that makes `undo_agent_edit` refuse, then the undo) against the mock and PyGhidra, plus MCP Inspector's CLI (`tools/list`, `status`) through the bridge.
+
+- **Access modes.** The Agent menu offers Off / Read / Edit (no Full until phase 2 has Full tools). Off is the initial state and the choice is persisted; there is no separate "Edit after the first enable" rule. A tool's `access` is the lowest *mode* that offers it (`status` is `"off"`).
+- **`GHIDORITA_AGENT_MODE`** (`off|read|edit|full`) overrides the persisted mode for tests and autotest, is not persisted, and is ignored by a packaged app.
+- **Lowering the mode is a kill switch**: running calls whose tool the new mode no longer offers are cancelled. (The sidecar cannot abort a request it already received, so an edit in flight may still land.)
+- **Tools added or changed.** `get_view` and `goto` (the design lists them, the plan assigned them to no stream; `src/agent/tools/ui.ts`). The read tools take optional `offset`/`limit` where output can be paged; `search` checks `symbolSearch`/`strings`/`memorySearch` per kind at call time instead of declaring one capability. A caller-raised `timeoutSecs` extends main's per-call limit (+30 s).
+- **Resolution.** A bare-hex word needs at least five digits ("bad", "cafe" are names, not addresses); fewer gets "if you meant the address, write 0x…".
+- **Edits.** The one retry on `cancelled` covers every edit tool. Edit calls run one at a time in the renderer executor so that guards reading the change log cannot interleave with another edit. `undo_agent_edit` requires: the newest live change-log entry was made by the same client (`clientInfo.name`), the provider can undo, and the provider's `undoName` matches that entry's kind (per-kind patterns in `tools/edit.ts`; the log's labels and the sidecar's undo names are not one to one, an entry with no pattern is never undone). The change is re-read after the history state is fetched. The remaining gap is a user edit that lands between that check and the undo.
+- **Protocol.** `tools/call` before `notifications/initialized` is refused. Main validates arguments with the SDK's ajv against each tool's schema. Output caps are ~30 000 characters per tool; untrusted text is escaped (control, zero-width and tag characters).
+- **Step 0 additions**: `ToolCtx` also carries `session`, `mode`, `changes` (the `undo_agent_edit` guard's view of the change log) and `tag`; `Host` also has `onAgentState`, `agentReady`, `agentMenu` (status bar, readiness, kill switch); new files `access.ts`, `errors.ts`, `attribution.ts`, `instructions.ts`. Linux without `XDG_RUNTIME_DIR` falls back to `~/.ghidorita/agent.sock`.
+- **Bridge.** `--launch` is the default, `--no-launch` selects the "not running" fallback (always pass it in tests: the default starts an installed Ghidorita); `GHIDORITA_APP_CMD` overrides the macOS `open -b`. The wrapper is `Resources/mcp/ghidorita-mcp`, the script `Resources/mcp/bridge.cjs`.
+- **Confirm.** The renderer has the confirm machinery (agent questions queue, render on top of other dialogs, answer false when the call is aborted or the program is replaced), but no phase 1 tool asks: `open_program` is phase 2.
+- **Known limits / follow-ups for phase 2**: no single-instance lock (two apps starting after a crash can race for the stale socket); the bridge waits up to 60 s for a launched app that never listens (Claude Code's start timeout may fire first: answer `initialize` from the fallback immediately and retry in the background) and does not check the socket's owner when `GHIDORITA_AGENT_SOCKET`/`XDG_RUNTIME_DIR` is used; attribution is by `clientInfo.name`, so two sessions of one client share an identity (use a per-connection id); no per-connection cap on pending calls or request size; an atomic "undo only if the top step is X" in the sidecar would close the check-then-undo gap; Windows pipe ACLs and the Windows path are untested.

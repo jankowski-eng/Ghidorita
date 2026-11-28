@@ -102,6 +102,28 @@ Right-click a listing row for **Copy Address**, **Copy Bytes (Hex)** and **Copy 
 
 ![Right-click menu on a listing row](screenshots/copy.png)
 
+### Use with an agent (Claude Code, Codex, any MCP client)
+
+Ghidorita can let an AI agent read and annotate the program you have open, live, without computer use. You see its edits in the Changes panel (tagged with the agent's name), can undo them, and can point it at what you are looking at.
+
+1. Turn it on: **Agent > Access > Read** (reads, plus showing you things) or **Edit** (also renames, retypes, comments, signatures, data, types, bookmarks). The default is Off; the status bar shows "Agent: <name>" while a client is connected, and clicking it opens the Agent menu, so the kill switch is one click away.
+2. Connect the agent: **Help > Copy Agent Setup** puts the commands on the clipboard with the real path.
+
+```bash
+claude mcp add ghidorita -- "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
+```
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.ghidorita]
+command = "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp"
+tool_timeout_sec = 120   # decompiling a big function can take over a minute
+```
+
+If Ghidorita is not running the wrapper starts it (`--no-launch` turns that off; the agent then only gets a `status` tool that says so). In a development checkout use `node app/out/mcp/bridge.cjs` as the command (after `npm run build`).
+
+Everything the binary contains (strings, comments, symbol names) reaches the agent as untrusted data. Edits can be undone with Cmd+Z; `undo_agent_edit` only ever undoes the agent's own newest change. Full design: [docs/AGENTS_MCP.md](docs/AGENTS_MCP.md).
+
 ### Save and export
 `Cmd+S` saves; edits are also saved when you open another program, close it or quit, and unsaved changes are snapshotted every two minutes so a crash loses little. Saving ends Ghidra's undo history. File > Export > Symbol Map (JSON)… or C Header… writes your names and types for reports or other tools; **Ghidra Archive (.gzf)…** writes the whole program, unsaved edits included, for Ghidra's own importer (refused while an analysis runs).
 
