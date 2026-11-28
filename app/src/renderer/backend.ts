@@ -67,7 +67,8 @@ export interface References {
 }
 
 export interface Searches {
-  searchSymbols(params: { query: string; limit?: number }): Job<SymbolHit[]>;
+  /** `exact` (capability exactSymbolSearch): the symbols named exactly `query`, case-sensitive, by address; the substring search can cut off an exact name. Without the capability the job fails `unsupported`. */
+  searchSymbols(params: { query: string; limit?: number; exact?: boolean }): Job<SymbolHit[]>;
   /** What an empty command bar suggests (suggestions capability): entry points, most used imports and functions (the client ranks them: rank.ts). */
   topSymbols(params: { limit?: number }): Job<TopSymbol[]>;
   listSymbols(params: ListSymbolsParams): Job<{ total: number; items: SymbolRow[] }>;

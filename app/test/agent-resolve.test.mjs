@@ -3,16 +3,21 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 
 const bundle = async (entry) => import("data:text/javascript," + encodeURIComponent((await build({ entryPoints: [new URL(entry, import.meta.url).pathname], bundle: true, format: "esm", write: false, platform: "node" })).outputFiles[0].text));
-const { resolveAddress, resolveFunction } = await bundle("../src/agent/resolve.ts");
+// one bundle, so BackendError is the same class in the resolver and in the test
+const mod = await import("data:text/javascript," + encodeURIComponent((await build({ stdin: { contents: `export * from "./agent/resolve"; export { BackendError } from "./renderer/backend";`, resolveDir: new URL("../src/", import.meta.url).pathname, loader: "ts" }, bundle: true, format: "esm", write: false, platform: "node" })).outputFiles[0].text));
+const { resolveAddress, resolveFunction, BackendError } = mod;
 const { modeAllows, ToolError } = await bundle("../src/agent/types.ts");
 const { tagParams, agentOf } = await bundle("../src/agent/attribution.ts");
 const { agentSocketPlace } = await bundle("../src/agent/socketPath.ts");
 const { TOOLS } = await bundle("../src/agent/tools/index.ts");
 
 const sym = (name, address, kind = "function") => ({ name, address, kind });
-/** symbols searched by substring, like the sidecar */
-const ops = (symbols, funcs = {}) => ({
-  searches: { searchSymbols: ({ query }) => ({ result: Promise.resolve(symbols.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()))), cancel() { this.cancelled = true; } }) },
+/** symbols searched by substring in list order and cut off at `limit`, like the sidecar; `exact` is the provider's exactSymbolSearch capability (off: the job fails "unsupported", as rpc.ts does) */
+const ops = (symbols, funcs = {}, { exact = false } = {}) => ({
+  searches: { searchSymbols: ({ query, exact: ex, limit = 1e9 }) => ({
+    result: ex ? (exact ? Promise.resolve(symbols.filter((s) => s.name === query.trim()).slice(0, limit)) : Promise.reject(new BackendError("unsupported", "exactSymbolSearch")))
+      : Promise.resolve(symbols.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())).slice(0, limit)),
+    cancel() { this.cancelled = true; } }) },
   functions: { containing: async ({ address }) => funcs[address] ?? null },
 });
 const SYMS = [sym("main", "0x401000"), sym("main_loop", "0x401200"), sym("FUN_00401500", "0x401500"), sym("add", "0x402000"), sym("Init", "0x403000"), sym("init", "0x404000", "label"), sym("helper", "0x405000"), sym("helper", "0x406000", "label")];
@@ -162,4 +167,43 @@ test("untrusted text is escaped, including zero-width and tag characters a reade
   assert.equal(esc("l1\nl2 "), "l1\\nl2\\u2028");
   const m = await msg(resolveAddress("ev​il", ops([sym("ev​il1", "0x10"), sym("ev​il2", "0x20")])));
   assert.ok(!/[​]/.test(m), m);
+});
+
+// a big binary: more symbols contain "main" than one search returns, and the exact one sorts late (the sidecar's iterator order is not exact-first)
+const DECOYS = Array.from({ length: 600 }, (_, i) => sym("_main_" + String(i).padStart(3, "0"), "0x" + (0x500000 + i * 16).toString(16)));
+const BIG = [...DECOYS, sym("main", "0x401000"), sym("Domain", "0x401100", "data")];
+
+test("big binary, provider with exactSymbolSearch: the exact name is found past the cutoff, and a second symbol of that name is an ambiguity, not a silent pick", async () => {
+  assert.equal(await resolveAddress("main", ops(BIG, {}, { exact: true })), "0x401000");
+  const two = [...DECOYS, sym("main", "0x401000"), sym("main", "0x9ff000", "label")];
+  const m = await msg(resolveAddress("main", ops(two, {}, { exact: true })));
+  assert.match(m, /ambiguous/); assert.match(m, /0x401000/); assert.match(m, /0x9ff000/);
+  assert.equal(await resolveAddress("main", ops(two, {}, { exact: true }), undefined, true), "0x401000"); // functionsOnly prefers the function
+});
+
+test("the case-insensitive step and the suggestions still use the substring search, with exact lookup available", async () => {
+  const o = ops([sym("Init", "0x403000"), sym("helper", "0x405000"), sym("helper_two", "0x405100")], {}, { exact: true });
+  assert.equal(await resolveAddress("init", o), "0x403000"); // no exact "init": the substring search finds Init
+  assert.match(await msg(resolveAddress("help", o)), /Did you mean: helper/);
+});
+
+test("without the capability today's behaviour holds, but a name the substring search cannot fully list is refused instead of guessed", async () => {
+  assert.equal(await resolveAddress("main", ops(SYMS)), "0x401000"); // small program: unchanged
+  const m = await msg(resolveAddress("main", ops(BIG))); // 600+ names contain "main": the exact one (or a twin) could be past the cutoff
+  assert.match(m, /500 or more symbol names/); assert.match(m, /Pass an address/);
+  assert.equal(await resolveAddress("0x401000", ops(BIG)), "0x401000"); // addresses never needed the search
+  assert.equal(await resolveAddress("401000", ops(BIG)), "0x401000");
+});
+
+test("with exact lookup, a name that is only contained in many others says so (case-sensitive) instead of a bogus suggestion list", async () => {
+  const m = await msg(resolveAddress("MAIN", ops(BIG, {}, { exact: true })));
+  assert.match(m, /500 or more symbol names.*case-sensitive/s);
+});
+
+test("an already-cancelled call cancels the jobs it starts", async () => {
+  const jobs = [];
+  const o = { searches: { searchSymbols: () => { const j = { cancelled: false, result: Promise.resolve([]), cancel() { j.cancelled = true; } }; jobs.push(j); return j; } }, functions: {} };
+  const ac = new AbortController(); ac.abort();
+  await resolveAddress("zzz_nope", o, ac.signal).catch(() => {});
+  assert.ok(jobs.length >= 1 && jobs.every((j) => j.cancelled));
 });

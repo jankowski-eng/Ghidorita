@@ -107,3 +107,15 @@ test("mock open_program opens the requested catalog entry, seeded or not", async
   assert.equal(r.persisted, true);
   await err("open_program", { programId: "nope" }, -32004);
 });
+
+test("mock search_symbols: exact finds exactly the name (case-sensitive, by address), the substring search does not stop being a substring search; the capability is advertised", async () => {
+  await ok("open_binary", { path: "/program-a" });
+  const sub = await ok("search_symbols", { query: "fn_1", limit: 1000 });
+  assert.ok(sub.length > 1 && sub.every((h) => h.name.includes("fn_1")));
+  const one = await ok("search_symbols", { query: sub[0].name, exact: true });
+  assert.deepEqual(one.map((h) => h.name), [sub[0].name]);
+  assert.deepEqual(await ok("search_symbols", { query: "FN_1", exact: true }), []);
+  assert.deepEqual(await ok("search_symbols", { query: "fn_", exact: true }), []); // a substring is not a name
+  await err("search_symbols", { query: "x", exact: "yes" });
+  assert.ok((await ok("provider_info")).capabilities.includes("exactSymbolSearch")); // last: it makes the connection versioned (scoped calls then need a session id)
+});

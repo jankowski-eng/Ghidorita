@@ -187,7 +187,7 @@ export class WebSocketBackend implements ApplicationBackend {
         calls: (p) => job("calls", "function_calls", p, "cancel_search"),
       },
       searches: {
-        searchSymbols: (p) => job("symbolSearch", "search_symbols", p, "cancel_search"),
+        searchSymbols: (p) => job(p.exact ? "exactSymbolSearch" : "symbolSearch", "search_symbols", p, "cancel_search"),
         topSymbols: (p) => job("suggestions", "top_symbols", p, "cancel_search"),
         listSymbols: (p) => job("symbolTable", "list_symbols", p, "cancel_search"),
         listStrings: (p) => job("strings", "list_strings", p, "cancel_search"),

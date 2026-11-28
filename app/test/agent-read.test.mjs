@@ -50,7 +50,7 @@ function fake(over = {}) {
       calls: rec("calls", () => job({ callers: [{ name: "start", entry: "0x400000", external: false, thunk: false }], callees: [{ name: "_printf", entry: "0x401500", external: false, thunk: true, target: { name: "printf", entry: null, external: true } }, { name: "ext", entry: null, external: true, thunk: false }] }, jobs)),
     },
     searches: {
-      searchSymbols: rec("searchSymbols", ({ query }) => job(SYMS.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())), jobs)),
+      searchSymbols: rec("searchSymbols", ({ query, exact }) => job(SYMS.filter((s) => (exact ? s.name === query : s.name.toLowerCase().includes(query.toLowerCase()))), jobs)),
       listStrings: rec("listStrings", ({ offset = 0, limit = 100 }) => job({ total: 3, items: [{ address: "0x500000", value: "hello\nworld", length: 12, refs: 1, refFrom: [{ from: "0x401010", function: "main" }] }, { address: "0x500010", value: "\x1b[31mred", length: 8, refs: 0 }, { address: "0x500020", value: "x", length: 2, refs: 0 }].slice(offset, offset + limit) }, jobs)),
       searchMemory: rec("searchMemory", () => job({ items: [{ address: "0x401000", length: 2, bytes: "48 8b", function: "main" }], next: "0x402000" }, jobs)),
       listSymbols: () => job({ total: 0, items: [] }), topSymbols: () => job([]), listUndefinedRefs: () => job({ total: 0, items: [] }),

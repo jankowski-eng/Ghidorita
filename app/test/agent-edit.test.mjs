@@ -38,7 +38,7 @@ function world({ client = "claude-code", fails = {} } = {}) {
   };
   const user = (cmd, p) => { const name = sidecarName[cmd](p); stack.push(name); log.record(cmd, p, { undoName: name }); }; // the UI: untagged params
   const ops = {
-    searches: { searchSymbols: ({ query }) => ({ result: Promise.resolve(SYMS.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()))), cancel() {} }) },
+    searches: { searchSymbols: ({ query, exact }) => ({ result: Promise.resolve(SYMS.filter((s) => (exact ? s.name === query : s.name.toLowerCase().includes(query.toLowerCase())))), cancel() {} }) },
     functions: { containing: async ({ address }) => (address === "0x401000" || address === "0x401010" ? FN : null) },
     edits: {
       renameSymbol: mk("renameSymbol"), createLabel: mk("createLabel"), setComment: mk("setComment"), setFunctionSignature: mk("setFunctionSignature"),

@@ -156,7 +156,7 @@ export interface AddrRange {
 export const CAPABILITIES = [
   "importOptions", "decompile", "editing", "variableEditing", "undo", "save",
   "symbolSearch", "symbolTable", "strings", "memorySearch", "references", "variableReferences",
-  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail",
+  "dataTypes", "typeEditing", "projects", "recovery", "coverage", "controlFlowGraph", "callGraph", "suggestions", "export", "exportGzf", "bytes", "calls", "bookmarks", "analysis", "debugger", "decompilerEdits", "stackFrame", "undefinedRefs", "patch", "pcode", "valueTrail", "exactSymbolSearch",
 ] as const;
 export type Capability = typeof CAPABILITIES[number];
 export interface ProviderInfo { version: 1; provider: string; capabilities: Capability[]; recovery?: { snapshotIntervalSeconds: number } }
@@ -223,7 +223,8 @@ export interface Methods {
   stack_frame: { params: { entry: Address }; result: StackFrame };
   get_function_at: { params: { address: Address }; result: { name: string; entry: Address; size: number; signature: string } | null };
   // Scan requests (search_symbols, list_symbols, list_strings, search_memory) run on scan workers, never behind or in front of listing fetches; cancel_search {id} cancels one by request id.
-  search_symbols: { params: { query: string; limit?: number }; result: SymbolHit[] };
+  // `exact` (capability exactSymbolSearch): the symbols named exactly `query` (case-sensitive, every namespace, memory addresses), by address, through Ghidra's name index; the substring search stops after `limit` hits in iterator order, so an exact name can fall outside them
+  search_symbols: { params: { query: string; limit?: number; exact?: boolean }; result: SymbolHit[] };
   top_symbols: { params: { limit?: number }; result: TopSymbol[] }; // the empty command bar's suggestions: entry points, then the most referenced imports and functions (the client scores and orders them: kind weight + 10·log2(1 + refs), app/src/renderer/rank.ts)
   // Exports (protocol.md "Exports"): the sidecar writes the file at an absolute `path` the client picked.
   export_symbols: { params: { path: string }; result: { path: string; functions: number; labels: number; data: number; comments: number } };
