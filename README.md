@@ -106,7 +106,7 @@ Right-click a listing row for **Copy Address**, **Copy Bytes (Hex)** and **Copy 
 
 Ghidorita can let an AI agent read and annotate the program you have open, live, without computer use. You see its edits in the Changes panel (tagged with the agent's name), can undo them, and can point it at what you are looking at.
 
-1. Turn it on: **Agent > Access > Read** (reads, plus showing you things) or **Edit** (also renames, retypes, comments, signatures, data, types, bookmarks). The default is Off; the status bar shows "Agent: <name>" while a client is connected, and clicking it opens the Agent menu, so the kill switch is one click away.
+1. Turn it on: **Agent > Access > Read** (reads, plus showing you things), **Edit** (also renames, retypes, comments, signatures, data, types, bookmarks, C type definitions) or **Full** (also patching, saving, exporting, opening and closing programs without asking, coverage and the debugger; `save` ends your undo history). The default is Off; the status bar shows "Agent: <name>" while a client is connected, and clicking it opens the Agent menu, so the kill switch is one click away.
 2. Connect the agent: **Help > Copy Agent Setup** puts the commands on the clipboard with the real path.
 
 ```bash
@@ -123,6 +123,8 @@ tool_timeout_sec = 300   # a slow tool (decompile, wait_for_analysis) answers wi
 No tool runs longer than about 270 s (the decompiler's `timeoutSecs` defaults to 90 and is capped at 240, `wait_for_analysis` waits at most 240 s), so a client timeout of 300 s always lets the tool's own answer (a Timeout error that says what to retry) arrive first.
 
 The connector never starts Ghidorita by itself, so having it configured costs nothing in sessions that don't use it. While the app is not running the agent sees one `status` tool that says so; calling it with `launch: true` asks macOS to start the app. The connector switches to the app by itself when it appears (about 2 s) and back when it quits, and tells the agent its tools changed; no restart of the agent is needed. In a development checkout use `node app/out/mcp/bridge.cjs` as the command (after `npm run build`; the app runs from `npm start`).
+
+**Headless (no window).** For triage, batch work or CI, give the connector `--headless` (optionally with a binary): `claude mcp add ghidorita -- "/Applications/Ghidorita.app/Contents/Resources/mcp/ghidorita-mcp" --headless /path/to/sample`. When the agent calls `status` with `launch: true`, Ghidorita starts without a window (no dock icon) and every agent you run shares that one host; it exits 30 s after the last agent disconnects and saves. The access mode is the one you last chose in the Agent menu (or `GHIDORITA_AGENT_MODE`). If you start the app while a host runs, the app asks the host to save and quit and takes over; the agents switch to the app by themselves. Opening and closing programs needs no confirmation there, since there is no program of yours to protect. The headless host has no window tools (`get_view`, `goto`, `highlight`). **Agent > Follow Agent** makes your view follow the function the agent is reading (off by default).
 
 Everything the binary contains (strings, comments, symbol names) reaches the agent as untrusted data. Edits can be undone with Cmd+Z; `undo_agent_edit` only ever undoes the agent's own newest change. Full design: [docs/AGENTS_MCP.md](docs/AGENTS_MCP.md).
 
