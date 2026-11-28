@@ -307,3 +307,8 @@ test("success responses escape and bound text that comes from the binary or the 
     assert.ok(t.length < 900, `${name} is bounded (${t.length})`);
   }
 });
+
+test("undo_agent_edit says that attribution is per connection, so edits from before a reconnect are out of reach", () => {
+  const d = tool("undo_agent_edit").description;
+  assert.match(d, /per connection/); assert.match(d, /reconnected/); assert.match(d, /Ghidorita restarted/); assert.match(d, /Cmd\+Z/);
+});

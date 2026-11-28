@@ -190,7 +190,7 @@ const editEnum: ToolDef<{ path: string; op: EnumOp }> = {
 
 const undoAgentEdit: ToolDef<Record<string, never>> = {
   name: "undo_agent_edit",
-  description: "Undo your own most recent edit. Refuses when the newest change is the user's, or was made by another client, so it can never revert the user's work. Call again to step back further.",
+  description: "Undo your own most recent edit. Refuses when the newest change is the user's, or was made by another client, so it can never revert the user's work. Call again to step back further. Edits are attributed per connection: it cannot undo edits made before you reconnected (for example after Ghidorita restarted); the user can undo those with Cmd+Z.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   annotations: ann("Undo agent edit", true, false), access: "edit", capability: "undo", timeoutSecs: 30,
   async handler(ctx) {
