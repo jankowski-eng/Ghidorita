@@ -162,3 +162,20 @@ def test_edit_results_name_their_undo_step_and_undo_can_expect_it(env):
             assert after["undoName"] == first["undoName"]
             await c.ok("undo", expect=first["undoName"])  # leaves the shared program as it was
     run(go())
+
+
+def test_a_no_op_edit_does_not_claim_the_previous_undo_step(env):
+    fns = env["fns"]
+
+    async def go():
+        async with Client(env["proc"].port) as c:
+            at = fns[len(fns) // 2]["entry"]
+            assert await c.ok("get_comments", address=at) == {}
+            mine = await c.ok("rename_symbol", address=at, newName="noop_renamed")  # an earlier step (someone else's)
+            r = await c.ok("set_comment", address=at, kind="pre", text="")  # clearing a comment that is not there changes nothing
+            assert "undoName" not in r, r  # it must not inherit "Rename ..." and let a later undo {expect} revert the rename
+            assert (await c.ok("undo_state"))["undoName"] == mine["undoName"]
+            real = await c.ok("set_comment", address=at, kind="pre", text="x")
+            assert real["undoName"] == "Set pre comment"  # a real edit still names its step
+            await c.ok("undo", expect=real["undoName"]); await c.ok("undo", expect=mine["undoName"])  # leaves the shared program as it was
+    run(go())

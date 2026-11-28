@@ -103,6 +103,7 @@ class Session:
         prog = self.need()
         if self.analyzing:  # a second transaction would join the analysis one: not undoable alone, and a rollback would abort the analysis
             raise RpcError(BUSY, "analysis running")
+        mod = int(prog.getModificationNumber())
         tx, ok = prog.startTransaction(name), False
         try:
             r = fn(prog)
@@ -116,7 +117,7 @@ class Session:
                 self.revision += 1
         self.refresh_undo(prog)
         cell = getattr(self._tl, "cell", None)
-        if cell is not None:
+        if cell is not None and int(prog.getModificationNumber()) != mod:  # a no-op transaction leaves no undo step: the top one is someone else's, never name it
             cell["undoName"] = self.undo_snap.get("undoName")  # what `undo {expect}` compares with
         return r
 
