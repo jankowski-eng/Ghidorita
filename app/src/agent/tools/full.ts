@@ -57,6 +57,7 @@ const patch: ToolDef<{ address: string; asm?: string; bytes?: string; overwriteF
       if (!asm) throw new ToolError("asm is empty.");
       const r = await run(ctx, ops.patch.assemble({ address, text: asm }));
       ({ bytes, oldLength, length } = r); overwrites = r.overwrites;
+      if (length > MAX_PATCH) throw new ToolError(`\`${esc(asm, 120)}\` assembles to ${length} bytes; at most ${MAX_PATCH} bytes per patch.`);
       if ((length > oldLength || overwrites > 0) && !a.overwriteFollowing)
         throw new ToolError(`Not applied, nothing was written. \`${esc(asm, 120)}\` assembles to ${length} bytes (${bytes}) but the unit at ${address} is ${oldLength} bytes (${r.oldBytes}), so the patch would overwrite ${overwrites ? `${overwrites} following instruction(s) or data unit(s)` : "the bytes after it"}. Call again with overwriteFollowing=true if that is intended, or use an instruction of at most ${oldLength} bytes (pad with nop).`);
     } else {

@@ -68,6 +68,8 @@ test("patch that fits is applied without the flag; bytes mode checks the unit le
 test("patch: at most 16 bytes (the provider's limit); a call cancelled during preparation writes nothing", async () => {
   const w = world({ rowLength: 32 });
   assert.match(await msg(tool("patch").handler(w.ctx, { address: "0x401000", bytes: Array(17).fill("90").join(" ") })), /At most 16 bytes/);
+  const long = world({ assembled: { address: "0x401000", bytes: Array(17).fill("90").join(" "), length: 17, oldBytes: "48", oldLength: 3, overwrites: 1 } });
+  assert.match(await msg(tool("patch").handler(long.ctx, { address: "0x401000", asm: "huge", overwriteFollowing: true })), /17 bytes; at most 16/);
   const ac = new AbortController(), slow = world({ rowLength: 8 });
   slow.ctx.signal = ac.signal;
   const rows = slow.ctx.ops.listing.rows; slow.ctx.ops.listing.rows = async (p) => { const r = await rows(p); ac.abort(); return r; };
